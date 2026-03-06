@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 use ratatui::layout::Rect;
 use sbql_core::{
@@ -208,6 +209,8 @@ pub struct FilterBar {
     pub show_suggestions: bool,
     pub suggestion_token: u64,
     pub loading_suggestions: bool,
+    pub pending_live_apply_at: Option<Instant>,
+    pub last_applied_query: Option<String>,
 }
 
 impl Default for FilterBar {
@@ -220,6 +223,8 @@ impl Default for FilterBar {
             show_suggestions: false,
             suggestion_token: 0,
             loading_suggestions: false,
+            pending_live_apply_at: None,
+            last_applied_query: None,
         }
     }
 }

@@ -1,4 +1,5 @@
 use std::io;
+use std::time::{Duration, Instant};
 
 use sbql_core::load_connections;
 use crossterm::{
@@ -182,6 +183,7 @@ async fn main() -> anyhow::Result<()> {
                 if state.is_loading {
                     state.spinner_frame = state.spinner_frame.wrapping_add(1);
                 }
+                apply_live_filter_if_due(&mut state, &cmd_tx);
             }
         }
 
@@ -905,6 +907,8 @@ fn handle_key_results(
             state.filter_bar.selected_suggestion = 0;
             state.filter_bar.show_suggestions = false;
             state.filter_bar.loading_suggestions = false;
+            state.filter_bar.pending_live_apply_at = None;
+            state.filter_bar.last_applied_query = state.active_filter.clone();
         }
 
         // Esc = discard staged changes and go back to editor
@@ -998,6 +1002,8 @@ fn handle_key_filter(
                 state.filter_bar.visible = false;
                 state.filter_bar.show_suggestions = false;
                 state.filter_bar.loading_suggestions = false;
+                state.filter_bar.pending_live_apply_at = None;
+                state.filter_bar.last_applied_query = None;
                 state.active_filter = None;
                 let _ = cmd_tx.send(CoreCommand::ClearFilter);
             }
@@ -1037,11 +1043,14 @@ fn handle_key_filter(
             state.filter_bar.visible = false;
             state.filter_bar.show_suggestions = false;
             state.filter_bar.loading_suggestions = false;
+            state.filter_bar.pending_live_apply_at = None;
             if query.trim().is_empty() {
                 state.active_filter = None;
+                state.filter_bar.last_applied_query = None;
                 let _ = cmd_tx.send(CoreCommand::ClearFilter);
             } else {
                 state.active_filter = Some(query.clone());
+                state.filter_bar.last_applied_query = Some(query.clone());
                 let _ = cmd_tx.send(CoreCommand::ApplyFilter { query });
             }
         }
@@ -1063,6 +1072,7 @@ fn refresh_filter_suggestions(
         state.filter_bar.suggestions.clear();
         state.filter_bar.show_suggestions = false;
         state.filter_bar.loading_suggestions = false;
+        state.filter_bar.pending_live_apply_at = None;
         return;
     }
 
@@ -1082,6 +1092,7 @@ fn refresh_filter_suggestions(
         state.filter_bar.selected_suggestion = 0;
         state.filter_bar.show_suggestions = !state.filter_bar.suggestions.is_empty();
         state.filter_bar.loading_suggestions = false;
+        state.filter_bar.pending_live_apply_at = None;
         return;
     }
 
@@ -1089,6 +1100,7 @@ fn refresh_filter_suggestions(
         state.filter_bar.suggestions.clear();
         state.filter_bar.show_suggestions = false;
         state.filter_bar.loading_suggestions = false;
+        state.filter_bar.pending_live_apply_at = None;
         return;
     };
 
@@ -1103,6 +1115,7 @@ fn refresh_filter_suggestions(
         state.filter_bar.suggestions.clear();
         state.filter_bar.show_suggestions = false;
         state.filter_bar.loading_suggestions = false;
+        state.filter_bar.pending_live_apply_at = None;
         return;
     };
 
@@ -1135,6 +1148,7 @@ fn refresh_filter_suggestions(
     // Ask Core for DISTINCT suggestions from DB using prefix.
     state.filter_bar.suggestion_token = state.filter_bar.suggestion_token.saturating_add(1);
     state.filter_bar.loading_suggestions = true;
+    state.filter_bar.pending_live_apply_at = Some(Instant::now() + Duration::from_millis(250));
     let _ = cmd_tx.send(CoreCommand::SuggestFilterValues {
         column: col,
         prefix: value_prefix.to_owned(),
@@ -1183,6 +1197,49 @@ fn apply_selected_filter_suggestion(state: &mut AppState) -> bool {
     state.filter_bar.textarea = tui_textarea::TextArea::default();
     state.filter_bar.textarea.insert_str(&replacement);
     true
+}
+
+fn apply_live_filter_if_due(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCommand>) {
+    if !state.filter_bar.visible {
+        return;
+    }
+    let Some(deadline) = state.filter_bar.pending_live_apply_at else {
+        return;
+    };
+    if Instant::now() < deadline {
+        return;
+    }
+    state.filter_bar.pending_live_apply_at = None;
+
+    let query = state.filter_bar.textarea.lines().join("");
+    let trimmed = query.trim().to_owned();
+    if !is_live_filter_candidate(&trimmed) {
+        if state.filter_bar.last_applied_query.is_some() {
+            state.filter_bar.last_applied_query = None;
+            state.active_filter = None;
+            let _ = cmd_tx.send(CoreCommand::ClearFilter);
+        }
+        return;
+    }
+
+    if state
+        .filter_bar
+        .last_applied_query
+        .as_deref()
+        == Some(trimmed.as_str())
+    {
+        return;
+    }
+
+    state.filter_bar.last_applied_query = Some(trimmed.clone());
+    state.active_filter = Some(trimmed.clone());
+    let _ = cmd_tx.send(CoreCommand::ApplyFilter { query: trimmed });
+}
+
+fn is_live_filter_candidate(input: &str) -> bool {
+    parse_filter_input(input)
+        .map(|(_, value)| !value.trim().is_empty())
+        .unwrap_or(false)
 }
 
 // ---- Connection form keys ----
