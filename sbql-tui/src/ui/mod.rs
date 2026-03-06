@@ -13,7 +13,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{AppState, LastAreas};
+use crate::app::{AppState, EditorMode, LastAreas, NavMode};
 
 /// Root draw function — dispatches to each panel.
 pub fn draw(frame: &mut Frame, state: &mut AppState) {
@@ -58,7 +58,16 @@ pub fn draw(frame: &mut Frame, state: &mut AppState) {
 }
 
 fn draw_status_bar(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rect) {
-    if let Some(ref err) = state.error_msg {
+    if let Some((_, ref name)) = state.pending_connection_delete {
+        let bar = Paragraph::new(Line::from(Span::styled(
+            format!(" ! Delete connection '{name}'? y/Enter confirm, n/Esc cancel"),
+            Style::default()
+                .fg(theme::BASE)
+                .bg(theme::YELLOW)
+                .add_modifier(Modifier::BOLD),
+        )));
+        frame.render_widget(bar, area);
+    } else if let Some(ref err) = state.error_msg {
         let bar = Paragraph::new(Line::from(Span::styled(
             format!(" ✗ {err}"),
             Style::default()
@@ -75,7 +84,19 @@ fn draw_status_bar(frame: &mut Frame, state: &AppState, area: ratatui::layout::R
         frame.render_widget(bar, area);
     } else {
         const SPINNER: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
-        let help = " sbql  q/Ctrl+C: quit  M-hjkl: panels  Tab: cycle  ^B: sidebar  i: insert  Esc: normal  ^S/F5: run";
+        let mode = match (state.nav_mode, state.editor_mode) {
+            (_, EditorMode::Insert) => "INSERT",
+            (NavMode::Global, EditorMode::Normal) => "GLOBAL",
+            (NavMode::Panel, EditorMode::Normal) => "PANEL",
+        };
+        let leader = if state.pending_leader {
+            "  Leader: _"
+        } else {
+            ""
+        };
+        let help = format!(
+            " sbql [{mode}]  q/Ctrl+C: quit  hjkl: panels(global)  Enter: panel mode  Esc: global  Tab: cycle  SPC e: sidebar  i: insert/edit  ^S/F5: run{leader}"
+        );
         let line = if state.is_loading {
             let frame_char = SPINNER[state.spinner_frame % SPINNER.len()];
             Line::from(vec![
@@ -86,10 +107,7 @@ fn draw_status_bar(frame: &mut Frame, state: &AppState, area: ratatui::layout::R
                 ),
             ])
         } else {
-            Line::from(Span::styled(
-                format!("{help} "),
-                Style::default().fg(theme::OVERLAY0),
-            ))
+            Line::from(Span::styled(help, Style::default().fg(theme::OVERLAY0)))
         };
         frame.render_widget(Paragraph::new(line), area);
     }

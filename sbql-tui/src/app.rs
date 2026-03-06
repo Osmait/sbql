@@ -33,6 +33,12 @@ pub enum EditorMode {
     Insert,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavMode {
+    Global,
+    Panel,
+}
+
 // ---------------------------------------------------------------------------
 // Connection form state (add/edit connection dialog)
 // ---------------------------------------------------------------------------
@@ -319,6 +325,8 @@ pub struct AppState {
     // ---- status / error ----
     pub status_msg: Option<String>,
     pub error_msg: Option<String>,
+    /// Pending connection deletion confirmation: (id, display name).
+    pub pending_connection_delete: Option<(Uuid, String)>,
 
     // ---- quit ----
     pub should_quit: bool,
@@ -328,8 +336,13 @@ pub struct AppState {
     pub diagram: Option<DiagramState>,
 
     // ---- editor mode (Vim Normal / Insert) ----
-    /// Current mode of the SQL editor panel.
+    /// Current global mode (Vim-like): Normal for navigation, Insert for typing.
     pub editor_mode: EditorMode,
+    /// Global navigation scope: either panel-to-panel movement or inside-panel controls.
+    pub nav_mode: NavMode,
+    /// When true, the leader key (Space) was pressed in Normal mode and the
+    /// next key will be interpreted as a leader combo.
+    pub pending_leader: bool,
 
     // ---- pending vim prefix ----
     /// Set to true when the user pressed `g` in results/connections, waiting
@@ -398,9 +411,12 @@ impl AppState {
             active_filter: None,
             status_msg: None,
             error_msg: None,
+            pending_connection_delete: None,
             should_quit: false,
             diagram: None,
             editor_mode: EditorMode::Normal,
+            nav_mode: NavMode::Global,
+            pending_leader: false,
             pending_g: false,
             pending_d: false,
             pending_edits: HashMap::new(),

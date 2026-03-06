@@ -23,7 +23,7 @@ mod events;
 mod ui;
 mod worker;
 
-use app::{AppState, EditorMode, FocusedPanel};
+use app::{AppState, EditorMode, FocusedPanel, NavMode};
 use tui_textarea::CursorMove;
 use events::{is_commit, is_quit, is_run_query, spawn_event_reader, AppEvent};
 use worker::spawn_worker;
@@ -248,79 +248,74 @@ fn handle_key(
         return;
     }
 
+    // ---- Pending destructive confirmation ----
+    if state.pending_connection_delete.is_some() {
+        handle_key_confirm_delete_connection(state, key, cmd_tx);
+        return;
+    }
+
     // ---- Global keys ----
     if is_quit(&key) {
         state.should_quit = true;
         return;
     }
 
-    // Ctrl+B — toggle sidebar visibility
-    if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
-        state.sidebar_hidden = !state.sidebar_hidden;
-        if state.sidebar_hidden
-            && (state.focused == FocusedPanel::Connections
-                || state.focused == FocusedPanel::Tables)
-        {
-            state.focused = FocusedPanel::Editor;
+    // Ctrl+\ — toggle sidebar visibility (fallback shortcut)
+    if key.code == KeyCode::Char('\\') && key.modifiers == KeyModifiers::CONTROL {
+        toggle_sidebar(state);
+        return;
+    }
+
+    // In Editor Insert mode, keep typing local to editor.
+    if state.editor_mode == EditorMode::Insert && state.focused == FocusedPanel::Editor {
+        if key.code == KeyCode::Esc {
+            state.editor_mode = EditorMode::Normal;
+            state.nav_mode = NavMode::Panel;
+            state.pending_leader = false;
+            return;
+        }
+        handle_key_editor(state, key, cmd_tx);
+        return;
+    }
+
+    // Esc leaves panel mode and returns to global mode.
+    if key.code == KeyCode::Esc {
+        state.pending_leader = false;
+        state.editor_mode = EditorMode::Normal;
+        if state.nav_mode == NavMode::Panel {
+            state.nav_mode = NavMode::Global;
+            state.status_msg = Some("Global mode".into());
+            state.error_msg = None;
         }
         return;
     }
 
-    // ---- Alt+hjkl — panel navigation ----
-    // Using Alt instead of Ctrl to avoid vim-tmux-navigator consuming Ctrl+hjkl.
-    // Requires: `set -g extended-keys on` in ~/.tmux.conf (already done) and
-    // Kitty Keyboard Protocol active (pushed on startup above).
-    //
-    // Layout (4 panels):
-    //   [Connections] [Editor  ]
-    //   [Tables     ] [Results ]
-    //
-    if key.modifiers == KeyModifiers::ALT {
-        let sidebar = !state.sidebar_hidden;
-        let navigated = match key.code {
-            // l — left column → right column
-            KeyCode::Char('l') => {
-                match state.focused {
-                    FocusedPanel::Connections => { state.focused = FocusedPanel::Editor; }
-                    FocusedPanel::Tables      => { state.focused = FocusedPanel::Results; }
-                    _ => {}
-                }
-                true
-            }
-            // h — right column → left column
-            KeyCode::Char('h') => {
-                if sidebar {
-                    match state.focused {
-                        FocusedPanel::Editor  => { state.focused = FocusedPanel::Connections; }
-                        FocusedPanel::Results => { state.focused = FocusedPanel::Tables; }
-                        _ => {}
-                    }
-                }
-                true
-            }
-            // j — move down within same column
-            KeyCode::Char('j') => {
-                match state.focused {
-                    FocusedPanel::Connections => { state.focused = FocusedPanel::Tables; }
-                    FocusedPanel::Editor      => { state.focused = FocusedPanel::Results; }
-                    _ => {}
-                }
-                true
-            }
-            // k — move up within same column
-            KeyCode::Char('k') => {
-                match state.focused {
-                    FocusedPanel::Tables  => { state.focused = FocusedPanel::Connections; }
-                    FocusedPanel::Results => { state.focused = FocusedPanel::Editor; }
-                    _ => {}
-                }
-                true
-            }
-            _ => false,
-        };
-        if navigated {
-            return;
+    // Reliable panel shortcuts (helpful on macOS when Alt/Option is not sent as Meta)
+    // F1/F2/F3/F4 or Ctrl+1/Ctrl+2/Ctrl+3/Ctrl+4
+    let focus_target = match (key.code, key.modifiers) {
+        (KeyCode::F(1), _) | (KeyCode::Char('1'), KeyModifiers::CONTROL) => {
+            Some(FocusedPanel::Connections)
         }
+        (KeyCode::F(2), _) | (KeyCode::Char('2'), KeyModifiers::CONTROL) => {
+            Some(FocusedPanel::Tables)
+        }
+        (KeyCode::F(3), _) | (KeyCode::Char('3'), KeyModifiers::CONTROL) => {
+            Some(FocusedPanel::Editor)
+        }
+        (KeyCode::F(4), _) | (KeyCode::Char('4'), KeyModifiers::CONTROL) => {
+            Some(FocusedPanel::Results)
+        }
+        _ => None,
+    };
+    if let Some(target) = focus_target {
+        state.focused = if state.sidebar_hidden
+            && (target == FocusedPanel::Connections || target == FocusedPanel::Tables)
+        {
+            FocusedPanel::Editor
+        } else {
+            target
+        };
+        return;
     }
 
     // Shift+D = open database diagram
@@ -345,11 +340,143 @@ fn handle_key(
         return;
     }
 
+    if state.nav_mode == NavMode::Global {
+        if state.pending_leader {
+            state.pending_leader = false;
+            match (key.code, key.modifiers) {
+                (KeyCode::Char('e'), KeyModifiers::NONE) => toggle_sidebar(state),
+                _ => state.status_msg = Some("Unknown leader combo. Try: Space e".into()),
+            }
+            return;
+        }
+
+        if key.code == KeyCode::Char(' ') && key.modifiers == KeyModifiers::NONE {
+            state.pending_leader = true;
+            state.status_msg = Some("Leader: _  (e: toggle sidebar)".into());
+            state.error_msg = None;
+            return;
+        }
+
+        if key.code == KeyCode::Char('i') && key.modifiers == KeyModifiers::NONE {
+            match state.focused {
+                FocusedPanel::Results => {
+                    state.nav_mode = NavMode::Panel;
+                    enter_cell_edit_mode(state, cmd_tx);
+                }
+                FocusedPanel::Editor => {
+                    state.nav_mode = NavMode::Panel;
+                    state.editor_mode = EditorMode::Insert;
+                }
+                FocusedPanel::Connections | FocusedPanel::Tables => {
+                    state.focused = FocusedPanel::Editor;
+                    state.nav_mode = NavMode::Panel;
+                    state.editor_mode = EditorMode::Insert;
+                }
+            }
+            return;
+        }
+
+        if key.code == KeyCode::Enter {
+            state.nav_mode = NavMode::Panel;
+            state.status_msg = Some("Panel mode".into());
+            state.error_msg = None;
+            return;
+        }
+
+        if try_navigate_panels(state, key) {
+            return;
+        }
+
+        return;
+    }
+
+    // In panel mode, Alt+hjkl still navigates panel focus.
+    if key.modifiers == KeyModifiers::ALT && try_navigate_panels(state, key) {
+        return;
+    }
+
+    // In panel mode, `i` inside editor enters Insert mode.
+    if state.focused == FocusedPanel::Editor
+        && key.code == KeyCode::Char('i')
+        && key.modifiers == KeyModifiers::NONE
+        && state.editor_mode == EditorMode::Normal
+    {
+        state.editor_mode = EditorMode::Insert;
+        return;
+    }
+
     match state.focused {
         FocusedPanel::Connections => handle_key_connections(state, key, cmd_tx),
         FocusedPanel::Tables      => handle_key_tables(state, key, cmd_tx),
         FocusedPanel::Editor      => handle_key_editor(state, key, cmd_tx),
         FocusedPanel::Results     => handle_key_results(state, key, cmd_tx),
+    }
+}
+
+fn handle_key_confirm_delete_connection(
+    state: &mut AppState,
+    key: KeyEvent,
+    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
+) {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+            if let Some((id, name)) = state.pending_connection_delete.take() {
+                let _ = cmd_tx.send(CoreCommand::DeleteConnection(id));
+                state.status_msg = Some(format!("Deleted connection '{name}'."));
+                state.error_msg = None;
+            }
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            state.pending_connection_delete = None;
+            state.status_msg = Some("Delete cancelled.".into());
+            state.error_msg = None;
+        }
+        _ => {}
+    }
+}
+
+fn try_navigate_panels(state: &mut AppState, key: KeyEvent) -> bool {
+    let sidebar = !state.sidebar_hidden;
+    match key.code {
+        // l — left column → right column
+        KeyCode::Char('l') | KeyCode::Right => {
+            match state.focused {
+                FocusedPanel::Connections => state.focused = FocusedPanel::Editor,
+                FocusedPanel::Tables => state.focused = FocusedPanel::Results,
+                _ => {}
+            }
+            true
+        }
+        // h — right column → left column
+        KeyCode::Char('h') | KeyCode::Left => {
+            if sidebar {
+                match state.focused {
+                    FocusedPanel::Editor => state.focused = FocusedPanel::Connections,
+                    FocusedPanel::Results => state.focused = FocusedPanel::Tables,
+                    _ => {}
+                }
+            }
+            true
+        }
+        // j — move down within same column
+        KeyCode::Char('j') | KeyCode::Down => {
+            match state.focused {
+                FocusedPanel::Connections => state.focused = FocusedPanel::Tables,
+                FocusedPanel::Editor => state.focused = FocusedPanel::Results,
+                _ => {}
+            }
+            true
+        }
+        // k — move up within same column
+        KeyCode::Char('k') | KeyCode::Up => {
+            match state.focused {
+                FocusedPanel::Tables => state.focused = FocusedPanel::Connections,
+                FocusedPanel::Results => state.focused = FocusedPanel::Editor,
+                _ => {}
+            }
+            true
+        }
+        _ => false,
     }
 }
 
@@ -379,6 +506,21 @@ fn tab_prev(current: FocusedPanel, sidebar_hidden: bool) -> FocusedPanel {
         }
         FocusedPanel::Results => FocusedPanel::Editor,
     }
+}
+
+fn toggle_sidebar(state: &mut AppState) {
+    state.sidebar_hidden = !state.sidebar_hidden;
+    if state.sidebar_hidden
+        && (state.focused == FocusedPanel::Connections || state.focused == FocusedPanel::Tables)
+    {
+        state.focused = FocusedPanel::Editor;
+    }
+    state.status_msg = Some(if state.sidebar_hidden {
+        "Sidebar hidden".into()
+    } else {
+        "Sidebar shown".into()
+    });
+    state.error_msg = None;
 }
 
 // ---- Connections panel keys ----
@@ -437,7 +579,12 @@ fn handle_key_connections(
         KeyCode::Char('d') => {
             state.pending_g = false;
             if let Some(cfg) = state.connections.get(state.selected_connection).cloned() {
-                let _ = cmd_tx.send(CoreCommand::DeleteConnection(cfg.id));
+                state.pending_connection_delete = Some((cfg.id, cfg.name.clone()));
+                state.status_msg = Some(format!(
+                    "Confirm delete connection '{}': y/Enter = confirm, n/Esc = cancel.",
+                    cfg.name
+                ));
+                state.error_msg = None;
             }
         }
         KeyCode::Char('x') => {
@@ -945,18 +1092,17 @@ fn handle_mouse(
                 if rect_contains(la.table_list, col, row) {
                     // Click in the table list — focus Tables panel and select item
                     state.focused = FocusedPanel::Tables;
+                    state.nav_mode = NavMode::Panel;
                     // row 0 = top border, row 1+ = table items
                     if row > la.table_list.y {
                         let clicked = (row - la.table_list.y).saturating_sub(1) as usize;
                         let new_idx = clicked.min(state.tables.len().saturating_sub(1));
                         state.selected_table = new_idx;
-                        if !state.tables.is_empty() {
-                            open_selected_table(state, cmd_tx);
-                        }
                     }
                 } else if rect_contains(la.conn_list, col, row) {
                     // Click in the connection list — focus Connections panel and select item
                     state.focused = FocusedPanel::Connections;
+                    state.nav_mode = NavMode::Panel;
                     if row > la.conn_list.y {
                         let clicked = (row - la.conn_list.y).saturating_sub(1) as usize;
                         if !state.connections.is_empty() {
@@ -966,8 +1112,10 @@ fn handle_mouse(
                     }
                 } else if rect_contains(la.editor, col, row) {
                     state.focused = FocusedPanel::Editor;
+                    state.nav_mode = NavMode::Panel;
                 } else if rect_contains(la.results, col, row) {
                     state.focused = FocusedPanel::Results;
+                    state.nav_mode = NavMode::Panel;
                     // Compute which data row was clicked:
                     // row 0 = top border, row 1 = header, row 2+ = data rows
                     let header_offset = 2u16; // border + header
@@ -1003,13 +1151,16 @@ fn handle_mouse(
                 let conn_width = term_width / 4;
                 if mouse.column < conn_width {
                     state.focused = FocusedPanel::Connections;
+                    state.nav_mode = NavMode::Panel;
                 } else {
                     let term_height = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(24);
                     let editor_height = term_height * 35 / 100;
                     if mouse.row < editor_height {
                         state.focused = FocusedPanel::Editor;
+                        state.nav_mode = NavMode::Panel;
                     } else {
                         state.focused = FocusedPanel::Results;
+                        state.nav_mode = NavMode::Panel;
                     }
                 }
             }

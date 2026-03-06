@@ -1,5 +1,5 @@
 use sqlx::postgres::PgRow;
-use sqlx::{Column, PgPool, Row, TypeInfo};
+use sqlx::{Column, Decode, PgPool, Postgres, Row, TypeInfo, ValueRef};
 
 use crate::error::Result;
 
@@ -138,19 +138,28 @@ fn pg_value_to_string(row: &PgRow, idx: usize, type_name: &str) -> String {
         try_get!(f64);
     }
 
+    // --- Exact numeric ---
+    if matches!(upper, "NUMERIC" | "DECIMAL") {
+        if let Ok(v) = row.try_get::<Option<sqlx::types::BigDecimal>, _>(idx) {
+            return match v {
+                Some(val) => val.to_string(),
+                None => String::new(),
+            };
+        }
+    }
+
     // --- OID and other unsigned ints (sqlx maps OID to i64 on Postgres) ---
     if matches!(upper, "OID" | "REGPROC" | "REGPROCEDURE" | "REGOPER"
         | "REGOPERATOR" | "REGCLASS" | "REGTYPE" | "REGCONFIG" | "REGDICTIONARY") {
         try_get!(i64);
     }
 
-    // --- Text-like (String covers NUMERIC, DECIMAL, MONEY, CIDR, INET,
+    // --- Text-like (String covers MONEY, CIDR, INET,
     //     MACADDR, BIT, VARBIT, XML, TSVECTOR, TSQUERY, PATH, POINT,
     //     LINE, LSEG, BOX, POLYGON, CIRCLE, PG_LSN and anything unknown) ---
     if matches!(
         upper,
-        "TEXT" | "VARCHAR" | "CHAR" | "BPCHAR" | "NAME" | "CITEXT"
-            | "NUMERIC" | "DECIMAL"
+            "TEXT" | "VARCHAR" | "CHAR" | "BPCHAR" | "NAME" | "CITEXT"
             | "MONEY"
             | "INET" | "CIDR" | "MACADDR" | "MACADDR8"
             | "BIT" | "VARBIT"
@@ -263,6 +272,18 @@ fn pg_value_to_string(row: &PgRow, idx: usize, type_name: &str) -> String {
         return v
             .map(|b| String::from_utf8_lossy(&b).into_owned())
             .unwrap_or_default();
+    }
+
+    // --- Universal fallback 3: decode raw value as text ---
+    // This catches custom PostgreSQL enums/domains where sqlx dynamic typed
+    // decoding may fail through try_get::<String>(), but text decode still works.
+    if let Ok(raw) = row.try_get_raw(idx) {
+        if raw.is_null() {
+            return String::new();
+        }
+        if let Ok(v) = <String as Decode<Postgres>>::decode(raw) {
+            return v;
+        }
     }
 
     // --- Last resort: show type name so it's debuggable ---

@@ -50,7 +50,7 @@ pub fn draw_connections(frame: &mut Frame, state: &AppState, area: Rect) {
         .collect();
 
     let conn_title = if is_focused {
-        " Connections (Enter=connect  n=new) "
+        " Connections (Enter=connect  n=new  e=edit  d=delete) "
     } else if state.connections.is_empty() {
         " Connections (n=new) "
     } else {
