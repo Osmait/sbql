@@ -66,6 +66,13 @@ pub enum CoreCommand {
     ApplyFilter { query: String },
     /// Remove the current WHERE filter and re-execute.
     ClearFilter,
+    /// Suggest distinct values for `column` matching `prefix%`.
+    SuggestFilterValues {
+        column: String,
+        prefix: String,
+        limit: usize,
+        token: u64,
+    },
     /// Fetch primary key columns for a given table.
     GetPrimaryKeys { schema: String, table: String },
     /// Load all table schemas and FK relationships for the diagram view.
@@ -113,6 +120,11 @@ pub enum CoreEvent {
     },
     /// Full diagram data (table schemas + FK relationships).
     DiagramLoaded(DiagramData),
+    /// Filter value suggestions response.
+    FilterSuggestions {
+        items: Vec<String>,
+        token: u64,
+    },
     /// A long-running operation has started (show a spinner).
     Loading,
     /// An error occurred.
@@ -367,6 +379,44 @@ impl Core {
                 };
                 self.effective_sql = Some(final_sql);
                 self.execute_current_page(0).await
+            }
+
+            CoreCommand::SuggestFilterValues {
+                column,
+                prefix,
+                limit,
+                token,
+            } => {
+                let pool = match self.active_pool() {
+                    Ok(p) => p,
+                    Err(e) => return vec![CoreEvent::Error(e.to_string())],
+                };
+                let base = match &self.base_sql {
+                    Some(s) => s.clone(),
+                    None => {
+                        return vec![CoreEvent::FilterSuggestions {
+                            items: Vec::new(),
+                            token,
+                        }]
+                    }
+                };
+
+                let column = self
+                    .last_columns
+                    .iter()
+                    .find(|c| c.eq_ignore_ascii_case(&column))
+                    .cloned();
+                let Some(column) = column else {
+                    return vec![CoreEvent::FilterSuggestions {
+                        items: Vec::new(),
+                        token,
+                    }];
+                };
+
+                match query::suggest_distinct_values(&pool, &base, &column, &prefix, limit).await {
+                    Ok(items) => vec![CoreEvent::FilterSuggestions { items, token }],
+                    Err(e) => vec![CoreEvent::Error(e.to_string())],
+                }
             }
 
             // ----------------------------------------------------------------

@@ -331,7 +331,7 @@ pub fn draw_filter_bar(frame: &mut Frame, state: &mut AppState, results_area: Re
 
     state.filter_bar.textarea.set_block(
         Block::default()
-            .title(" Filter (col:value or text — Enter to apply, Esc to close) ")
+            .title(" Filter (Tab: autocomplete, Enter: apply, Esc: close) ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme::MAUVE)),
     );
@@ -341,6 +341,49 @@ pub fn draw_filter_bar(frame: &mut Frame, state: &mut AppState, results_area: Re
         .set_cursor_style(Style::default().bg(theme::MAUVE).fg(theme::BASE));
 
     frame.render_widget(&state.filter_bar.textarea, bar_area);
+
+    if state.filter_bar.show_suggestions {
+        let max_items = 6usize;
+        let count = state.filter_bar.suggestions.len().min(max_items);
+        let sug_height = count as u16 + 2;
+        let sug_y = bar_area.y.saturating_sub(sug_height);
+        let sug_area = Rect {
+            x: bar_area.x,
+            y: sug_y,
+            width: bar_area.width,
+            height: sug_height,
+        };
+        frame.render_widget(Clear, sug_area);
+
+        let mut lines = Vec::new();
+        for (i, item) in state
+            .filter_bar
+            .suggestions
+            .iter()
+            .take(max_items)
+            .enumerate()
+        {
+            let style = if i == state.filter_bar.selected_suggestion {
+                Style::default().fg(theme::BASE).bg(theme::BLUE)
+            } else {
+                Style::default().fg(theme::TEXT)
+            };
+            lines.push(Line::from(Span::styled(item.clone(), style)));
+        }
+
+        let title = if state.filter_bar.loading_suggestions {
+            " Suggestions (loading...) "
+        } else {
+            " Suggestions "
+        };
+        let sug = Paragraph::new(lines).block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme::OVERLAY0)),
+        );
+        frame.render_widget(sug, sug_area);
+    }
 }
 
 // ---------------------------------------------------------------------------

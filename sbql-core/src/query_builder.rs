@@ -11,7 +11,7 @@
 //!   4. Re-serialize back to a SQL string.
 //!   5. On parse failure fall back to a safe subquery wrapper.
 
-use sqlparser::ast::{BinaryOperator, Expr, Ident, OrderByExpr, Query, SetExpr, Statement, Value};
+use sqlparser::ast::{Expr, Ident, OrderByExpr, Query, SetExpr, Statement};
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 
@@ -82,63 +82,32 @@ pub fn clear_order(sql: &str) -> Result<String> {
 pub fn apply_filter(sql: &str, filter_query: &str, columns: Option<&[String]>) -> Result<String> {
     let (col_opt, value) = parse_filter_query(filter_query);
 
-    let where_expr = match &col_opt {
-        Some(col) => build_ilike_expr(col, value),
-        None => {
-            // Global search: need column list
-            match columns {
-                Some(cols) if !cols.is_empty() => {
-                    let exprs: Vec<Expr> =
-                        cols.iter().map(|c| build_ilike_expr(c, value)).collect();
-                    // Fold with OR
-                    exprs
-                        .into_iter()
-                        .reduce(|acc, e| Expr::BinaryOp {
-                            left: Box::new(acc),
-                            op: BinaryOperator::Or,
-                            right: Box::new(e),
-                        })
-                        .unwrap()
-                }
-                _ => {
-                    // No column info — fall back to subquery
-                    let trimmed = sql.trim_end_matches(';').trim();
-                    let escaped = value.replace('\'', "''");
-                    return Ok(format!(
-                        "SELECT * FROM ({trimmed}) AS _sbql_filter WHERE CAST(_sbql_filter.* AS TEXT) ILIKE '%{escaped}%'"
-                    ));
-                }
-            }
-        }
-    };
-
-    match parse_single_select(sql) {
-        Ok(mut query) => {
-            if let SetExpr::Select(ref mut sel) = *query.body {
-                sel.selection = match sel.selection.take() {
-                    Some(existing) => Some(Expr::BinaryOp {
-                        left: Box::new(existing),
-                        op: BinaryOperator::And,
-                        right: Box::new(where_expr),
-                    }),
-                    None => Some(where_expr),
-                };
-            }
-            Ok(query.to_string())
-        }
-        Err(_) => {
-            // Fallback: wrap in subquery
-            let trimmed = sql.trim_end_matches(';').trim();
-            let escaped = value.replace('\'', "''");
-            if let Some(col) = col_opt {
+    // Keep filtering robust across mixed column types by always casting to text.
+    let trimmed = sql.trim_end_matches(';').trim();
+    let escaped = value.replace('\'', "''");
+    if let Some(col) = col_opt {
+        let col = quote_ident(&col);
+        Ok(format!(
+            "SELECT * FROM ({trimmed}) AS _sbql_filter WHERE CAST(_sbql_filter.{col} AS TEXT) ILIKE '%{escaped}%'"
+        ))
+    } else {
+        match columns {
+            Some(cols) if !cols.is_empty() => {
+                let ors = cols
+                    .iter()
+                    .map(|c| {
+                        let c = quote_ident(c);
+                        format!("CAST(_sbql_filter.{c} AS TEXT) ILIKE '%{escaped}%'")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" OR ");
                 Ok(format!(
-                    "SELECT * FROM ({trimmed}) AS _sbql_filter WHERE {col} ILIKE '%{escaped}%'"
-                ))
-            } else {
-                Ok(format!(
-                    "SELECT * FROM ({trimmed}) AS _sbql_filter WHERE CAST(_sbql_filter AS TEXT) ILIKE '%{escaped}%'"
+                    "SELECT * FROM ({trimmed}) AS _sbql_filter WHERE {ors}"
                 ))
             }
+            _ => Ok(format!(
+                "SELECT * FROM ({trimmed}) AS _sbql_filter WHERE CAST(_sbql_filter.* AS TEXT) ILIKE '%{escaped}%'"
+            )),
         }
     }
 }
@@ -201,18 +170,8 @@ fn parse_filter_query(q: &str) -> (Option<String>, &str) {
     (None, q)
 }
 
-/// Build `<col> ILIKE '%<value>%'` expression.
-fn build_ilike_expr(col: &str, value: &str) -> Expr {
-    let escaped = value.replace('\'', "''");
-    Expr::ILike {
-        negated: false,
-        any: false,
-        expr: Box::new(Expr::Identifier(Ident::new(col))),
-        pattern: Box::new(Expr::Value(
-            Value::SingleQuotedString(format!("%{escaped}%")).into(),
-        )),
-        escape_char: None,
-    }
+fn quote_ident(ident: &str) -> String {
+    format!("\"{}\"", ident.replace('"', "\"\""))
 }
 
 // ---------------------------------------------------------------------------

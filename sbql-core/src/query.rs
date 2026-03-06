@@ -55,6 +55,35 @@ pub async fn execute_page(
     })
 }
 
+/// Suggest distinct values for a column using prefix search (`prefix%`).
+pub async fn suggest_distinct_values(
+    pool: &PgPool,
+    sql: &str,
+    column: &str,
+    prefix: &str,
+    limit: usize,
+) -> Result<Vec<String>> {
+    let trimmed = sql.trim_end_matches(';').trim();
+    let col_ident = quote_ident(column);
+    let stmt = format!(
+        "SELECT DISTINCT CAST(_sbql_s.{col_ident} AS TEXT) AS v FROM ({trimmed}) AS _sbql_s WHERE CAST(_sbql_s.{col_ident} AS TEXT) ILIKE $1 ORDER BY v LIMIT $2"
+    );
+    let pattern = format!("{}%", prefix.replace('%', "\\%").replace('_', "\\_"));
+    let rows = sqlx::query(&stmt)
+        .bind(pattern)
+        .bind(limit as i64)
+        .fetch_all(pool)
+        .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        if let Ok(Some(v)) = row.try_get::<Option<String>, _>("v") {
+            out.push(v);
+        }
+    }
+    Ok(out)
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -293,4 +322,8 @@ fn pg_value_to_string(row: &PgRow, idx: usize, type_name: &str) -> String {
 /// Encode a byte slice as lowercase hex.
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn quote_ident(ident: &str) -> String {
+    format!("\"{}\"", ident.replace('"', "\"\""))
 }

@@ -203,6 +203,11 @@ impl CellEditState {
 pub struct FilterBar {
     pub visible: bool,
     pub textarea: TextArea<'static>,
+    pub suggestions: Vec<String>,
+    pub selected_suggestion: usize,
+    pub show_suggestions: bool,
+    pub suggestion_token: u64,
+    pub loading_suggestions: bool,
 }
 
 impl Default for FilterBar {
@@ -210,6 +215,11 @@ impl Default for FilterBar {
         Self {
             visible: false,
             textarea: TextArea::default(),
+            suggestions: Vec::new(),
+            selected_suggestion: 0,
+            show_suggestions: false,
+            suggestion_token: 0,
+            loading_suggestions: false,
         }
     }
 }
@@ -596,6 +606,26 @@ impl AppState {
                 self.is_loading = false;
                 self.diagram = Some(DiagramState::new(data));
             }
+            CoreEvent::FilterSuggestions { items, token } => {
+                self.is_loading = false;
+                if self.filter_bar.visible && token == self.filter_bar.suggestion_token {
+                    if !items.is_empty() {
+                        let mut merged = self.filter_bar.suggestions.clone();
+                        for item in items {
+                            if !merged.iter().any(|x| x.eq_ignore_ascii_case(&item)) {
+                                merged.push(item);
+                            }
+                        }
+                        self.filter_bar.suggestions = merged;
+                    }
+                    self.filter_bar.show_suggestions = !self.filter_bar.suggestions.is_empty();
+                    self.filter_bar.selected_suggestion = self
+                        .filter_bar
+                        .selected_suggestion
+                        .min(self.filter_bar.suggestions.len().saturating_sub(1));
+                    self.filter_bar.loading_suggestions = false;
+                }
+            }
             CoreEvent::Error(msg) => {
                 self.is_loading = false;
                 self.error_msg = Some(msg);
@@ -604,6 +634,7 @@ impl AppState {
                 // pending_delete_row dangling and the next `i` keypress misbehaves.
                 self.pending_cell_edit = None;
                 self.pending_delete_row = None;
+                self.filter_bar.loading_suggestions = false;
             }
         }
     }

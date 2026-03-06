@@ -901,6 +901,10 @@ fn handle_key_results(
             state.pending_d = false;
             state.filter_bar.visible = true;
             state.filter_bar.textarea = tui_textarea::TextArea::default();
+            state.filter_bar.suggestions.clear();
+            state.filter_bar.selected_suggestion = 0;
+            state.filter_bar.show_suggestions = false;
+            state.filter_bar.loading_suggestions = false;
         }
 
         // Esc = discard staged changes and go back to editor
@@ -987,13 +991,52 @@ fn handle_key_filter(
 ) {
     match key.code {
         KeyCode::Esc => {
-            state.filter_bar.visible = false;
-            state.active_filter = None;
-            let _ = cmd_tx.send(CoreCommand::ClearFilter);
+            if state.filter_bar.show_suggestions {
+                state.filter_bar.show_suggestions = false;
+                state.filter_bar.loading_suggestions = false;
+            } else {
+                state.filter_bar.visible = false;
+                state.filter_bar.show_suggestions = false;
+                state.filter_bar.loading_suggestions = false;
+                state.active_filter = None;
+                let _ = cmd_tx.send(CoreCommand::ClearFilter);
+            }
+        }
+        KeyCode::Up => {
+            if state.filter_bar.show_suggestions && !state.filter_bar.suggestions.is_empty() {
+                state.filter_bar.selected_suggestion = state
+                    .filter_bar
+                    .selected_suggestion
+                    .saturating_sub(1);
+            } else {
+                state.filter_bar.textarea.input(Input::from(key));
+                refresh_filter_suggestions(state, cmd_tx);
+            }
+        }
+        KeyCode::Down => {
+            if state.filter_bar.show_suggestions && !state.filter_bar.suggestions.is_empty() {
+                let max = state.filter_bar.suggestions.len().saturating_sub(1);
+                state.filter_bar.selected_suggestion =
+                    (state.filter_bar.selected_suggestion + 1).min(max);
+            } else {
+                state.filter_bar.textarea.input(Input::from(key));
+                refresh_filter_suggestions(state, cmd_tx);
+            }
+        }
+        KeyCode::Tab => {
+            if apply_selected_filter_suggestion(state) {
+                refresh_filter_suggestions(state, cmd_tx);
+            }
         }
         KeyCode::Enter => {
+            if apply_selected_filter_suggestion(state) {
+                refresh_filter_suggestions(state, cmd_tx);
+                return;
+            }
             let query = state.filter_bar.textarea.lines().join("");
             state.filter_bar.visible = false;
+            state.filter_bar.show_suggestions = false;
+            state.filter_bar.loading_suggestions = false;
             if query.trim().is_empty() {
                 state.active_filter = None;
                 let _ = cmd_tx.send(CoreCommand::ClearFilter);
@@ -1004,8 +1047,142 @@ fn handle_key_filter(
         }
         _ => {
             state.filter_bar.textarea.input(Input::from(key));
+            refresh_filter_suggestions(state, cmd_tx);
         }
     }
+}
+
+fn refresh_filter_suggestions(
+    state: &mut AppState,
+    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
+) {
+    let input = state.filter_bar.textarea.lines().join("");
+    let trimmed = input.trim();
+
+    if trimmed.is_empty() {
+        state.filter_bar.suggestions.clear();
+        state.filter_bar.show_suggestions = false;
+        state.filter_bar.loading_suggestions = false;
+        return;
+    }
+
+    // Column suggestions (before ':')
+    if !trimmed.contains(':') {
+        let prefix = trimmed.to_lowercase();
+        let mut suggestions: Vec<String> = state
+            .results
+            .columns
+            .iter()
+            .filter(|c| c.to_lowercase().starts_with(&prefix))
+            .take(20)
+            .cloned()
+            .collect();
+        suggestions.sort();
+        state.filter_bar.suggestions = suggestions;
+        state.filter_bar.selected_suggestion = 0;
+        state.filter_bar.show_suggestions = !state.filter_bar.suggestions.is_empty();
+        state.filter_bar.loading_suggestions = false;
+        return;
+    }
+
+    let Some((col_raw, value_prefix)) = parse_filter_input(trimmed) else {
+        state.filter_bar.suggestions.clear();
+        state.filter_bar.show_suggestions = false;
+        state.filter_bar.loading_suggestions = false;
+        return;
+    };
+
+    // Only allow known columns to avoid invalid suggestions.
+    let Some(col) = state
+        .results
+        .columns
+        .iter()
+        .find(|c| c.eq_ignore_ascii_case(&col_raw))
+        .cloned()
+    else {
+        state.filter_bar.suggestions.clear();
+        state.filter_bar.show_suggestions = false;
+        state.filter_bar.loading_suggestions = false;
+        return;
+    };
+
+    // Local (current page) suggestions for instant feedback.
+    let col_idx = match state
+        .results
+        .columns
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case(&col))
+    {
+        Some(i) => i,
+        None => return,
+    };
+    let prefix_lower = value_prefix.to_lowercase();
+    let mut local = std::collections::BTreeSet::new();
+    for row in &state.results.rows {
+        if let Some(v) = row.get(col_idx) {
+            if v.to_lowercase().starts_with(&prefix_lower) {
+                local.insert(v.clone());
+            }
+        }
+        if local.len() >= 20 {
+            break;
+        }
+    }
+    state.filter_bar.suggestions = local.into_iter().collect();
+    state.filter_bar.selected_suggestion = 0;
+    state.filter_bar.show_suggestions = true;
+
+    // Ask Core for DISTINCT suggestions from DB using prefix.
+    state.filter_bar.suggestion_token = state.filter_bar.suggestion_token.saturating_add(1);
+    state.filter_bar.loading_suggestions = true;
+    let _ = cmd_tx.send(CoreCommand::SuggestFilterValues {
+        column: col,
+        prefix: value_prefix.to_owned(),
+        limit: 20,
+        token: state.filter_bar.suggestion_token,
+    });
+}
+
+fn parse_filter_input(input: &str) -> Option<(String, &str)> {
+    let colon = input.find(':')?;
+    let col = input[..colon].trim();
+    if col.is_empty() {
+        return None;
+    }
+    let value = input[colon + 1..].trim_start();
+    Some((col.to_owned(), value))
+}
+
+fn apply_selected_filter_suggestion(state: &mut AppState) -> bool {
+    if !state.filter_bar.show_suggestions || state.filter_bar.suggestions.is_empty() {
+        return false;
+    }
+    let Some(choice) = state
+        .filter_bar
+        .suggestions
+        .get(state.filter_bar.selected_suggestion)
+        .cloned()
+    else {
+        return false;
+    };
+
+    let current = state.filter_bar.textarea.lines().join("");
+    let replacement = if let Some(colon) = current.find(':') {
+        let col = current[..colon].trim();
+        format!("{col}:{choice}")
+    } else {
+        format!("{choice}:")
+    };
+
+    // If suggestion does not change the input (already completed), let caller
+    // continue with its normal Enter behavior (e.g., apply filter).
+    if replacement == current {
+        return false;
+    }
+
+    state.filter_bar.textarea = tui_textarea::TextArea::default();
+    state.filter_bar.textarea.insert_str(&replacement);
+    true
 }
 
 // ---- Connection form keys ----

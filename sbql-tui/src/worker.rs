@@ -34,6 +34,7 @@ pub fn spawn_worker() -> (
                 CoreCommand::GetPrimaryKeys { .. }
                     | CoreCommand::Disconnect(_)
                     | CoreCommand::LoadDiagram
+                    | CoreCommand::SuggestFilterValues { .. }
             );
             if show_loading {
                 let _ = event_tx.send(CoreEvent::Loading);
