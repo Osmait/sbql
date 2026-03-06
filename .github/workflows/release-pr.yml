@@ -31,3 +31,21 @@ jobs:
           command: release-pr
         env:
           GITHUB_TOKEN: ${{ secrets.AUTH_TOKEN }}
+
+      - name: Enable auto-merge for release PR
+        env:
+          GH_TOKEN: ${{ secrets.AUTH_TOKEN }}
+        run: |
+          PR_NUMBER=$(gh pr list \
+            --base main \
+            --state open \
+            --json number,headRefName,title \
+            --jq '.[] | select(.headRefName | startswith("release-plz-")) | .number' \
+            | head -n 1)
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No open release-plz PR found. Skipping auto-merge setup."
+            exit 0
+          fi
+
+          gh pr merge "$PR_NUMBER" --auto --squash --delete-branch
