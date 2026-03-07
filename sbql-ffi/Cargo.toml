@@ -1,0 +1,23 @@
+[package]
+name = "sbql-ffi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "UniFFI bridge for sbql-core (macOS/iOS)"
+publish = false
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+name = "sbql_ffi"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+sbql-core = { path = "../sbql-core" }
+uniffi = { version = "0.29", features = ["tokio", "cli"] }
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
