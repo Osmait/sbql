@@ -8,11 +8,17 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{AppState, EditorMode, FocusedPanel};
+use crate::app::{ConnectionState, EditorMode, EditorState, FocusedPanel};
 use crate::ui::theme;
 
-pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
-    let is_focused = state.focused == FocusedPanel::Editor;
+pub fn draw(
+    frame: &mut Frame,
+    editor: &mut EditorState,
+    conn: &ConnectionState,
+    focused: FocusedPanel,
+    area: Rect,
+) {
+    let is_focused = focused == FocusedPanel::Editor;
 
     let border_style = if is_focused {
         Style::default().fg(theme::YELLOW)
@@ -20,10 +26,9 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
         Style::default().fg(theme::OVERLAY0)
     };
 
-    // Build the title with connection indicator
-    let conn_indicator = match state.active_connection_id {
+    let conn_indicator = match conn.active_id {
         Some(id) => {
-            let name = state
+            let name = conn
                 .connections
                 .iter()
                 .find(|c| c.id == id)
@@ -34,9 +39,8 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
         None => " SQL Editor (no connection) ".into(),
     };
 
-    // Mode badge — only shown when focused
     let mode_span = if is_focused {
-        match state.editor_mode {
+        match editor.mode {
             EditorMode::Normal => Span::styled(
                 " NORMAL ",
                 Style::default()
@@ -57,7 +61,7 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
     };
 
     let help_span = if is_focused {
-        match state.editor_mode {
+        match editor.mode {
             EditorMode::Normal => Span::styled(
                 " hjkl: move  i: insert  M-hjkl: panels  ^S/F5: run ",
                 Style::default().fg(theme::OVERLAY0),
@@ -82,28 +86,28 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
         help_span,
     ]);
 
-    state.editor.set_block(
+    editor.textarea.set_block(
         Block::default()
             .title(title)
             .borders(Borders::ALL)
             .border_style(border_style),
     );
 
-    // Style the cursor line
     if is_focused {
-        state
-            .editor
+        editor
+            .textarea
             .set_cursor_line_style(Style::default().bg(theme::SURFACE0));
-        // Cursor color differs by mode: yellow (Normal) vs green (Insert)
-        let cursor_style = match state.editor_mode {
+        let cursor_style = match editor.mode {
             EditorMode::Normal => Style::default().bg(theme::MAUVE).fg(theme::BASE),
             EditorMode::Insert => Style::default().bg(theme::YELLOW).fg(theme::BASE),
         };
-        state.editor.set_cursor_style(cursor_style);
+        editor.textarea.set_cursor_style(cursor_style);
     } else {
-        state.editor.set_cursor_line_style(Style::default());
-        state.editor.set_cursor_style(Style::default());
+        editor
+            .textarea
+            .set_cursor_line_style(Style::default());
+        editor.textarea.set_cursor_style(Style::default());
     }
 
-    frame.render_widget(&state.editor, area);
+    frame.render_widget(&editor.textarea, area);
 }

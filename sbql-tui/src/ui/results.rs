@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{AppState, FocusedPanel};
+use crate::app::{FilterBar, FocusedPanel, MutationState, ResultsState};
 use crate::ui::theme;
 use sbql_core::SortDirection;
 
@@ -19,12 +19,28 @@ const MIN_COL_WIDTH: u16 = 6;
 // Column separator spacing used by ratatui Table
 const COL_SPACING: u16 = 1;
 
-pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
-    let is_focused = state.focused == FocusedPanel::Results;
+/// Values computed during draw that the caller needs to write back.
+pub struct DrawOutput {
+    pub col_widths: Vec<u16>,
+    pub viewport_height: usize,
+    pub viewport_cols: usize,
+}
 
-    // Compute the usable row height (subtract 2 for borders, 1 for header).
+pub fn draw(
+    frame: &mut Frame,
+    results: &ResultsState,
+    mutation: &MutationState,
+    focused: FocusedPanel,
+    active_filter: Option<&str>,
+    filter_visible: bool,
+    spinner_frame: usize,
+    has_active_connection: bool,
+    area: Rect,
+) -> DrawOutput {
+    let is_focused = focused == FocusedPanel::Results;
+
     let viewport_height = area.height.saturating_sub(3) as usize;
-    state.results_viewport_height = viewport_height.max(1);
+    let viewport_height = viewport_height.max(1);
 
     let border_style = if is_focused {
         Style::default().fg(theme::GREEN)
@@ -33,12 +49,12 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
     };
 
     // Build title with page info
-    let page_info = if !state.results.rows.is_empty() {
-        let total_shown = state.current_page * 100 + state.results.rows.len();
-        if state.results.has_next_page {
+    let page_info = if !results.data.rows.is_empty() {
+        let total_shown = results.current_page * 100 + results.data.rows.len();
+        if results.data.has_next_page {
             format!(
                 " Results (rows 1–{total_shown}+, page {}) ",
-                state.current_page + 1
+                results.current_page + 1
             )
         } else {
             format!(" Results ({total_shown} rows) ")
@@ -47,16 +63,16 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
         " Results ".into()
     };
 
-    let loading_indicator = if state.is_loading {
+    let loading_indicator = if results.is_loading {
         const SPINNER: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
-        format!(" {} ", SPINNER[state.spinner_frame % SPINNER.len()])
+        format!(" {} ", SPINNER[spinner_frame % SPINNER.len()])
     } else {
         String::new()
     };
 
     let pending_indicator = {
-        let edits = state.pending_edits.len();
-        let deletes = state.pending_deletes.len();
+        let edits = mutation.pending_edits.len();
+        let deletes = mutation.pending_deletes.len();
         if edits > 0 || deletes > 0 {
             let mut parts = Vec::new();
             if edits > 0 {
@@ -71,10 +87,9 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
         }
     };
 
-    // Show active filter in title
-    let filter_hint = if state.filter_bar.visible || state.results.columns.is_empty() {
+    let filter_hint = if filter_visible || results.data.columns.is_empty() {
         String::new()
-    } else if let Some(ref f) = state.active_filter {
+    } else if let Some(f) = active_filter {
         format!(" [filter: {}] / edit filter", f)
     } else {
         " / filter".to_owned()
@@ -97,7 +112,7 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
         ),
         Span::styled(
             filter_hint,
-            if state.active_filter.is_some() {
+            if active_filter.is_some() {
                 Style::default()
                     .fg(theme::MAUVE)
                     .add_modifier(Modifier::BOLD)
@@ -107,10 +122,10 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
         ),
     ]);
 
-    if state.results.columns.is_empty() {
-        let msg = if state.is_loading {
+    if results.data.columns.is_empty() {
+        let msg = if results.is_loading {
             "Loading..."
-        } else if state.active_connection_id.is_none() {
+        } else if !has_active_connection {
             "Connect to a database first (Enter on a connection)"
         } else {
             "No results. Run a query with Ctrl+S or F5."
@@ -122,19 +137,24 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
                 .border_style(border_style),
         );
         frame.render_widget(para, area);
-        return;
+        return DrawOutput {
+            col_widths: Vec::new(),
+            viewport_height,
+            viewport_cols: 1,
+        };
     }
 
-    // --- Compute column widths for ALL columns ---
-    let all_col_widths = compute_col_widths(&state.results.columns, &state.results.rows);
-    let total_cols = state.results.columns.len();
+    // --- Compute column widths for ALL columns (cached when data hasn't changed) ---
+    let all_col_widths = if results.col_widths_dirty || results.cached_col_widths.is_empty() {
+        compute_col_widths(&results.data.columns, &results.data.rows)
+    } else {
+        results.cached_col_widths.clone()
+    };
+    let total_cols = results.data.columns.len();
 
-    // Usable inner width (subtract 2 for left+right borders)
     let inner_width = area.width.saturating_sub(2) as usize;
 
-    // Determine which columns are visible given result_col_scroll and inner_width.
-    // We greedily fit as many columns as possible from result_col_scroll onward.
-    let col_scroll = state.result_col_scroll.min(total_cols.saturating_sub(1));
+    let col_scroll = results.col_scroll.min(total_cols.saturating_sub(1));
     let mut visible_end = col_scroll;
     let mut used_width = 0usize;
     for ci in col_scroll..total_cols {
@@ -145,11 +165,9 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
         used_width += w;
         visible_end = ci + 1;
     }
-    // visible column range: [col_scroll, visible_end)
     let visible_col_count = visible_end - col_scroll;
-    state.results_viewport_cols = visible_col_count.max(1);
+    let viewport_cols = visible_col_count.max(1);
 
-    // Scroll indicator spans
     let left_arrow = if col_scroll > 0 { " ◀ " } else { "" };
     let right_arrow = if visible_end < total_cols {
         " ▶ "
@@ -158,20 +176,20 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
     };
 
     // Build header row (only visible columns)
-    let header_cells: Vec<Cell> = state
-        .results
+    let header_cells: Vec<Cell> = results
+        .data
         .columns
         .iter()
         .enumerate()
         .skip(col_scroll)
         .take(visible_col_count)
         .map(|(i, col)| {
-            let sort_indicator = match state.sort_state.get(col) {
+            let sort_indicator = match results.sort_state.get(col) {
                 Some(SortDirection::Ascending) => " ▲",
                 Some(SortDirection::Descending) => " ▼",
                 None => "",
             };
-            let is_selected_col = i == state.selected_col && is_focused;
+            let is_selected_col = i == results.selected_col && is_focused;
             let style = if is_selected_col {
                 Style::default()
                     .fg(theme::BASE)
@@ -188,27 +206,27 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
 
     let header = Row::new(header_cells).height(1);
 
-    // Build data rows — apply both row scroll and column scroll
-    let visible_rows: Vec<Row> = state
-        .results
+    let visible_rows: Vec<Row> = results
+        .data
         .rows
         .iter()
         .enumerate()
-        .skip(state.result_scroll)
+        .skip(results.scroll)
         .map(|(row_idx, row)| {
-            let is_selected = row_idx == state.selected_row && is_focused;
-            let is_pending_delete = state.pending_deletes.contains_key(&row_idx);
+            let is_selected = row_idx == results.selected_row && is_focused;
+            let is_pending_delete = mutation.pending_deletes.contains_key(&row_idx);
             let cells: Vec<Cell> = row
                 .iter()
                 .enumerate()
                 .skip(col_scroll)
                 .take(visible_col_count)
                 .map(|(col_idx, val)| {
-                    let is_selected_cell = is_selected && col_idx == state.selected_col;
-                    let is_pending_edit = state.pending_edits.contains_key(&(row_idx, col_idx));
+                    let is_selected_cell =
+                        is_selected && col_idx == results.selected_col;
+                    let is_pending_edit =
+                        mutation.pending_edits.contains_key(&(row_idx, col_idx));
 
-                    // Determine display value: use staged value if available
-                    let display_val = state
+                    let display_val = mutation
                         .pending_edits
                         .get(&(row_idx, col_idx))
                         .map(|e| e.new_val.as_str())
@@ -216,7 +234,6 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
                     let display = truncate(display_val, MAX_COL_WIDTH as usize);
 
                     let style = if is_pending_delete {
-                        // Entire row red = marked for deletion
                         if is_selected_cell {
                             Style::default()
                                 .fg(theme::TEXT)
@@ -226,7 +243,6 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
                             Style::default().fg(theme::TEXT).bg(theme::RED)
                         }
                     } else if is_pending_edit {
-                        // Edited cell yellow
                         Style::default()
                             .fg(theme::BASE)
                             .bg(theme::YELLOW)
@@ -255,7 +271,7 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
         .map(|&w| Constraint::Length(w))
         .collect();
 
-    let pending_count = state.pending_edits.len() + state.pending_deletes.len();
+    let pending_count = mutation.pending_edits.len() + mutation.pending_deletes.len();
     let help = if is_focused {
         if pending_count > 0 {
             " ^S: stage  dd: delete  ^W: commit  Esc: discard  o: sort  /: filter "
@@ -266,7 +282,6 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
         " Tab/click: focus "
     };
 
-    // Build scroll nav hint for title bottom
     let nav_hint = if !left_arrow.is_empty() || !right_arrow.is_empty() {
         format!(
             "{left_arrow}cols {}-{} of {total_cols}{right_arrow}",
@@ -286,9 +301,6 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
         ])
     };
 
-    // Store column widths for cell-edit overlay positioning
-    state.last_col_widths = all_col_widths.clone();
-
     let table = Table::new(visible_rows, constraints)
         .header(header)
         .block(
@@ -303,19 +315,25 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, area: Rect) {
 
     let mut tbl_state = TableState::default();
     tbl_state.select(if is_focused {
-        Some(state.selected_row.saturating_sub(state.result_scroll))
+        Some(results.selected_row.saturating_sub(results.scroll))
     } else {
         None
     });
 
     frame.render_stateful_widget(table, area, &mut tbl_state);
+
+    DrawOutput {
+        col_widths: all_col_widths,
+        viewport_height,
+        viewport_cols,
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Filter bar overlay (drawn over the bottom edge of the results panel)
 // ---------------------------------------------------------------------------
 
-pub fn draw_filter_bar(frame: &mut Frame, state: &mut AppState, results_area: Rect) {
+pub fn draw_filter_bar(frame: &mut Frame, filter: &mut FilterBar, results_area: Rect) {
     let bar_height = 3u16;
     if results_area.height < bar_height + 2 {
         return;
@@ -329,22 +347,21 @@ pub fn draw_filter_bar(frame: &mut Frame, state: &mut AppState, results_area: Re
 
     frame.render_widget(Clear, bar_area);
 
-    state.filter_bar.textarea.set_block(
+    filter.textarea.set_block(
         Block::default()
             .title(" Filter (Tab: autocomplete, Enter: apply, Esc: close) ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme::MAUVE)),
     );
-    state
-        .filter_bar
+    filter
         .textarea
         .set_cursor_style(Style::default().bg(theme::MAUVE).fg(theme::BASE));
 
-    frame.render_widget(&state.filter_bar.textarea, bar_area);
+    frame.render_widget(&filter.textarea, bar_area);
 
-    if state.filter_bar.show_suggestions {
+    if filter.show_suggestions {
         let max_items = 6usize;
-        let count = state.filter_bar.suggestions.len().min(max_items);
+        let count = filter.suggestions.len().min(max_items);
         let sug_height = count as u16 + 2;
         let sug_y = bar_area.y.saturating_sub(sug_height);
         let sug_area = Rect {
@@ -356,14 +373,8 @@ pub fn draw_filter_bar(frame: &mut Frame, state: &mut AppState, results_area: Re
         frame.render_widget(Clear, sug_area);
 
         let mut lines = Vec::new();
-        for (i, item) in state
-            .filter_bar
-            .suggestions
-            .iter()
-            .take(max_items)
-            .enumerate()
-        {
-            let style = if i == state.filter_bar.selected_suggestion {
+        for (i, item) in filter.suggestions.iter().take(max_items).enumerate() {
+            let style = if i == filter.selected_suggestion {
                 Style::default().fg(theme::BASE).bg(theme::BLUE)
             } else {
                 Style::default().fg(theme::TEXT)
@@ -371,7 +382,7 @@ pub fn draw_filter_bar(frame: &mut Frame, state: &mut AppState, results_area: Re
             lines.push(Line::from(Span::styled(item.clone(), style)));
         }
 
-        let title = if state.filter_bar.loading_suggestions {
+        let title = if filter.loading_suggestions {
             " Suggestions (loading...) "
         } else {
             " Suggestions "
@@ -390,16 +401,15 @@ pub fn draw_filter_bar(frame: &mut Frame, state: &mut AppState, results_area: Re
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Compute display widths for each column based on header + sample rows.
 fn compute_col_widths(columns: &[String], rows: &[Vec<String>]) -> Vec<u16> {
     columns
         .iter()
         .enumerate()
         .map(|(i, col)| {
-            let header_w = col.len() as u16 + 2; // +2 for sort indicator space
+            let header_w = col.len() as u16 + 2;
             let data_w = rows
                 .iter()
-                .take(50) // sample first 50 rows for width calc
+                .take(50)
                 .filter_map(|r| r.get(i))
                 .map(|v| v.len() as u16)
                 .max()
@@ -409,11 +419,9 @@ fn compute_col_widths(columns: &[String], rows: &[Vec<String>]) -> Vec<u16> {
         .collect()
 }
 
-/// Truncate a string to at most `max_chars` visible characters.
 fn truncate(s: &str, max_chars: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max_chars {
-        // Replace newlines with a visible indicator
         s.replace('\n', "↵").replace('\r', "")
     } else {
         let truncated: String = chars[..max_chars.saturating_sub(1)].iter().collect();

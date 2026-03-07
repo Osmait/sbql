@@ -8,24 +8,29 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{AppState, ConnectionForm, FocusedPanel};
+use crate::app::{ConnectionForm, ConnectionState, FocusedPanel, TableBrowserState};
 use crate::ui::theme;
 
 // ---------------------------------------------------------------------------
 // Connections panel (top-left)
 // ---------------------------------------------------------------------------
 
-pub fn draw_connections(frame: &mut Frame, state: &AppState, area: Rect) {
-    let is_focused = state.focused == FocusedPanel::Connections;
+pub fn draw_connections(
+    frame: &mut Frame,
+    conn: &ConnectionState,
+    focused: FocusedPanel,
+    area: Rect,
+) {
+    let is_focused = focused == FocusedPanel::Connections;
 
-    let conn_items: Vec<ListItem> = state
+    let conn_items: Vec<ListItem> = conn
         .connections
         .iter()
         .enumerate()
         .map(|(i, c)| {
-            let is_active = state.active_connection_id == Some(c.id);
+            let is_active = conn.active_id == Some(c.id);
             let indicator = if is_active { "● " } else { "  " };
-            let style = if i == state.selected_connection && is_focused {
+            let style = if i == conn.selected && is_focused {
                 Style::default()
                     .fg(theme::BASE)
                     .bg(theme::BLUE)
@@ -51,7 +56,7 @@ pub fn draw_connections(frame: &mut Frame, state: &AppState, area: Rect) {
 
     let conn_title = if is_focused {
         " Connections (Enter=connect  n=new  e=edit  d=delete) "
-    } else if state.connections.is_empty() {
+    } else if conn.connections.is_empty() {
         " Connections (n=new) "
     } else {
         " Connections "
@@ -73,7 +78,7 @@ pub fn draw_connections(frame: &mut Frame, state: &AppState, area: Rect) {
         .highlight_style(Style::default().add_modifier(Modifier::BOLD));
 
     let mut conn_state = ListState::default();
-    conn_state.select(Some(state.selected_connection));
+    conn_state.select(Some(conn.selected));
     frame.render_stateful_widget(conn_list, area, &mut conn_state);
 }
 
@@ -81,8 +86,14 @@ pub fn draw_connections(frame: &mut Frame, state: &AppState, area: Rect) {
 // Tables panel (bottom-left)
 // ---------------------------------------------------------------------------
 
-pub fn draw_tables(frame: &mut Frame, state: &AppState, area: Rect) {
-    let is_focused = state.focused == FocusedPanel::Tables;
+pub fn draw_tables(
+    frame: &mut Frame,
+    tables: &TableBrowserState,
+    focused: FocusedPanel,
+    is_loading: bool,
+    area: Rect,
+) {
+    let is_focused = focused == FocusedPanel::Tables;
 
     let border_style = if is_focused {
         Style::default().fg(theme::BLUE)
@@ -90,17 +101,17 @@ pub fn draw_tables(frame: &mut Frame, state: &AppState, area: Rect) {
         Style::default().fg(theme::OVERLAY0)
     };
 
-    let table_items: Vec<ListItem> = state
+    let table_items: Vec<ListItem> = tables
         .tables
         .iter()
         .enumerate()
         .map(|(i, t)| {
-            let style = if i == state.selected_table && is_focused {
+            let style = if i == tables.selected && is_focused {
                 Style::default()
                     .fg(theme::BASE)
                     .bg(theme::YELLOW)
                     .add_modifier(Modifier::BOLD)
-            } else if i == state.selected_table {
+            } else if i == tables.selected {
                 Style::default().fg(theme::YELLOW)
             } else {
                 Style::default().fg(theme::OVERLAY2)
@@ -109,7 +120,7 @@ pub fn draw_tables(frame: &mut Frame, state: &AppState, area: Rect) {
         })
         .collect();
 
-    let table_title = if state.is_loading && state.tables.is_empty() {
+    let table_title = if is_loading && tables.tables.is_empty() {
         " Tables (loading...) "
     } else if is_focused {
         " Tables (Enter=SELECT *  Esc=exit) "
@@ -125,10 +136,10 @@ pub fn draw_tables(frame: &mut Frame, state: &AppState, area: Rect) {
     );
 
     let mut tbl_state = ListState::default();
-    tbl_state.select(if state.tables.is_empty() {
+    tbl_state.select(if tables.tables.is_empty() {
         None
     } else {
-        Some(state.selected_table)
+        Some(tables.selected)
     });
     frame.render_stateful_widget(table_list, area, &mut tbl_state);
 }
@@ -137,13 +148,12 @@ pub fn draw_tables(frame: &mut Frame, state: &AppState, area: Rect) {
 // Connection form overlay
 // ---------------------------------------------------------------------------
 
-pub fn draw_form(frame: &mut Frame, state: &AppState) {
-    let area = centered_rect(60, 70, frame.area());
+pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
+    let area = centered_rect(60, 70, screen);
 
-    // Clear the background
     frame.render_widget(Clear, area);
 
-    let title = if state.conn_form.editing_id.is_some() {
+    let title = if form.editing_id.is_some() {
         " Edit Connection "
     } else {
         " New Connection "
@@ -169,7 +179,7 @@ pub fn draw_form(frame: &mut Frame, state: &AppState) {
 
     for i in 0..field_count {
         let label = ConnectionForm::field_label(i);
-        let is_active = state.conn_form.field_index == i;
+        let is_active = form.field_index == i;
         let border_style = if is_active {
             Style::default().fg(theme::BLUE)
         } else {
@@ -184,8 +194,7 @@ pub fn draw_form(frame: &mut Frame, state: &AppState) {
         };
 
         if i == 6 {
-            // SSL Mode is a cycle selector, not a text field
-            let ssl_display = state.conn_form.ssl_mode.as_str().to_owned();
+            let ssl_display = form.ssl_mode.as_str().to_owned();
             let hint = if is_active { "  Space: cycle" } else { "" };
             let para = Paragraph::new(format!("{ssl_display}{hint}")).block(
                 Block::default()
@@ -198,17 +207,16 @@ pub fn draw_form(frame: &mut Frame, state: &AppState) {
         }
 
         let value = match i {
-            0 => &state.conn_form.name,
-            1 => &state.conn_form.host,
-            2 => &state.conn_form.port,
-            3 => &state.conn_form.user,
-            4 => &state.conn_form.database,
-            5 => &state.conn_form.password,
+            0 => &form.name,
+            1 => &form.host,
+            2 => &form.port,
+            3 => &form.user,
+            4 => &form.database,
+            5 => &form.password,
             _ => continue,
         };
-        // Mask the password field; show a placeholder when editing with blank password
         let display = if i == 5 {
-            if value.is_empty() && state.conn_form.editing_id.is_some() {
+            if value.is_empty() && form.editing_id.is_some() {
                 "(unchanged)".to_owned()
             } else {
                 "*".repeat(value.len())
@@ -226,13 +234,11 @@ pub fn draw_form(frame: &mut Frame, state: &AppState) {
         frame.render_widget(para, chunks[i]);
     }
 
-    // Help line
     let help = Paragraph::new("Tab/↑↓: next field  Space: cycle SSL  Enter: save  Esc: cancel")
         .style(Style::default().fg(theme::OVERLAY0));
     frame.render_widget(help, *chunks.last().unwrap());
 
-    // Error message
-    if let Some(ref err) = state.conn_form.error {
+    if let Some(ref err) = form.error {
         let err_area = Rect {
             y: inner.y + inner.height.saturating_sub(2),
             height: 1,

@@ -25,18 +25,9 @@ use crate::ui::theme;
 // Box layout constants
 // ---------------------------------------------------------------------------
 
-/// Vertical gap between rows of table boxes.
-const V_GAP: u16 = 2;
-/// Number of table columns in the canvas layout.
-const COLS_PER_ROW: u16 = 3;
 /// Fixed width of each table box (inner content width = BOX_WIDTH - 2 borders).
 const BOX_WIDTH: u16 = 36;
 
-// Public re-exports used by main.rs for jump_canvas_to_table
-/// Approximate height of one row of table boxes (columns vary, use conservative estimate).
-pub const BOX_ROW_HEIGHT: u16 = 12;
-pub const COLS_PER_ROW_PUB: usize = COLS_PER_ROW as usize;
-pub const V_GAP_PUB: u16 = V_GAP;
 
 #[derive(Clone, Copy)]
 struct GlyphSet {
@@ -47,6 +38,10 @@ struct GlyphSet {
     bl: char,
     br: char,
     cross: char,
+    ltee: char,
+    rtee: char,
+    arrow_right: char,
+    arrow_left: char,
 }
 
 fn glyphs_for(mode: DiagramGlyphMode) -> GlyphSet {
@@ -59,6 +54,10 @@ fn glyphs_for(mode: DiagramGlyphMode) -> GlyphSet {
             bl: '+',
             br: '+',
             cross: '+',
+            ltee: '+',
+            rtee: '+',
+            arrow_right: '>',
+            arrow_left: '<',
         },
         DiagramGlyphMode::Unicode => GlyphSet {
             h: '─',
@@ -68,7 +67,56 @@ fn glyphs_for(mode: DiagramGlyphMode) -> GlyphSet {
             bl: '└',
             br: '┘',
             cross: '┼',
+            ltee: '├',
+            rtee: '┤',
+            arrow_right: '▶',
+            arrow_left: '◀',
         },
+    }
+}
+
+/// Map a SQL data type string to a theme colour.
+fn data_type_color(data_type: &str) -> ratatui::style::Color {
+    let dt = data_type.to_ascii_lowercase();
+    // Check temporal first (before numeric, since "timestamp"/"interval" contain "int")
+    if dt.contains("date")
+        || dt.contains("time")
+        || dt.contains("interval")
+    {
+        theme::SKY
+    // Structured types (before numeric, since "_int4" array types contain "int")
+    } else if dt.contains("json")
+        || dt.contains("xml")
+        || dt.contains("array")
+        || dt.contains("hstore")
+        || dt.starts_with("_")
+    {
+        theme::MAUVE
+    } else if dt.contains("bool") {
+        theme::FLAMINGO
+    } else if dt.contains("uuid") {
+        theme::LAVENDER
+    } else if dt.contains("bytea") || dt.contains("blob") || dt.contains("binary") {
+        theme::MAROON
+    } else if dt.contains("int")
+        || dt.contains("float")
+        || dt.contains("double")
+        || dt.contains("serial")
+        || dt.contains("decimal")
+        || dt.contains("numeric")
+        || dt.contains("real")
+        || dt.starts_with("money")
+    {
+        theme::PEACH
+    } else if dt.contains("char")
+        || dt.contains("text")
+        || dt.contains("citext")
+        || dt.contains("name")
+        || dt.contains("string")
+    {
+        theme::GREEN
+    } else {
+        theme::OVERLAY0
     }
 }
 
@@ -148,12 +196,41 @@ fn visible_foreign_keys<'a>(
 fn draw_sidebar(frame: &mut Frame, state: &DiagramState, area: Rect) {
     let visible_indices = visible_table_indices(state);
     let tables = &state.data.tables;
-    let items: Vec<ListItem> = visible_indices
+
+    // Filter by search query if active
+    let query_lower = state.search_query.to_ascii_lowercase();
+    let filtered_indices: Vec<usize> = if state.search_active && !state.search_query.is_empty() {
+        visible_indices
+            .iter()
+            .filter(|&&idx| {
+                tables
+                    .get(idx)
+                    .map(|t| t.qualified().to_ascii_lowercase().contains(&query_lower))
+                    .unwrap_or(false)
+            })
+            .copied()
+            .collect()
+    } else {
+        visible_indices.clone()
+    };
+
+    let items: Vec<ListItem> = filtered_indices
         .iter()
         .filter_map(|&idx| tables.get(idx))
         .map(|t| ListItem::new(t.qualified()))
         .collect();
     let item_count = items.len();
+
+    // Reserve bottom row for search input when active
+    let (list_area, search_area) = if state.search_active && area.height > 3 {
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(1)])
+            .split(area);
+        (split[0], Some(split[1]))
+    } else {
+        (area, None)
+    };
 
     let list = List::new(items)
         .block(
@@ -169,7 +246,7 @@ fn draw_sidebar(frame: &mut Frame, state: &DiagramState, area: Rect) {
         .highlight_symbol("> ");
 
     let mut list_state = ListState::default();
-    let selected_visible = visible_indices
+    let selected_visible = filtered_indices
         .iter()
         .position(|&idx| idx == state.selected_table);
     list_state.select(if item_count == 0 {
@@ -178,7 +255,22 @@ fn draw_sidebar(frame: &mut Frame, state: &DiagramState, area: Rect) {
         Some(selected_visible.unwrap_or(0))
     });
 
-    frame.render_stateful_widget(list, area, &mut list_state);
+    frame.render_stateful_widget(list, list_area, &mut list_state);
+
+    // Draw search input at bottom
+    if let Some(sa) = search_area {
+        let search_text = format!("/{}_", state.search_query);
+        let search_line = Line::from(vec![
+            Span::styled("/", Style::default().fg(theme::BLUE)),
+            Span::styled(
+                state.search_query.clone(),
+                Style::default().fg(theme::TEXT),
+            ),
+            Span::styled("_", Style::default().fg(theme::OVERLAY0)),
+        ]);
+        let _ = search_text; // suppress unused
+        frame.render_widget(Paragraph::new(search_line), sa);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -195,38 +287,52 @@ fn draw_canvas(frame: &mut Frame, state: &mut DiagramState, area: Rect) {
         .collect();
     let visible_fk_count = visible_foreign_keys(state, &visible_keys).len();
 
-    // Collect the lines that make up the full virtual canvas
-    let lines = build_canvas_lines(state, area.width);
+    // Store viewport dimensions for navigation centering
+    let inner_h = area.height.saturating_sub(2) as usize;
+    let inner_w = area.width.saturating_sub(2) as usize;
+    state.last_viewport_w = inner_w as u16;
+    state.last_viewport_h = inner_h as u16;
+
+    // Rebuild canvas only when dirty or not yet cached
+    if state.canvas_dirty || state.cached_canvas.is_none() {
+        let build = build_canvas_lines(state, area.width);
+        state.cached_canvas = Some(build.lines);
+        state.table_positions = build.table_positions;
+        state.canvas_dirty = false;
+    }
+    let lines = state.cached_canvas.clone().unwrap_or_default();
 
     let canvas_height = lines.len();
     let canvas_width = lines.iter().map(line_width).max().unwrap_or(0);
-    let inner_h = area.height.saturating_sub(2) as usize;
-    let inner_w = area.width.saturating_sub(2) as usize;
 
     let max_scroll_y = canvas_height.saturating_sub(inner_h) as u16;
     let max_scroll_x = canvas_width.saturating_sub(inner_w) as u16;
     state.scroll_y = state.scroll_y.min(max_scroll_y);
     state.scroll_x = state.scroll_x.min(max_scroll_x);
 
+    // Position indicator
+    let pct = if canvas_height > 0 {
+        (state.scroll_y as usize * 100) / canvas_height.max(1)
+    } else {
+        0
+    };
+
     // Apply scroll (vertical + horizontal)
     let scrolled: Vec<Line> = lines
         .into_iter()
         .skip(state.scroll_y as usize)
         .map(|line| crop_line(line, state.scroll_x as usize, inner_w))
-        .take(area.height.saturating_sub(2) as usize) // leave room for border
+        .take(inner_h)
         .collect();
 
     let paragraph = Paragraph::new(scrolled)
         .block(Block::default().borders(Borders::ALL).title(format!(
-            " Diagram ({} tables, {} FKs, mode: {}, glyph: {}) — hjkl to scroll ",
+            " Diagram ({} tables, {} FKs) [x:{} y:{}] {}% ",
             visible_indices.len(),
             visible_fk_count,
-            if state.focus_mode { "focus" } else { "all" },
-            if state.glyph_mode == DiagramGlyphMode::Ascii {
-                "ascii"
-            } else {
-                "unicode"
-            }
+            state.scroll_x,
+            state.scroll_y,
+            pct,
         )))
         .wrap(Wrap { trim: false });
 
@@ -237,10 +343,14 @@ fn draw_canvas(frame: &mut Frame, state: &mut DiagramState, area: Rect) {
 // Canvas line builder
 // ---------------------------------------------------------------------------
 
+struct CanvasBuild {
+    lines: Vec<Line<'static>>,
+    /// Global table index → (x, y) position on canvas.
+    table_positions: std::collections::HashMap<usize, (usize, usize)>,
+}
+
 /// Build the full virtual canvas as a vector of ratatui `Line`s.
-/// Tables are laid out in a grid of COLS_PER_ROW columns, scrollable via
-/// scroll_x / scroll_y.
-fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'static>> {
+fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> CanvasBuild {
     let tables = &state.data.tables;
     let glyphs = glyphs_for(state.glyph_mode);
 
@@ -257,10 +367,13 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
         .collect();
 
     if visible_tables.is_empty() {
-        return vec![Line::from(Span::styled(
-            "  No tables found in the current database.",
-            Style::default().fg(theme::OVERLAY0),
-        ))];
+        return CanvasBuild {
+            lines: vec![Line::from(Span::styled(
+                "  No tables found in the current database.",
+                Style::default().fg(theme::OVERLAY0),
+            ))],
+            table_positions: std::collections::HashMap::new(),
+        };
     }
 
     let selected_idx = state.selected_table;
@@ -304,18 +417,19 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
         HashSet::new()
     };
 
-    // Hierarchical layout (graph-like) for both all/focus modes.
-    const LAYER_X_GAP: usize = 14;
+    // Hierarchical directed layout with crossing minimization.
     const NODE_Y_GAP: usize = 2;
     const COMPONENT_GAP: usize = 4;
 
+    let n_vis = visible_tables.len();
     let mut key_to_visible: HashMap<String, usize> = HashMap::new();
     for (vidx, t) in visible_tables.iter().enumerate() {
         key_to_visible.insert(t.qualified(), vidx);
     }
 
-    let mut undirected_adj: Vec<Vec<usize>> = vec![Vec::new(); visible_tables.len()];
-    let mut indegree: Vec<usize> = vec![0; visible_tables.len()];
+    // Build directed edges (from_table → to_table) and undirected adjacency for components
+    let mut directed_edges: Vec<(usize, usize)> = Vec::new();
+    let mut undirected_adj: Vec<Vec<usize>> = vec![Vec::new(); n_vis];
     for fk in &visible_fks {
         let from_key = format!("{}.{}", fk.from_schema, fk.from_table);
         let to_key = format!("{}.{}", fk.to_schema, fk.to_table);
@@ -323,22 +437,24 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
         else {
             continue;
         };
+        if !directed_edges.contains(&(a, b)) {
+            directed_edges.push((a, b));
+        }
         if !undirected_adj[a].contains(&b) {
             undirected_adj[a].push(b);
         }
         if !undirected_adj[b].contains(&a) {
             undirected_adj[b].push(a);
         }
-        indegree[b] = indegree[b].saturating_add(1);
     }
 
     let selected_visible_idx = visible_indices
         .iter()
         .position(|&gidx| gidx == selected_idx);
 
-    let mut positions: Vec<(usize, usize)> = vec![(0, 0); visible_tables.len()];
-    let mut seen = vec![false; visible_tables.len()];
-    let mut component_starts: Vec<usize> = (0..visible_tables.len()).collect();
+    let mut positions: Vec<(usize, usize)> = vec![(0, 0); n_vis];
+    let mut seen = vec![false; n_vis];
+    let mut component_starts: Vec<usize> = (0..n_vis).collect();
     component_starts.sort_by_key(|&i| visible_tables[i].qualified());
     if let Some(sel) = selected_visible_idx {
         component_starts.retain(|&i| i != sel);
@@ -351,6 +467,7 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
             continue;
         }
 
+        // Discover component via undirected DFS
         let mut stack = vec![start];
         let mut component_nodes = Vec::new();
         seen[start] = true;
@@ -364,49 +481,117 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
             }
         }
 
+        // Directed longest-path layer assignment:
+        // All nodes start at layer 0, then for each directed edge from→to,
+        // ensure layer[to] > layer[from].
+        let comp_set: HashSet<usize> = component_nodes.iter().copied().collect();
+        let mut layer: Vec<usize> = vec![0; n_vis];
+        // Iterate multiple times to propagate (like Bellman-Ford)
+        for _ in 0..component_nodes.len() {
+            let mut changed = false;
+            for &(a, b) in &directed_edges {
+                if !comp_set.contains(&a) {
+                    continue;
+                }
+                if layer[b] <= layer[a] {
+                    layer[b] = layer[a] + 1;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        // Assign unconnected nodes via BFS from the selected or root node
         let root = if let Some(sel) = selected_visible_idx {
             if component_nodes.contains(&sel) {
                 sel
             } else {
                 *component_nodes
                     .iter()
-                    .min_by_key(|&&n| (indegree[n], visible_tables[n].qualified()))
+                    .min_by_key(|&&n| (layer[n], visible_tables[n].qualified()))
                     .unwrap_or(&component_nodes[0])
             }
         } else {
             *component_nodes
                 .iter()
-                .min_by_key(|&&n| (indegree[n], visible_tables[n].qualified()))
+                .min_by_key(|&&n| (layer[n], visible_tables[n].qualified()))
                 .unwrap_or(&component_nodes[0])
         };
 
-        let mut level: Vec<Option<usize>> = vec![None; visible_tables.len()];
-        let mut q = std::collections::VecDeque::new();
-        level[root] = Some(0);
-        q.push_back(root);
-        while let Some(n) = q.pop_front() {
-            let base = level[n].unwrap_or(0);
-            for &nb in &undirected_adj[n] {
-                if level[nb].is_none() {
-                    level[nb] = Some(base + 1);
-                    q.push_back(nb);
+        // For nodes with no directed edges, use BFS layer from root
+        let has_directed: HashSet<usize> = directed_edges
+            .iter()
+            .flat_map(|&(a, b)| [a, b])
+            .filter(|n| comp_set.contains(n))
+            .collect();
+        if has_directed.len() < component_nodes.len() {
+            let mut bfs_level: Vec<Option<usize>> = vec![None; n_vis];
+            let mut q = std::collections::VecDeque::new();
+            bfs_level[root] = Some(0);
+            q.push_back(root);
+            while let Some(n) = q.pop_front() {
+                let base = bfs_level[n].unwrap_or(0);
+                for &nb in &undirected_adj[n] {
+                    if bfs_level[nb].is_none() && comp_set.contains(&nb) {
+                        bfs_level[nb] = Some(base + 1);
+                        q.push_back(nb);
+                    }
+                }
+            }
+            for &n in &component_nodes {
+                if !has_directed.contains(&n) {
+                    layer[n] = bfs_level[n].unwrap_or(0);
                 }
             }
         }
 
         let max_layer = component_nodes
             .iter()
-            .map(|&n| level[n].unwrap_or(0))
+            .map(|&n| layer[n])
             .max()
             .unwrap_or(0);
         let mut layers: Vec<Vec<usize>> = vec![Vec::new(); max_layer + 1];
         for &n in &component_nodes {
-            layers[level[n].unwrap_or(0)].push(n);
+            layers[layer[n]].push(n);
         }
+        // Initial ordering: alphabetical
         for layer_nodes in &mut layers {
             layer_nodes.sort_by_key(|&n| visible_tables[n].qualified());
         }
 
+        // Barycenter crossing minimization (4 passes)
+        for _ in 0..4 {
+            for li in 1..layers.len() {
+                let prev = &layers[li - 1];
+                let prev_pos: HashMap<usize, f64> = prev
+                    .iter()
+                    .enumerate()
+                    .map(|(pos, &node)| (node, pos as f64))
+                    .collect();
+
+                let mut scored: Vec<(usize, f64)> = layers[li]
+                    .iter()
+                    .map(|&n| {
+                        let neighbors: Vec<f64> = undirected_adj[n]
+                            .iter()
+                            .filter_map(|nb| prev_pos.get(nb).copied())
+                            .collect();
+                        let bc = if neighbors.is_empty() {
+                            f64::MAX
+                        } else {
+                            neighbors.iter().sum::<f64>() / neighbors.len() as f64
+                        };
+                        (n, bc)
+                    })
+                    .collect();
+                scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                layers[li] = scored.into_iter().map(|(n, _)| n).collect();
+            }
+        }
+
+        // Adaptive gap: based on number of FKs between adjacent layers
         let row_stride = component_nodes
             .iter()
             .map(|&n| table_box_height(visible_tables[n]))
@@ -415,12 +600,30 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
             + NODE_Y_GAP;
         let max_rows = layers.iter().map(Vec::len).max().unwrap_or(1);
 
-        for (lx, layer_nodes) in layers.iter().enumerate() {
+        let mut layer_x_offsets: Vec<usize> = Vec::new();
+        let mut cum_x = 0usize;
+        for li in 0..layers.len() {
+            layer_x_offsets.push(cum_x);
+            if li + 1 < layers.len() {
+                // Count FKs between this layer and the next
+                let this_set: HashSet<usize> = layers[li].iter().copied().collect();
+                let next_set: HashSet<usize> = layers[li + 1].iter().copied().collect();
+                let fk_count = directed_edges
+                    .iter()
+                    .filter(|&&(a, b)| {
+                        (this_set.contains(&a) && next_set.contains(&b))
+                            || (this_set.contains(&b) && next_set.contains(&a))
+                    })
+                    .count();
+                let gap = 10 + (fk_count * 3).min(10); // range [10, 20]
+                cum_x += BOX_WIDTH as usize + gap;
+            }
+        }
+
+        for (li, layer_nodes) in layers.iter().enumerate() {
+            let lx = layer_x_offsets[li];
             for (ly, &node) in layer_nodes.iter().enumerate() {
-                positions[node] = (
-                    lx * (BOX_WIDTH as usize + LAYER_X_GAP),
-                    comp_y + ly * row_stride,
-                );
+                positions[node] = (lx, comp_y + ly * row_stride);
             }
         }
 
@@ -432,6 +635,7 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
     let mut boxes_to_draw: Vec<(usize, usize, Vec<StyledLine>)> = Vec::new();
     let mut canvas_w = 1usize;
     let mut canvas_h = 1usize;
+    let mut out_table_positions: HashMap<usize, (usize, usize)> = HashMap::new();
 
     for (vidx, t) in visible_tables.iter().enumerate() {
         let global_idx = visible_indices[vidx];
@@ -440,13 +644,14 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
         let empty_set = HashSet::new();
         let from_cols = fk_from.get(&t.qualified()).unwrap_or(&empty_set);
         let to_cols = fk_to.get(&t.qualified()).unwrap_or(&empty_set);
-        let box_lines = render_table_box(t, is_selected, is_related, from_cols, to_cols, glyphs);
+        let box_lines = render_table_box(t, is_selected, is_related, from_cols, to_cols, glyphs, state.glyph_mode);
         let (x, y) = positions[vidx];
 
         canvas_w = canvas_w.max(x + BOX_WIDTH as usize + 3);
         canvas_h = canvas_h.max(y + box_lines.len() + 2);
 
         boxes_to_draw.push((x, y, box_lines.clone()));
+        out_table_positions.insert(global_idx, (x, y));
 
         let key = t.qualified();
         rects.insert(
@@ -462,6 +667,16 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
     }
 
     let mut canvas = vec![vec![CanvasCell::default(); canvas_w.max(1)]; canvas_h.max(1)];
+
+    // Rotative colour palette for FK connectors (deterministic by table pair hash).
+    const CONNECTOR_COLORS: [ratatui::style::Color; 6] = [
+        theme::TEAL,
+        theme::PINK,
+        theme::PEACH,
+        theme::SAPPHIRE,
+        theme::FLAMINGO,
+        theme::LAVENDER,
+    ];
 
     // Draw FK connectors first (underlay), then table boxes on top so
     // connectors do not reduce text readability inside table boxes.
@@ -487,12 +702,23 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
             .as_ref()
             .map(|s| s == &from_key || s == &to_key)
             .unwrap_or(false);
+
+        // Deterministic colour based on the table pair
+        let pair_hash = {
+            let (lo, hi) = if from_idx <= to_idx {
+                (from_idx, to_idx)
+            } else {
+                (to_idx, from_idx)
+            };
+            lo.wrapping_mul(131) ^ hi.wrapping_mul(97)
+        };
+        let base_color = CONNECTOR_COLORS[pair_hash % CONNECTOR_COLORS.len()];
         let style = if highlighted {
             Style::default()
-                .fg(theme::YELLOW)
+                .fg(base_color)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme::SURFACE2)
+            Style::default().fg(base_color)
         };
 
         let from_center = from_rect.x + (from_rect.w / 2);
@@ -534,6 +760,9 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
         groups.entry(key).or_default().push(edge);
     }
 
+    // Collect rect list for lane avoidance
+    let rect_list: Vec<CanvasRect> = rects.values().copied().collect();
+
     let max_x = canvas[0].len().saturating_sub(1);
     const LANE_BUCKET_WIDTH: usize = 12;
     const LANE_BUCKET_SLOTS: usize = 3;
@@ -547,18 +776,21 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
         let raw_mid = group.iter().map(|e| (e.sx + e.tx) / 2).sum::<usize>() / group.len();
         let bucket = raw_mid / LANE_BUCKET_WIDTH;
         let slot = lane_bucket_counts.entry(bucket).or_insert(0usize);
-        let lane_x = (bucket * LANE_BUCKET_WIDTH + 2 + (*slot % LANE_BUCKET_SLOTS)).min(max_x);
+        let candidate_x =
+            (bucket * LANE_BUCKET_WIDTH + 2 + (*slot % LANE_BUCKET_SLOTS)).min(max_x);
         *slot = slot.saturating_add(1);
 
         let y_min = group.iter().map(|e| e.sy.min(e.ty)).min().unwrap_or(0);
         let y_max = group.iter().map(|e| e.sy.max(e.ty)).max().unwrap_or(0);
 
-        let trunk_style = if group.iter().any(|e| e.highlighted) {
-            Style::default()
-                .fg(theme::YELLOW)
-                .add_modifier(Modifier::BOLD)
+        // Shift lane if it overlaps with any table box
+        let lane_x = find_free_lane(candidate_x, &rect_list, y_min, y_max, max_x);
+
+        // Trunk style: use colour of first highlighted edge, or first edge
+        let trunk_style = if let Some(e) = group.iter().find(|e| e.highlighted) {
+            e.style
         } else {
-            Style::default().fg(theme::SURFACE2)
+            group[0].style
         };
 
         draw_vline(&mut canvas, lane_x, y_min, y_max, trunk_style, glyphs);
@@ -574,6 +806,31 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
                 edge.style,
                 glyphs,
             );
+
+            // Cardinality labels: N on source side, 1 on target side
+            let label_style = Style::default().fg(theme::OVERLAY1);
+            // Place "N" one row above source endpoint
+            if edge.sy > 0 {
+                let ny = edge.sy - 1;
+                if ny < canvas.len() && edge.sx < canvas[ny].len() && canvas[ny][edge.sx].ch == ' '
+                {
+                    canvas[ny][edge.sx] = CanvasCell {
+                        ch: 'N',
+                        style: label_style,
+                    };
+                }
+            }
+            // Place "1" one row above target endpoint
+            if edge.ty > 0 {
+                let oy = edge.ty - 1;
+                if oy < canvas.len() && edge.tx < canvas[oy].len() && canvas[oy][edge.tx].ch == ' '
+                {
+                    canvas[oy][edge.tx] = CanvasCell {
+                        ch: '1',
+                        style: label_style,
+                    };
+                }
+            }
         }
     }
 
@@ -581,7 +838,10 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> Vec<Line<'sta
         write_box(&mut canvas, x, y, &box_lines);
     }
 
-    canvas_to_lines(canvas)
+    CanvasBuild {
+        lines: canvas_to_lines(canvas),
+        table_positions: out_table_positions,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -631,9 +891,9 @@ struct PreparedEdge {
 }
 
 /// Height in lines of a rendered table box.
+/// top border + separator + N column rows + bottom border = N + 3
 fn table_box_height(t: &TableSchema) -> usize {
-    2 + t.columns.len() // top border + columns + bottom border (combined)
-                        // Actually: top + N column rows + bottom = N + 2
+    3 + t.columns.len()
 }
 
 use std::collections::HashSet;
@@ -646,6 +906,7 @@ fn render_table_box(
     fk_from_cols: &HashSet<String>,
     fk_to_cols: &HashSet<String>,
     glyphs: GlyphSet,
+    glyph_mode: DiagramGlyphMode,
 ) -> Vec<StyledLine> {
     let inner_width = (BOX_WIDTH as usize).saturating_sub(2); // subtract 2 for borders
 
@@ -675,58 +936,54 @@ fn render_table_box(
 
     let mut lines: Vec<StyledLine> = Vec::new();
 
-    // Top border: ┌─ schema.name ──...──┐
-    let title = format!(" {}.{} ", table.schema, table.name);
-    let title_len = title.len();
-    let dashes_total = inner_width.saturating_sub(title_len);
-    let dashes_right = dashes_total;
-    let top = format!("┌{}{}┐", title, "─".repeat(dashes_right));
-    let top_padded = pad_or_truncate(&top, BOX_WIDTH as usize);
-    lines.push(StyledLine {
-        spans: vec![
-            Span::styled(glyphs.tl.to_string(), border_style),
-            Span::styled(title, title_style),
-            Span::styled(
-                format!("{}{}", glyphs.h.to_string().repeat(dashes_right), glyphs.tr),
-                border_style,
-            ),
-        ]
-        .into_iter()
-        .map(|sp| {
-            // Ensure total width is correct — ratatui handles this
-            sp
-        })
-        .collect(),
-    });
-    // Recalculate to ensure we emit exactly BOX_WIDTH characters
-    // We rebuild the top line more carefully:
+    // Top border with title and column count: ┌ schema.table (N) ──...──┐
     let top_line = build_top_border(table, inner_width, border_style, title_style, glyphs);
-    lines[0] = top_line;
+    lines.push(top_line);
+
+    // Separator line: ├──...──┤
+    lines.push(StyledLine {
+        spans: vec![Span::styled(
+            format!(
+                "{}{}{}",
+                glyphs.ltee,
+                glyphs.h.to_string().repeat(inner_width),
+                glyphs.rtee
+            ),
+            border_style,
+        )],
+    });
 
     // Column rows
     for col in &table.columns {
         let indicator = if col.is_pk {
+            let glyph = match glyph_mode {
+                DiagramGlyphMode::Ascii => "* ",
+                DiagramGlyphMode::Unicode => "\u{25c6} ", // ◆
+            };
             Span::styled(
-                "* ",
+                glyph,
                 Style::default()
                     .fg(theme::YELLOW)
                     .add_modifier(Modifier::BOLD),
             )
         } else if fk_from_cols.contains(&col.name) {
-            Span::styled("→ ", Style::default().fg(theme::GREEN))
+            let glyph = match glyph_mode {
+                DiagramGlyphMode::Ascii => "->",
+                DiagramGlyphMode::Unicode => "\u{2192} ", // →
+            };
+            Span::styled(glyph, Style::default().fg(theme::GREEN))
         } else if fk_to_cols.contains(&col.name) {
-            Span::styled("← ", Style::default().fg(theme::MAUVE))
+            let glyph = match glyph_mode {
+                DiagramGlyphMode::Ascii => "<-",
+                DiagramGlyphMode::Unicode => "\u{2190} ", // ←
+            };
+            Span::styled(glyph, Style::default().fg(theme::MAUVE))
         } else {
             Span::raw("  ")
         };
 
         let nullable_marker = if col.is_nullable { " " } else { "!" };
 
-        // inner content: "  col_name   type  " fits in inner_width
-        // Layout: │ {ind}{col:<name_w}  {type:<type_w}{null} │
-        // We have: 2 chars indicator, then name, gap, type, nullable, border
-        // inner_width = 2 (ind) + name_w + 2 (gap) + type_w + 1 (null) = inner_width
-        // name_w + type_w = inner_width - 5
         let avail = inner_width.saturating_sub(5); // ind(2) + gap(2) + null(1)
         let name_w = (avail * 2 / 3).max(8);
         let type_w = avail.saturating_sub(name_w);
@@ -743,13 +1000,15 @@ fn render_table_box(
             Style::default().fg(theme::OVERLAY2)
         };
 
+        let type_color = data_type_color(&col.data_type);
+
         lines.push(StyledLine {
             spans: vec![
                 Span::styled(glyphs.v.to_string(), border_style),
                 indicator,
                 Span::styled(name_padded, content_style),
                 Span::raw("  "),
-                Span::styled(type_padded, Style::default().fg(theme::OVERLAY0)),
+                Span::styled(type_padded, Style::default().fg(type_color)),
                 Span::raw(nullable_marker.to_string()),
                 Span::styled(glyphs.v.to_string(), border_style),
             ],
@@ -769,13 +1028,10 @@ fn render_table_box(
         )],
     });
 
-    // Suppress the unused variable warning
-    let _ = top_padded;
-
     lines
 }
 
-/// Build the top border line with title inlined.
+/// Build the top border line with title and column count inlined.
 fn build_top_border(
     table: &TableSchema,
     inner_width: usize,
@@ -783,7 +1039,7 @@ fn build_top_border(
     title_style: Style,
     glyphs: GlyphSet,
 ) -> StyledLine {
-    let title = format!(" {}.{} ", table.schema, table.name);
+    let title = format!(" {}.{} ({}) ", table.schema, table.name, table.columns.len());
     let title_len = title.chars().count();
     let right_dashes = inner_width.saturating_sub(title_len);
 
@@ -794,15 +1050,6 @@ fn build_top_border(
             Span::styled(glyphs.h.to_string().repeat(right_dashes), border_style),
             Span::styled(glyphs.tr.to_string(), border_style),
         ],
-    }
-}
-
-fn pad_or_truncate(s: &str, width: usize) -> String {
-    let len = s.chars().count();
-    if len >= width {
-        s.chars().take(width).collect()
-    } else {
-        format!("{}{}", s, " ".repeat(width - len))
     }
 }
 
@@ -842,9 +1089,33 @@ fn endpoint_y(table: &TableSchema, rect: CanvasRect, col_name: &str) -> usize {
         .iter()
         .position(|c| c.name.eq_ignore_ascii_case(col_name));
     match col_idx {
-        Some(i) => rect.y + 1 + i,
+        // +2 = top border + separator line
+        Some(i) => rect.y + 2 + i,
         None => rect.y + (rect.h / 2),
     }
+}
+
+/// Find a free vertical lane that doesn't overlap with any table box rect.
+/// Shifts `lane_x` to the right in increments of 2 until a free spot is found,
+/// up to 20 attempts.
+fn find_free_lane(
+    lane_x: usize,
+    rects: &[CanvasRect],
+    y_min: usize,
+    y_max: usize,
+    max_x: usize,
+) -> usize {
+    let mut x = lane_x;
+    for _ in 0..20 {
+        let overlaps = rects.iter().any(|r| {
+            x >= r.x && x < r.x + r.w && y_max >= r.y && y_min < r.y + r.h
+        });
+        if !overlaps {
+            return x;
+        }
+        x = (x + 2).min(max_x);
+    }
+    x
 }
 
 fn draw_arrow(
@@ -858,12 +1129,12 @@ fn draw_arrow(
     if canvas.is_empty() || y >= canvas.len() || x >= canvas[y].len() {
         return;
     }
-    place_line_char(
-        &mut canvas[y][x],
-        if left_to_right { '>' } else { '<' },
-        style,
-        glyphs,
-    );
+    let arrow = if left_to_right {
+        glyphs.arrow_right
+    } else {
+        glyphs.arrow_left
+    };
+    place_line_char(&mut canvas[y][x], arrow, style, glyphs);
 }
 
 fn draw_hline(
@@ -997,29 +1268,311 @@ fn draw_help_bar(frame: &mut Frame, full_area: Rect, focus_mode: bool) {
     };
 
     let help = Paragraph::new(Line::from(vec![
-        Span::styled(" hjkl/arrows", Style::default().fg(theme::BLUE)),
+        Span::styled(" hjkl", Style::default().fg(theme::BLUE)),
         Span::raw(": scroll  "),
-        Span::styled("wheel", Style::default().fg(theme::BLUE)),
-        Span::raw(": y  "),
-        Span::styled("shift+wheel", Style::default().fg(theme::BLUE)),
-        Span::raw(": x  "),
         Span::styled("j/k/Tab", Style::default().fg(theme::BLUE)),
-        Span::raw(": select table  "),
+        Span::raw(": select  "),
+        Span::styled("/", Style::default().fg(theme::BLUE)),
+        Span::raw(": search  "),
+        Span::styled("PgUp/Dn", Style::default().fg(theme::BLUE)),
+        Span::raw(": fast scroll  "),
         Span::styled("f", Style::default().fg(theme::BLUE)),
         Span::raw(format!(
             ": {}  ",
             if focus_mode {
                 "show all"
             } else {
-                "focus selected"
+                "focus"
             }
         )),
         Span::styled("u", Style::default().fg(theme::BLUE)),
-        Span::raw(": ascii/unicode  "),
+        Span::raw(": glyph  "),
         Span::styled("Esc/q", Style::default().fg(theme::BLUE)),
-        Span::raw(": close diagram "),
+        Span::raw(": close "),
     ]))
     .style(Style::default().fg(theme::OVERLAY0));
 
     frame.render_widget(help, bar_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+    use sbql_core::{ColumnInfo, DiagramData, ForeignKey, TableSchema};
+
+    #[test]
+    fn test_diagram_rendering() {
+        // Setup mock diagram data
+        let data = DiagramData {
+            tables: vec![
+                TableSchema {
+                    schema: "public".into(),
+                    name: "users".into(),
+                    columns: vec![
+                        ColumnInfo {
+                            name: "id".into(),
+                            data_type: "integer".into(),
+                            is_pk: true,
+                            is_nullable: false,
+                        },
+                        ColumnInfo {
+                            name: "name".into(),
+                            data_type: "text".into(),
+                            is_pk: false,
+                            is_nullable: false,
+                        },
+                    ],
+                },
+                TableSchema {
+                    schema: "public".into(),
+                    name: "posts".into(),
+                    columns: vec![
+                        ColumnInfo {
+                            name: "id".into(),
+                            data_type: "integer".into(),
+                            is_pk: true,
+                            is_nullable: false,
+                        },
+                        ColumnInfo {
+                            name: "user_id".into(),
+                            data_type: "integer".into(),
+                            is_pk: false,
+                            is_nullable: false,
+                        },
+                    ],
+                },
+            ],
+            foreign_keys: vec![ForeignKey {
+                from_schema: "public".into(),
+                from_table: "posts".into(),
+                from_col: "user_id".into(),
+                to_schema: "public".into(),
+                to_table: "users".into(),
+                to_col: "id".into(),
+                constraint_name: "fk_user".into(),
+            }],
+        };
+
+        let mut state = DiagramState::new(data);
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        // Draw the UI
+        terminal.draw(|f| draw(f, &mut state)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let mut content = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                content.push_str(buffer.cell((x, y)).unwrap().symbol());
+            }
+        }
+
+        // Verify it rendered the table names
+        assert!(content.contains("public.users"));
+        assert!(content.contains("public.posts"));
+        // Verify PK indicator
+        assert!(content.contains("* id"));
+        // Verify column
+        assert!(content.contains("name"));
+    }
+
+    #[test]
+    fn test_line_cropping() {
+        let line = Line::from("hello world");
+        let cropped = crop_line(line, 6, 5);
+        assert_eq!(cropped.spans.len(), 5);
+        assert_eq!(cropped.spans[0].content, "w");
+        assert_eq!(cropped.spans[4].content, "d");
+    }
+
+    #[test]
+    fn test_data_type_color_numeric() {
+        assert_eq!(data_type_color("integer"), theme::PEACH);
+        assert_eq!(data_type_color("bigint"), theme::PEACH);
+        assert_eq!(data_type_color("float8"), theme::PEACH);
+        assert_eq!(data_type_color("serial"), theme::PEACH);
+        assert_eq!(data_type_color("numeric(10,2)"), theme::PEACH);
+    }
+
+    #[test]
+    fn test_data_type_color_text() {
+        assert_eq!(data_type_color("varchar"), theme::GREEN);
+        assert_eq!(data_type_color("text"), theme::GREEN);
+        assert_eq!(data_type_color("character varying"), theme::GREEN);
+    }
+
+    #[test]
+    fn test_data_type_color_boolean() {
+        assert_eq!(data_type_color("boolean"), theme::FLAMINGO);
+        assert_eq!(data_type_color("bool"), theme::FLAMINGO);
+    }
+
+    #[test]
+    fn test_data_type_color_temporal() {
+        assert_eq!(data_type_color("timestamp"), theme::SKY);
+        assert_eq!(data_type_color("date"), theme::SKY);
+        assert_eq!(data_type_color("time"), theme::SKY);
+        assert_eq!(data_type_color("interval"), theme::SKY);
+    }
+
+    #[test]
+    fn test_data_type_color_structured() {
+        assert_eq!(data_type_color("jsonb"), theme::MAUVE);
+        assert_eq!(data_type_color("json"), theme::MAUVE);
+        assert_eq!(data_type_color("xml"), theme::MAUVE);
+        assert_eq!(data_type_color("_int4"), theme::MAUVE); // array type
+    }
+
+    #[test]
+    fn test_data_type_color_uuid() {
+        assert_eq!(data_type_color("uuid"), theme::LAVENDER);
+    }
+
+    #[test]
+    fn test_data_type_color_binary() {
+        assert_eq!(data_type_color("bytea"), theme::MAROON);
+    }
+
+    #[test]
+    fn test_data_type_color_default() {
+        assert_eq!(data_type_color("oid"), theme::OVERLAY0);
+        assert_eq!(data_type_color("void"), theme::OVERLAY0);
+    }
+
+    #[test]
+    fn test_find_free_lane_no_overlap() {
+        // No rects → lane stays put
+        let rects = vec![];
+        assert_eq!(find_free_lane(10, &rects, 0, 20, 100), 10);
+    }
+
+    #[test]
+    fn test_find_free_lane_with_overlap() {
+        let rects = vec![CanvasRect {
+            x: 8,
+            y: 0,
+            w: 36,
+            h: 10,
+        }];
+        // lane_x=10 is inside the rect (8..44), should shift right
+        let result = find_free_lane(10, &rects, 0, 5, 100);
+        assert!(result >= 44, "lane should be outside rect, got {}", result);
+    }
+
+    #[test]
+    fn test_find_free_lane_no_y_overlap() {
+        let rects = vec![CanvasRect {
+            x: 8,
+            y: 0,
+            w: 36,
+            h: 10,
+        }];
+        // Lane y range is below the rect → no overlap
+        assert_eq!(find_free_lane(10, &rects, 15, 20, 100), 10);
+    }
+
+    #[test]
+    fn test_table_box_height() {
+        let t = TableSchema {
+            schema: "public".into(),
+            name: "test".into(),
+            columns: vec![
+                ColumnInfo {
+                    name: "id".into(),
+                    data_type: "integer".into(),
+                    is_pk: true,
+                    is_nullable: false,
+                },
+                ColumnInfo {
+                    name: "name".into(),
+                    data_type: "text".into(),
+                    is_pk: false,
+                    is_nullable: true,
+                },
+            ],
+        };
+        // 3 (header + separator + bottom) + 2 columns = 5
+        assert_eq!(table_box_height(&t), 5);
+    }
+
+    #[test]
+    fn test_build_canvas_stores_positions() {
+        let data = DiagramData {
+            tables: vec![
+                TableSchema {
+                    schema: "public".into(),
+                    name: "a".into(),
+                    columns: vec![ColumnInfo {
+                        name: "id".into(),
+                        data_type: "integer".into(),
+                        is_pk: true,
+                        is_nullable: false,
+                    }],
+                },
+                TableSchema {
+                    schema: "public".into(),
+                    name: "b".into(),
+                    columns: vec![ColumnInfo {
+                        name: "id".into(),
+                        data_type: "integer".into(),
+                        is_pk: true,
+                        is_nullable: false,
+                    }],
+                },
+            ],
+            foreign_keys: vec![],
+        };
+        let state = DiagramState::new(data);
+        let build = build_canvas_lines(&state, 100);
+        assert_eq!(build.table_positions.len(), 2);
+        assert!(build.table_positions.contains_key(&0));
+        assert!(build.table_positions.contains_key(&1));
+    }
+
+    #[test]
+    fn test_diagram_rendering_with_column_count() {
+        let data = DiagramData {
+            tables: vec![TableSchema {
+                schema: "public".into(),
+                name: "users".into(),
+                columns: vec![
+                    ColumnInfo {
+                        name: "id".into(),
+                        data_type: "integer".into(),
+                        is_pk: true,
+                        is_nullable: false,
+                    },
+                    ColumnInfo {
+                        name: "name".into(),
+                        data_type: "text".into(),
+                        is_pk: false,
+                        is_nullable: false,
+                    },
+                ],
+            }],
+            foreign_keys: vec![],
+        };
+
+        let mut state = DiagramState::new(data);
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut state)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let mut content = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                content.push_str(buffer.cell((x, y)).unwrap().symbol());
+            }
+        }
+
+        // Column count should appear in the header
+        assert!(
+            content.contains("(2)"),
+            "expected column count (2) in header"
+        );
+    }
 }

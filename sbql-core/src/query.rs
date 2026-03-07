@@ -26,26 +26,23 @@ pub struct QueryResult {
 /// when the query does not already contain a top-level LIMIT clause.  The
 /// extra +1 row is fetched to cheaply determine `has_next_page` without a
 /// COUNT query.
-pub async fn execute_page(
-    pool: &PgPool,
-    sql: &str,
-    page: usize,
-) -> Result<QueryResult> {
+pub async fn execute_page(pool: &PgPool, sql: &str, page: usize) -> Result<QueryResult> {
     let paginated = build_paginated_sql(sql, page);
     let rows: Vec<PgRow> = sqlx::query(&paginated).fetch_all(pool).await?;
 
     let has_next_page = rows.len() > PAGE_SIZE;
-    let rows_to_show = if has_next_page { &rows[..PAGE_SIZE] } else { &rows[..] };
+    let rows_to_show = if has_next_page {
+        &rows[..PAGE_SIZE]
+    } else {
+        &rows[..]
+    };
 
     let columns: Vec<String> = rows_to_show
         .first()
         .map(|r| r.columns().iter().map(|c| c.name().to_owned()).collect())
         .unwrap_or_default();
 
-    let result_rows: Vec<Vec<String>> = rows_to_show
-        .iter()
-        .map(|r| row_to_strings(r))
-        .collect();
+    let result_rows: Vec<Vec<String>> = rows_to_show.iter().map(|r| row_to_strings(r)).collect();
 
     Ok(QueryResult {
         columns,
@@ -178,8 +175,18 @@ fn pg_value_to_string(row: &PgRow, idx: usize, type_name: &str) -> String {
     }
 
     // --- OID and other unsigned ints (sqlx maps OID to i64 on Postgres) ---
-    if matches!(upper, "OID" | "REGPROC" | "REGPROCEDURE" | "REGOPER"
-        | "REGOPERATOR" | "REGCLASS" | "REGTYPE" | "REGCONFIG" | "REGDICTIONARY") {
+    if matches!(
+        upper,
+        "OID"
+            | "REGPROC"
+            | "REGPROCEDURE"
+            | "REGOPER"
+            | "REGOPERATOR"
+            | "REGCLASS"
+            | "REGTYPE"
+            | "REGCONFIG"
+            | "REGDICTIONARY"
+    ) {
         try_get!(i64);
     }
 
@@ -188,16 +195,38 @@ fn pg_value_to_string(row: &PgRow, idx: usize, type_name: &str) -> String {
     //     LINE, LSEG, BOX, POLYGON, CIRCLE, PG_LSN and anything unknown) ---
     if matches!(
         upper,
-            "TEXT" | "VARCHAR" | "CHAR" | "BPCHAR" | "NAME" | "CITEXT"
+        "TEXT"
+            | "VARCHAR"
+            | "CHAR"
+            | "BPCHAR"
+            | "NAME"
+            | "CITEXT"
             | "MONEY"
-            | "INET" | "CIDR" | "MACADDR" | "MACADDR8"
-            | "BIT" | "VARBIT"
+            | "INET"
+            | "CIDR"
+            | "MACADDR"
+            | "MACADDR8"
+            | "BIT"
+            | "VARBIT"
             | "XML"
-            | "TSVECTOR" | "TSQUERY"
-            | "POINT" | "LINE" | "LSEG" | "BOX" | "PATH" | "POLYGON" | "CIRCLE"
-            | "PG_LSN" | "TXID_SNAPSHOT"
+            | "TSVECTOR"
+            | "TSQUERY"
+            | "POINT"
+            | "LINE"
+            | "LSEG"
+            | "BOX"
+            | "PATH"
+            | "POLYGON"
+            | "CIRCLE"
+            | "PG_LSN"
+            | "TXID_SNAPSHOT"
             | "INTERVAL"
-            | "INT4RANGE" | "INT8RANGE" | "NUMRANGE" | "TSRANGE" | "TSTZRANGE" | "DATERANGE"
+            | "INT4RANGE"
+            | "INT8RANGE"
+            | "NUMRANGE"
+            | "TSRANGE"
+            | "TSTZRANGE"
+            | "DATERANGE"
     ) {
         try_get!(String);
     }
@@ -272,19 +301,37 @@ fn pg_value_to_string(row: &PgRow, idx: usize, type_name: &str) -> String {
         }
         if let Ok(v) = row.try_get::<Option<Vec<i64>>, _>(idx) {
             return match v {
-                Some(arr) => format!("{{{}}}", arr.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")),
+                Some(arr) => format!(
+                    "{{{}}}",
+                    arr.iter()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ),
                 None => String::new(),
             };
         }
         if let Ok(v) = row.try_get::<Option<Vec<f64>>, _>(idx) {
             return match v {
-                Some(arr) => format!("{{{}}}", arr.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")),
+                Some(arr) => format!(
+                    "{{{}}}",
+                    arr.iter()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ),
                 None => String::new(),
             };
         }
         if let Ok(v) = row.try_get::<Option<Vec<bool>>, _>(idx) {
             return match v {
-                Some(arr) => format!("{{{}}}", arr.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")),
+                Some(arr) => format!(
+                    "{{{}}}",
+                    arr.iter()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ),
                 None => String::new(),
             };
         }
@@ -326,4 +373,80 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 fn quote_ident(ident: &str) -> String {
     format!("\"{}\"", ident.replace('"', "\"\""))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- build_paginated_sql --
+
+    #[test]
+    fn paginated_no_limit_page_0() {
+        let result = build_paginated_sql("SELECT * FROM users", 0);
+        assert!(result.contains("LIMIT 101"));
+        assert!(result.contains("OFFSET 0"));
+    }
+
+    #[test]
+    fn paginated_no_limit_page_2() {
+        let result = build_paginated_sql("SELECT * FROM users", 2);
+        assert!(result.contains("LIMIT 101"));
+        assert!(result.contains("OFFSET 200"));
+    }
+
+    #[test]
+    fn paginated_with_existing_limit() {
+        let result = build_paginated_sql("SELECT * FROM users LIMIT 10", 0);
+        // Should not add another LIMIT
+        assert_eq!(result, "SELECT * FROM users LIMIT 10");
+    }
+
+    #[test]
+    fn paginated_strips_semicolon() {
+        let result = build_paginated_sql("SELECT * FROM users;", 0);
+        assert!(!result.ends_with(';'));
+        assert!(result.contains("LIMIT 101"));
+    }
+
+    #[test]
+    fn paginated_preserves_case() {
+        let result = build_paginated_sql("select * from Users WHERE active = true", 0);
+        assert!(result.contains("LIMIT 101"));
+    }
+
+    #[test]
+    fn paginated_existing_limit_case_insensitive() {
+        let result = build_paginated_sql("select * from users limit 5", 0);
+        assert_eq!(result, "select * from users limit 5");
+    }
+
+    // -- hex_encode --
+
+    #[test]
+    fn hex_encode_empty() {
+        assert_eq!(hex_encode(&[]), "");
+    }
+
+    #[test]
+    fn hex_encode_bytes() {
+        assert_eq!(hex_encode(&[0xDE, 0xAD, 0xBE, 0xEF]), "deadbeef");
+    }
+
+    #[test]
+    fn hex_encode_zeros() {
+        assert_eq!(hex_encode(&[0x00, 0x01, 0x0F]), "00010f");
+    }
+
+    // -- quote_ident --
+
+    #[test]
+    fn quote_ident_simple() {
+        assert_eq!(quote_ident("column_name"), "\"column_name\"");
+    }
+
+    #[test]
+    fn quote_ident_with_quotes() {
+        assert_eq!(quote_ident("col\"name"), "\"col\"\"name\"");
+    }
 }
