@@ -27,6 +27,7 @@ pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<Query
     match pool {
         DbPool::Postgres(pg) => execute_page_pg(pg, sql, page).await,
         DbPool::Sqlite(sq) => execute_page_sqlite(sq, sql, page).await,
+        DbPool::Redis(cm) => execute_page_redis(cm, sql).await,
     }
 }
 
@@ -41,6 +42,7 @@ pub async fn suggest_distinct_values(
     match pool {
         DbPool::Postgres(pg) => suggest_distinct_values_pg(pg, sql, column, prefix, limit).await,
         DbPool::Sqlite(sq) => suggest_distinct_values_sqlite(sq, sql, column, prefix, limit).await,
+        DbPool::Redis(_) => Ok(vec![]),
     }
 }
 
@@ -162,6 +164,263 @@ async fn suggest_distinct_values_sqlite(
         }
     }
     Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Redis implementation
+// ---------------------------------------------------------------------------
+
+async fn execute_page_redis(
+    cm: &redis::aio::ConnectionManager,
+    command_str: &str,
+) -> Result<QueryResult> {
+    let tokens = tokenize_redis_command(command_str);
+    if tokens.is_empty() {
+        return Ok(QueryResult::default());
+    }
+
+    let mut cmd = redis::cmd(&tokens[0]);
+    for arg in &tokens[1..] {
+        cmd.arg(arg.as_str());
+    }
+
+    let value: redis::Value = cmd.query_async(&mut cm.clone()).await?;
+    Ok(redis_value_to_query_result(&value))
+}
+
+/// Tokenize a Redis command string, respecting double-quoted and single-quoted strings.
+fn tokenize_redis_command(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut chars = input.chars().peekable();
+
+    while let Some(&ch) = chars.peek() {
+        if ch.is_whitespace() {
+            chars.next();
+            continue;
+        }
+        if ch == '"' || ch == '\'' {
+            let quote = ch;
+            chars.next(); // consume opening quote
+            let mut token = String::new();
+            while let Some(&c) = chars.peek() {
+                if c == quote {
+                    chars.next(); // consume closing quote
+                    break;
+                }
+                if c == '\\' {
+                    chars.next();
+                    if let Some(&escaped) = chars.peek() {
+                        token.push(escaped);
+                        chars.next();
+                    }
+                } else {
+                    token.push(c);
+                    chars.next();
+                }
+            }
+            tokens.push(token);
+        } else {
+            let mut token = String::new();
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() {
+                    break;
+                }
+                token.push(c);
+                chars.next();
+            }
+            tokens.push(token);
+        }
+    }
+
+    tokens
+}
+
+/// Convert a `redis::Value` into a `QueryResult` for display.
+fn redis_value_to_query_result(value: &redis::Value) -> QueryResult {
+    match value {
+        redis::Value::Nil => QueryResult {
+            columns: vec!["value".into()],
+            rows: vec![vec!["(nil)".into()]],
+            page: 0,
+            has_next_page: false,
+        },
+        redis::Value::Int(i) => QueryResult {
+            columns: vec!["value".into()],
+            rows: vec![vec![i.to_string()]],
+            page: 0,
+            has_next_page: false,
+        },
+        redis::Value::BulkString(b) => QueryResult {
+            columns: vec!["value".into()],
+            rows: vec![vec![String::from_utf8_lossy(b).into_owned()]],
+            page: 0,
+            has_next_page: false,
+        },
+        redis::Value::SimpleString(s) => QueryResult {
+            columns: vec!["value".into()],
+            rows: vec![vec![s.clone()]],
+            page: 0,
+            has_next_page: false,
+        },
+        redis::Value::Okay => QueryResult {
+            columns: vec!["value".into()],
+            rows: vec![vec!["OK".into()]],
+            page: 0,
+            has_next_page: false,
+        },
+        redis::Value::Array(arr) => {
+            // Check if this looks like HGETALL output (even-length, key-value pairs)
+            if arr.len() >= 2 && arr.len() % 2 == 0 && arr.iter().all(|v| is_string_like(v)) {
+                let mut rows = Vec::with_capacity(arr.len() / 2);
+                for pair in arr.chunks(2) {
+                    rows.push(vec![
+                        redis_value_to_string(&pair[0]),
+                        redis_value_to_string(&pair[1]),
+                    ]);
+                }
+                QueryResult {
+                    columns: vec!["field".into(), "value".into()],
+                    rows,
+                    page: 0,
+                    has_next_page: false,
+                }
+            } else {
+                let rows: Vec<Vec<String>> = arr
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| vec![i.to_string(), redis_value_to_string(v)])
+                    .collect();
+                QueryResult {
+                    columns: vec!["index".into(), "value".into()],
+                    rows,
+                    page: 0,
+                    has_next_page: false,
+                }
+            }
+        }
+        redis::Value::Double(f) => QueryResult {
+            columns: vec!["value".into()],
+            rows: vec![vec![f.to_string()]],
+            page: 0,
+            has_next_page: false,
+        },
+        redis::Value::Boolean(b) => QueryResult {
+            columns: vec!["value".into()],
+            rows: vec![vec![b.to_string()]],
+            page: 0,
+            has_next_page: false,
+        },
+        redis::Value::VerbatimString { text, .. } => QueryResult {
+            columns: vec!["value".into()],
+            rows: text.lines().map(|l| vec![l.to_string()]).collect(),
+            page: 0,
+            has_next_page: false,
+        },
+        redis::Value::BigNumber(n) => QueryResult {
+            columns: vec!["value".into()],
+            rows: vec![vec![n.to_string()]],
+            page: 0,
+            has_next_page: false,
+        },
+        redis::Value::Map(pairs) => {
+            let rows: Vec<Vec<String>> = pairs
+                .iter()
+                .map(|(k, v)| vec![redis_value_to_string(k), redis_value_to_string(v)])
+                .collect();
+            QueryResult {
+                columns: vec!["field".into(), "value".into()],
+                rows,
+                page: 0,
+                has_next_page: false,
+            }
+        }
+        redis::Value::Set(items) => {
+            let rows: Vec<Vec<String>> = items
+                .iter()
+                .enumerate()
+                .map(|(i, v)| vec![i.to_string(), redis_value_to_string(v)])
+                .collect();
+            QueryResult {
+                columns: vec!["index".into(), "value".into()],
+                rows,
+                page: 0,
+                has_next_page: false,
+            }
+        }
+        redis::Value::Attribute { data, .. } => redis_value_to_query_result(data),
+        redis::Value::Push { data, .. } => {
+            let rows: Vec<Vec<String>> = data
+                .iter()
+                .enumerate()
+                .map(|(i, v)| vec![i.to_string(), redis_value_to_string(v)])
+                .collect();
+            QueryResult {
+                columns: vec!["index".into(), "value".into()],
+                rows,
+                page: 0,
+                has_next_page: false,
+            }
+        }
+        redis::Value::ServerError(e) => QueryResult {
+            columns: vec!["error".into()],
+            rows: vec![vec![format!("ERR {}", e.details().unwrap_or_default())]],
+            page: 0,
+            has_next_page: false,
+        },
+    }
+}
+
+fn redis_value_to_string(value: &redis::Value) -> String {
+    match value {
+        redis::Value::Nil => "(nil)".into(),
+        redis::Value::Int(i) => i.to_string(),
+        redis::Value::BulkString(b) => String::from_utf8_lossy(b).into_owned(),
+        redis::Value::SimpleString(s) => s.clone(),
+        redis::Value::Okay => "OK".into(),
+        redis::Value::Double(f) => f.to_string(),
+        redis::Value::Boolean(b) => b.to_string(),
+        redis::Value::BigNumber(n) => n.to_string(),
+        redis::Value::Array(arr) => format!(
+            "[{}]",
+            arr.iter()
+                .map(|v| redis_value_to_string(v))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        redis::Value::VerbatimString { text, .. } => text.clone(),
+        redis::Value::Map(pairs) => format!(
+            "{{{}}}",
+            pairs
+                .iter()
+                .map(|(k, v)| format!("{}: {}", redis_value_to_string(k), redis_value_to_string(v)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        redis::Value::Set(items) => format!(
+            "{{{}}}",
+            items
+                .iter()
+                .map(|v| redis_value_to_string(v))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        redis::Value::ServerError(e) => format!("ERR {}", e.details().unwrap_or_default()),
+        redis::Value::Attribute { data, .. } => redis_value_to_string(data),
+        redis::Value::Push { data, .. } => format!(
+            "[{}]",
+            data.iter()
+                .map(|v| redis_value_to_string(v))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+fn is_string_like(value: &redis::Value) -> bool {
+    matches!(
+        value,
+        redis::Value::BulkString(_) | redis::Value::SimpleString(_) | redis::Value::Int(_)
+    )
 }
 
 // ---------------------------------------------------------------------------
