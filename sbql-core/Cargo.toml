@@ -22,9 +22,10 @@ anyhow.workspace = true
 tracing.workspace = true
 dirs = "5"
 indexmap.workspace = true
+redis.workspace = true
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 testcontainers = "0.23"
-testcontainers-modules = { version = "0.11", features = ["postgres"] }
+testcontainers-modules = { version = "0.11", features = ["postgres", "redis"] }
 tempfile = "3"
