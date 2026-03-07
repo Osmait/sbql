@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+description = "Core engine for sbql"
+repository = "https://github.com/Osmait/sbql"
 
 [dependencies]
 tokio.workspace = true

@@ -4,13 +4,16 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+description = "Terminal UI for sbql"
+repository = "https://github.com/Osmait/sbql"
+publish = false
 
 [[bin]]
 name = "sbql"
 path = "src/main.rs"
 
 [dependencies]
-sbql-core = { path = "../sbql-core" }
+sbql-core = { path = "../sbql-core", version = "0.1.0" }
 tokio.workspace = true
 serde.workspace = true
 uuid.workspace = true
