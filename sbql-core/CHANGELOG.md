@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/Osmait/sbql/compare/sbql-core-v0.1.1...sbql-core-v0.1.2) - 2026-03-07
+
+### Added
+
+- *(diagram)* comprehensive visual improvements and navigation ([#5](https://github.com/Osmait/sbql/pull/5))
+
 ## [0.1.0](https://github.com/Osmait/sbql/releases/tag/sbql-core-v0.1.0) - 2026-03-06
 
 ### Other
