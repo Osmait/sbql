@@ -88,6 +88,25 @@ impl ConnectionConfig {
         }
     }
 
+    /// Create a new Redis connection config.
+    pub fn new_redis(
+        name: impl Into<String>,
+        host: impl Into<String>,
+        port: u16,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            backend: DbBackend::Redis,
+            host: host.into(),
+            port,
+            user: String::new(),
+            database: "0".to_string(),
+            ssl_mode: SslMode::default(),
+            file_path: None,
+        }
+    }
+
     /// Build the connection string appropriate for this backend.
     pub fn connection_string(&self, password: &str) -> String {
         match self.backend {
@@ -104,6 +123,30 @@ impl ConnectionConfig {
                 let path = self.file_path.as_deref().unwrap_or(":memory:");
                 format!("sqlite:{path}")
             }
+            DbBackend::Redis => {
+                let scheme = if self.ssl_mode == SslMode::Require {
+                    "rediss"
+                } else {
+                    "redis"
+                };
+                if !self.user.is_empty() || !password.is_empty() {
+                    format!(
+                        "{scheme}://{}:{}@{}:{}/{}",
+                        self.user,
+                        urlencoding_simple(password),
+                        self.host,
+                        self.port,
+                        self.database,
+                    )
+                } else {
+                    format!(
+                        "{scheme}://{}:{}/{}",
+                        self.host,
+                        self.port,
+                        self.database,
+                    )
+                }
+            }
         }
     }
 
@@ -114,7 +157,7 @@ impl ConnectionConfig {
 
     /// Store the password in the OS keyring. No-op for SQLite.
     pub fn save_password(&self, password: &str) -> Result<()> {
-        if self.backend == DbBackend::Sqlite {
+        if self.backend == DbBackend::Sqlite || (self.backend == DbBackend::Redis && password.is_empty()) {
             return Ok(());
         }
         let entry = Entry::new(KEYRING_SERVICE, &self.keyring_user())
@@ -376,5 +419,42 @@ database = "mydb"
         assert_eq!(conn.file_path, Some("/tmp/test.sqlite".to_string()));
         assert!(conn.host.is_empty());
         assert_eq!(conn.port, 0);
+    }
+
+    // --- Phase 1C: additional gap tests ---
+
+    #[test]
+    fn sqlite_connection_string_memory_when_no_file_path() {
+        let mut conn = ConnectionConfig::new_sqlite("mem", "");
+        conn.file_path = None;
+        assert_eq!(conn.connection_string(""), "sqlite::memory:");
+    }
+
+    #[test]
+    fn sqlite_password_ops_are_noop() {
+        let conn = ConnectionConfig::new_sqlite("test", "/tmp/test.db");
+        // save_password should succeed (no-op)
+        assert!(conn.save_password("secret").is_ok());
+        // load_password should return empty string
+        assert_eq!(conn.load_password().unwrap(), "");
+        // delete_password should succeed (no-op)
+        assert!(conn.delete_password().is_ok());
+    }
+
+    #[test]
+    fn urlencoding_multibyte_utf8() {
+        // Test with multi-byte UTF-8 characters (e.g. emoji, CJK)
+        let encoded = urlencoding_simple("café");
+        assert!(encoded.starts_with("caf"));
+        // 'é' is U+00E9, 2 bytes: 0xC3 0xA9
+        assert!(encoded.contains("%C3%A9"));
+    }
+
+    #[test]
+    fn urlencoding_emoji() {
+        let encoded = urlencoding_simple("p@ss🔑");
+        assert!(encoded.starts_with("p%40ss"));
+        // Emoji should be percent-encoded as UTF-8 bytes
+        assert!(encoded.contains("%F0"));
     }
 }

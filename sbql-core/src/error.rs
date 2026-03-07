@@ -23,6 +23,9 @@ pub enum SbqlError {
     #[error("Schema introspection error: {0}")]
     Schema(String),
 
+    #[error("Redis error: {0}")]
+    Redis(#[from] redis::RedisError),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

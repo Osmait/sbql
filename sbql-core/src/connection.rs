@@ -69,6 +69,11 @@ impl ConnectionManager {
                     .await?;
                 DbPool::Sqlite(sq)
             }
+            DbBackend::Redis => {
+                let client = redis::Client::open(url.as_str())?;
+                let cm = redis::aio::ConnectionManager::new(client).await?;
+                DbPool::Redis(cm)
+            }
         };
 
         self.pools.write().await.insert(config.id, pool);
@@ -88,6 +93,11 @@ impl ConnectionManager {
             }
             DbPool::Sqlite(sq) => {
                 sqlx::query("SELECT 1").execute(sq).await?;
+            }
+            DbPool::Redis(cm) => {
+                let _: String = redis::cmd("PING")
+                    .query_async(&mut cm.clone())
+                    .await?;
             }
         }
         Ok(())
@@ -164,5 +174,71 @@ mod tests {
         manager.disconnect(id).await;
         let ids = manager.active_ids().await;
         assert!(ids.is_empty());
+    }
+
+    // --- Phase 1D: live SQLite tests ---
+
+    #[tokio::test]
+    async fn test_connect_sqlite_in_memory() {
+        let manager = ConnectionManager::new();
+        let config = ConnectionConfig::new_sqlite("test", ":memory:");
+        manager
+            .connect_with_password(&config, "")
+            .await
+            .expect("should connect to SQLite in-memory");
+        let ids = manager.active_ids().await;
+        assert!(ids.contains(&config.id));
+    }
+
+    #[tokio::test]
+    async fn test_connect_twice_is_idempotent() {
+        let manager = ConnectionManager::new();
+        let config = ConnectionConfig::new_sqlite("test", ":memory:");
+        manager
+            .connect_with_password(&config, "")
+            .await
+            .expect("first connect");
+        // Second connect with same id should be a no-op (early return)
+        manager
+            .connect_with_password(&config, "")
+            .await
+            .expect("second connect should succeed");
+        let ids = manager.active_ids().await;
+        assert_eq!(ids.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_ping_sqlite_pool() {
+        let manager = ConnectionManager::new();
+        let config = ConnectionConfig::new_sqlite("test", ":memory:");
+        manager.connect_with_password(&config, "").await.unwrap();
+        manager
+            .ping(config.id)
+            .await
+            .expect("ping should succeed on live pool");
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_removes_pool() {
+        let manager = ConnectionManager::new();
+        let config = ConnectionConfig::new_sqlite("test", ":memory:");
+        manager.connect_with_password(&config, "").await.unwrap();
+        assert!(!manager.active_ids().await.is_empty());
+
+        manager.disconnect(config.id).await;
+        assert!(manager.active_ids().await.is_empty());
+
+        // get after disconnect should fail
+        assert!(manager.get(config.id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_connect_invalid_connection_string() {
+        let manager = ConnectionManager::new();
+        let mut config = ConnectionConfig::new_sqlite("bad", "");
+        // Provide an invalid file path that doesn't exist and can't be created
+        config.file_path = Some("/nonexistent/directory/that/does/not/exist/test.db".to_string());
+        let result = manager.connect_with_password(&config, "").await;
+        assert!(result.is_err());
     }
 }
