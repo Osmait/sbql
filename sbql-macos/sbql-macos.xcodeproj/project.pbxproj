@@ -9,7 +9,7 @@
 /* Begin PBXBuildFile section */
 		FEF983612F5CA00000AF2D82 /* SbqlFFI.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FEF983602F5CA00000AF2D82 /* SbqlFFI.xcframework */; };
 		FEF986802F5CBC0100AF2D82 /* Neon in Frameworks */ = {isa = PBXBuildFile; productRef = FEA000012F6B000000000003 /* Neon */; };
-		FEF986812F5CBC0100AF2D82 /* TreeSitterClient in Frameworks */ = {isa = PBXBuildFile; productRef = FEA000012F6B000000000004 /* TreeSitterClient */; };
+		FEF986812F5CBC0100AF2D82 /* (null) in Frameworks */ = {isa = PBXBuildFile; };
 		FEF986822F5CBC0100AF2D82 /* TreeSitterSql in Frameworks */ = {isa = PBXBuildFile; productRef = FEA000012F6B000000000005 /* TreeSitterSql */; };
 /* End PBXBuildFile section */
 
@@ -61,7 +61,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FEF986822F5CBC0100AF2D82 /* TreeSitterSql in Frameworks */,
-				FEF986812F5CBC0100AF2D82 /* TreeSitterClient in Frameworks */,
+				FEF986812F5CBC0100AF2D82 /* (null) in Frameworks */,
 				FEF986802F5CBC0100AF2D82 /* Neon in Frameworks */,
 				FEF983612F5CA00000AF2D82 /* SbqlFFI.xcframework in Frameworks */,
 			);
@@ -634,16 +634,16 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/ChimeHQ/Neon";
 			requirement = {
-				kind = branch;
 				branch = main;
+				kind = branch;
 			};
 		};
 		FEA000012F6B000000000002 /* XCRemoteSwiftPackageReference "tree-sitter-sql" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/DerekStride/tree-sitter-sql";
 			requirement = {
-				kind = branch;
 				branch = "gh-pages";
+				kind = branch;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

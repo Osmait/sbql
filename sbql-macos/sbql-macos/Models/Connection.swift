@@ -17,6 +17,7 @@ struct Connection: Identifiable, Hashable {
     enum Backend: String, CaseIterable, Hashable {
         case postgres
         case sqlite
+        case redis
     }
 
     enum SSLMode: String, CaseIterable, Hashable {
@@ -43,6 +44,8 @@ struct Connection: Identifiable, Hashable {
             "\(user)@\(host):\(port)/\(database)"
         case .sqlite:
             filePath ?? "In-memory"
+        case .redis:
+            "\(host):\(port)/\(database)"
         }
     }
 
@@ -70,6 +73,19 @@ struct Connection: Identifiable, Hashable {
             database: "",
             sslMode: .prefer,
             filePath: ""
+        )
+    }
+
+    static func newRedis() -> Connection {
+        Connection(
+            id: UUID().uuidString.lowercased(),
+            name: "",
+            backend: .redis,
+            host: "localhost",
+            port: 6379,
+            user: "",
+            database: "0",
+            sslMode: .prefer
         )
     }
 }
@@ -109,6 +125,7 @@ extension Connection.Backend {
         switch ffi {
         case .postgres: self = .postgres
         case .sqlite:   self = .sqlite
+        case .redis:    self = .redis
         }
     }
 
@@ -116,6 +133,7 @@ extension Connection.Backend {
         switch self {
         case .postgres: .postgres
         case .sqlite:   .sqlite
+        case .redis:    .redis
         }
     }
 }
