@@ -131,6 +131,15 @@ impl ConnectionForm {
                 2 => "File Path",
                 _ => "",
             },
+            DbBackend::Redis => match idx {
+                0 => "Backend",
+                1 => "Name",
+                2 => "Host",
+                3 => "Port",
+                4 => "Password",
+                5 => "Database",
+                _ => "",
+            },
         }
     }
 
@@ -139,14 +148,16 @@ impl ConnectionForm {
         match self.backend {
             DbBackend::Postgres => 8, // backend, name, host, port, user, database, password, ssl_mode
             DbBackend::Sqlite => 3,   // backend, name, file_path
+            DbBackend::Redis => 6,    // backend, name, host, port, password, database
         }
     }
 
-    /// Toggle backend between Postgres and SQLite, resetting field_index.
+    /// Toggle backend between Postgres, SQLite, and Redis, resetting field_index.
     pub fn cycle_backend(&mut self) {
         self.backend = match self.backend {
             DbBackend::Postgres => DbBackend::Sqlite,
-            DbBackend::Sqlite => DbBackend::Postgres,
+            DbBackend::Sqlite => DbBackend::Redis,
+            DbBackend::Redis => DbBackend::Postgres,
         };
         self.field_index = 0;
     }
@@ -179,6 +190,15 @@ impl ConnectionForm {
                 0 => None, // Backend is cycled
                 1 => Some(&mut self.name),
                 2 => Some(&mut self.file_path),
+                _ => None,
+            },
+            DbBackend::Redis => match self.field_index {
+                0 => None, // Backend is cycled
+                1 => Some(&mut self.name),
+                2 => Some(&mut self.host),
+                3 => Some(&mut self.port),
+                4 => Some(&mut self.password),
+                5 => Some(&mut self.database),
                 _ => None,
             },
         }
@@ -1255,6 +1275,67 @@ mod tests {
         assert_eq!(form.field_label(1), "Name");
         assert_eq!(form.field_label(7), "SSL Mode");
         assert_eq!(form.field_label(8), "");
+    }
+
+    #[test]
+    fn connection_form_redis_field_labels() {
+        let mut form = ConnectionForm::default();
+        form.backend = DbBackend::Redis;
+        assert_eq!(form.field_label(0), "Backend");
+        assert_eq!(form.field_label(1), "Name");
+        assert_eq!(form.field_label(2), "Host");
+        assert_eq!(form.field_label(3), "Port");
+        assert_eq!(form.field_label(4), "Password");
+        assert_eq!(form.field_label(5), "Database");
+        assert_eq!(form.field_label(6), "");
+    }
+
+    #[test]
+    fn connection_form_redis_field_count() {
+        let mut form = ConnectionForm::default();
+        form.backend = DbBackend::Redis;
+        assert_eq!(form.field_count(), 6);
+    }
+
+    #[test]
+    fn connection_form_cycle_backend_includes_redis() {
+        let mut form = ConnectionForm::default();
+        assert_eq!(form.backend, DbBackend::Postgres);
+        form.cycle_backend();
+        assert_eq!(form.backend, DbBackend::Sqlite);
+        form.cycle_backend();
+        assert_eq!(form.backend, DbBackend::Redis);
+        form.cycle_backend();
+        assert_eq!(form.backend, DbBackend::Postgres);
+    }
+
+    #[test]
+    fn connection_form_redis_active_value_mut() {
+        let mut form = ConnectionForm::default();
+        form.backend = DbBackend::Redis;
+
+        form.field_index = 0;
+        assert!(form.active_value_mut().is_none()); // Backend is cycled
+
+        form.field_index = 1;
+        *form.active_value_mut().unwrap() = "my-redis".into();
+        assert_eq!(form.name, "my-redis");
+
+        form.field_index = 2;
+        *form.active_value_mut().unwrap() = "redis-host".into();
+        assert_eq!(form.host, "redis-host");
+
+        form.field_index = 3;
+        *form.active_value_mut().unwrap() = "6379".into();
+        assert_eq!(form.port, "6379");
+
+        form.field_index = 4;
+        *form.active_value_mut().unwrap() = "secret".into();
+        assert_eq!(form.password, "secret");
+
+        form.field_index = 5;
+        *form.active_value_mut().unwrap() = "2".into();
+        assert_eq!(form.database, "2");
     }
 
     #[test]

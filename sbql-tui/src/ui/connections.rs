@@ -198,6 +198,7 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
             let backend_display = match form.backend {
                 sbql_core::DbBackend::Postgres => "PostgreSQL",
                 sbql_core::DbBackend::Sqlite => "SQLite",
+                sbql_core::DbBackend::Redis => "Redis",
             };
             let hint = if is_active { "  Space: cycle" } else { "" };
             let para = Paragraph::new(format!("{backend_display}{hint}")).block(
@@ -240,10 +241,19 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
                 2 => &form.file_path,
                 _ => continue,
             },
+            sbql_core::DbBackend::Redis => match i {
+                1 => &form.name,
+                2 => &form.host,
+                3 => &form.port,
+                4 => &form.password,
+                5 => &form.database,
+                _ => continue,
+            },
         };
 
         let is_password =
-            form.backend == sbql_core::DbBackend::Postgres && i == 6;
+            (form.backend == sbql_core::DbBackend::Postgres && i == 6)
+            || (form.backend == sbql_core::DbBackend::Redis && i == 4);
         let display = if is_password {
             if value.is_empty() && form.editing_id.is_some() {
                 "(unchanged)".to_owned()

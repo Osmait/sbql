@@ -815,6 +815,39 @@ fn apply_form_submit(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCo
 
             (config, Some(String::new()))
         }
+        sbql_core::DbBackend::Redis => {
+            if form.host.trim().is_empty() {
+                state.conn.form.error = Some("Host is required".into());
+                return;
+            }
+            let port: u16 = match form.port.trim().parse() {
+                Ok(p) => p,
+                Err(_) => {
+                    state.conn.form.error = Some("Port must be a number (1-65535)".into());
+                    return;
+                }
+            };
+
+            let mut config = sbql_core::ConnectionConfig::new_redis(
+                form.name.trim(),
+                form.host.trim(),
+                port,
+            );
+            config.database = form.database.trim().to_string();
+
+            if let Some(id) = form.editing_id {
+                config.id = id;
+            }
+
+            let password = if form.password.is_empty() && form.editing_id.is_some() {
+                None
+            } else if form.password.is_empty() {
+                Some(String::new())
+            } else {
+                Some(form.password.clone())
+            };
+            (config, password)
+        }
     };
 
     let _ = cmd_tx.send(CoreCommand::SaveConnection { config, password });
@@ -1611,6 +1644,50 @@ mod tests {
         let (tx, _rx) = cmd_channel();
         apply(Action::FormSubmit, &mut state, &tx);
         assert!(state.conn.form.error.unwrap().contains("Port"));
+    }
+
+    #[test]
+    fn form_submit_redis_valid() {
+        let mut state = AppState::new(vec![]);
+        state.conn.form.visible = true;
+        state.conn.form.backend = sbql_core::DbBackend::Redis;
+        state.conn.form.name = "my-redis".into();
+        state.conn.form.host = "localhost".into();
+        state.conn.form.port = "6379".into();
+        state.conn.form.database = "0".into();
+        let (tx, mut rx) = cmd_channel();
+        apply(Action::FormSubmit, &mut state, &tx);
+        assert!(!state.conn.form.visible);
+        assert!(state.conn.form.error.is_none());
+        assert!(rx.try_recv().is_ok());
+    }
+
+    #[test]
+    fn form_submit_redis_missing_host() {
+        let mut state = AppState::new(vec![]);
+        state.conn.form.visible = true;
+        state.conn.form.backend = sbql_core::DbBackend::Redis;
+        state.conn.form.name = "my-redis".into();
+        state.conn.form.host = "".into();
+        state.conn.form.port = "6379".into();
+        let (tx, _rx) = cmd_channel();
+        apply(Action::FormSubmit, &mut state, &tx);
+        assert!(state.conn.form.visible);
+        assert!(state.conn.form.error.as_ref().unwrap().contains("Host"));
+    }
+
+    #[test]
+    fn form_submit_redis_bad_port() {
+        let mut state = AppState::new(vec![]);
+        state.conn.form.visible = true;
+        state.conn.form.backend = sbql_core::DbBackend::Redis;
+        state.conn.form.name = "my-redis".into();
+        state.conn.form.host = "localhost".into();
+        state.conn.form.port = "abc".into();
+        let (tx, _rx) = cmd_channel();
+        apply(Action::FormSubmit, &mut state, &tx);
+        assert!(state.conn.form.visible);
+        assert!(state.conn.form.error.as_ref().unwrap().contains("Port"));
     }
 
     // -----------------------------------------------------------------------
