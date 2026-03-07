@@ -32,6 +32,9 @@ pub enum SortDirection {
 /// Inject (or replace) an `ORDER BY <column> ASC/DESC` clause into `sql`.
 /// If the SQL cannot be parsed, wraps it in a subquery.
 pub fn apply_order(sql: &str, column: &str, direction: SortDirection, backend: DbBackend) -> Result<String> {
+    if backend == DbBackend::Redis {
+        return Err(SbqlError::SqlParse("ORDER BY not supported for Redis".into()));
+    }
     match parse_single_select(sql, backend) {
         Ok(mut query) => {
             let order_expr = OrderByExpr {
@@ -63,6 +66,9 @@ pub fn apply_order(sql: &str, column: &str, direction: SortDirection, backend: D
 
 /// Remove the `ORDER BY` clause from `sql`.
 pub fn clear_order(sql: &str, backend: DbBackend) -> Result<String> {
+    if backend == DbBackend::Redis {
+        return Ok(sql.to_owned());
+    }
     match parse_single_select(sql, backend) {
         Ok(mut query) => {
             query.order_by = None;
@@ -78,6 +84,9 @@ pub fn clear_order(sql: &str, backend: DbBackend) -> Result<String> {
 /// - `"col:value"` → `WHERE col ILIKE '%value%'` (PG) / `LIKE ... COLLATE NOCASE` (SQLite)
 /// - `"plain text"` → adds an `OR` ILIKE/LIKE for every provided column.
 pub fn apply_filter(sql: &str, filter_query: &str, columns: Option<&[String]>, backend: DbBackend) -> Result<String> {
+    if backend == DbBackend::Redis {
+        return Err(SbqlError::SqlParse("Filtering not supported for Redis".into()));
+    }
     let (col_opt, value) = parse_filter_query(filter_query);
 
     let trimmed = sql.trim_end_matches(';').trim();
@@ -85,11 +94,11 @@ pub fn apply_filter(sql: &str, filter_query: &str, columns: Option<&[String]>, b
 
     let like_op = match backend {
         DbBackend::Postgres => "ILIKE",
-        DbBackend::Sqlite => "LIKE",
+        DbBackend::Sqlite | DbBackend::Redis => "LIKE",
     };
     let collate_suffix = match backend {
         DbBackend::Postgres => "",
-        DbBackend::Sqlite => " COLLATE NOCASE",
+        DbBackend::Sqlite | DbBackend::Redis => " COLLATE NOCASE",
     };
 
     if let Some(col) = col_opt {
@@ -122,6 +131,9 @@ pub fn apply_filter(sql: &str, filter_query: &str, columns: Option<&[String]>, b
 /// Remove any injected WHERE filter, leaving the base query intact.
 #[allow(dead_code)]
 pub fn clear_filter(sql: &str, backend: DbBackend) -> Result<String> {
+    if backend == DbBackend::Redis {
+        return Ok(sql.to_owned());
+    }
     match parse_single_select(sql, backend) {
         Ok(mut query) => {
             if let SetExpr::Select(ref mut sel) = *query.body {
@@ -140,6 +152,7 @@ pub fn table_select_sql(schema: &str, table: &str, backend: DbBackend) -> String
     match backend {
         DbBackend::Postgres => format!("SELECT * FROM \"{schema}\".\"{table}\""),
         DbBackend::Sqlite => format!("SELECT * FROM \"{table}\""),
+        DbBackend::Redis => String::new(),
     }
 }
 
@@ -158,6 +171,9 @@ fn parse_single_select(sql: &str, backend: DbBackend) -> Result<Box<Query>> {
         DbBackend::Sqlite => {
             let dialect = SQLiteDialect {};
             Parser::parse_sql(&dialect, trimmed).map_err(|e| SbqlError::SqlParse(e.to_string()))?
+        }
+        DbBackend::Redis => {
+            return Err(SbqlError::SqlParse("SQL parsing not supported for Redis".into()));
         }
     };
 
@@ -327,5 +343,59 @@ mod tests {
             "SELECT * FROM (SELECT * FROM users UNION SELECT * FROM admins) AS _sbql_filter"
         ));
         assert!(result.contains("WHERE CAST(_sbql_filter.* AS TEXT) ILIKE '%test%'"));
+    }
+
+    // --- Phase 1A: additional edge-case tests ---
+
+    #[test]
+    fn test_apply_filter_single_quote_in_value() {
+        let sql = "SELECT * FROM users";
+        let result = apply_filter(sql, "name:O'Brien", None, DbBackend::Postgres).unwrap();
+        // Single quotes must be escaped as ''
+        assert!(result.contains("O''Brien"), "missing escaped quote: {result}");
+    }
+
+    #[test]
+    fn test_apply_filter_no_columns_global() {
+        let sql = "SELECT * FROM users";
+        // No columns provided (None) and plain text filter → wildcard CAST fallback
+        let result = apply_filter(sql, "alice", None, DbBackend::Postgres).unwrap();
+        assert!(result.contains("CAST(_sbql_filter.* AS TEXT)"));
+        assert!(result.contains("ILIKE '%alice%'"));
+    }
+
+    #[test]
+    fn test_clear_order_no_order_by() {
+        let sql = "SELECT * FROM users WHERE active = true";
+        let result = clear_order(sql, DbBackend::Postgres).unwrap();
+        // Should return the SQL unchanged (minus formatting differences)
+        let upper = result.to_uppercase();
+        assert!(upper.contains("SELECT"));
+        assert!(upper.contains("USERS"));
+        assert!(!upper.contains("ORDER BY"));
+    }
+
+    #[test]
+    fn test_table_select_sql_with_double_quote_chars() {
+        // Schema and table containing double-quote characters
+        let result = table_select_sql("my\"schema", "my\"table", DbBackend::Postgres);
+        // Double-quotes inside identifiers should be present (escaped by the format! macro)
+        assert_eq!(result, "SELECT * FROM \"my\"schema\".\"my\"table\"");
+    }
+
+    #[test]
+    fn test_parse_filter_query_empty_string() {
+        let (col, val) = parse_filter_query("");
+        assert_eq!(col, None);
+        assert_eq!(val, "");
+    }
+
+    #[test]
+    fn test_apply_filter_empty_columns_slice() {
+        let sql = "SELECT * FROM users";
+        let cols: Vec<String> = vec![];
+        // Empty columns slice → wildcard CAST fallback
+        let result = apply_filter(sql, "test", Some(&cols), DbBackend::Postgres).unwrap();
+        assert!(result.contains("CAST(_sbql_filter.* AS TEXT)"));
     }
 }

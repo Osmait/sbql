@@ -81,6 +81,7 @@ pub async fn list_tables(pool: &DbPool) -> Result<Vec<TableEntry>> {
     match pool {
         DbPool::Postgres(pg) => list_tables_pg(pg).await,
         DbPool::Sqlite(sq) => list_tables_sqlite(sq).await,
+        DbPool::Redis(_) => Ok(vec![]),
     }
 }
 
@@ -89,6 +90,7 @@ pub async fn get_primary_keys(pool: &DbPool, schema: &str, table: &str) -> Resul
     match pool {
         DbPool::Postgres(pg) => get_primary_keys_pg(pg, schema, table).await,
         DbPool::Sqlite(sq) => get_primary_keys_sqlite(sq, table).await,
+        DbPool::Redis(_) => Ok(vec![]),
     }
 }
 
@@ -97,6 +99,7 @@ pub async fn load_diagram(pool: &DbPool) -> Result<DiagramData> {
     match pool {
         DbPool::Postgres(pg) => load_diagram_pg(pg).await,
         DbPool::Sqlite(sq) => load_diagram_sqlite(sq).await,
+        DbPool::Redis(_) => Ok(DiagramData::default()),
     }
 }
 
@@ -117,6 +120,7 @@ pub async fn execute_cell_update(
         DbPool::Sqlite(sq) => {
             execute_cell_update_sqlite(sq, table, pk_col, pk_val, target_col, new_val).await
         }
+        DbPool::Redis(_) => Err(SbqlError::Schema("Cell update not supported for Redis".into())),
     }
 }
 
@@ -131,6 +135,7 @@ pub async fn execute_row_delete(
     match pool {
         DbPool::Postgres(pg) => execute_row_delete_pg(pg, schema, table, pk_col, pk_val).await,
         DbPool::Sqlite(sq) => execute_row_delete_sqlite(sq, table, pk_col, pk_val).await,
+        DbPool::Redis(_) => Err(SbqlError::Schema("Row delete not supported for Redis".into())),
     }
 }
 
@@ -592,5 +597,37 @@ mod tests {
             sql,
             r#"UPDATE "public"."users" SET "email" = $1 WHERE "id" = $2"#
         );
+    }
+
+    // --- Phase 1E: additional edge-case tests ---
+
+    #[test]
+    fn test_build_update_sql_with_double_quotes() {
+        let sql = build_update_sql("my\"schema", "my\"table", "pk\"col", "target\"col");
+        // Double-quote chars in identifiers are embedded as-is via format!
+        assert!(sql.contains(r#""my"schema""#));
+        assert!(sql.contains(r#""my"table""#));
+        assert!(sql.contains(r#""target"col""#));
+        assert!(sql.contains(r#""pk"col""#));
+    }
+
+    #[test]
+    fn test_table_entry_qualified_special_chars() {
+        let entry = TableEntry {
+            schema: "my.schema".to_string(),
+            name: "my table".to_string(),
+        };
+        assert_eq!(entry.qualified(), "my.schema.my table");
+    }
+
+    #[test]
+    fn test_table_schema_empty_columns() {
+        let ts = TableSchema {
+            schema: "public".to_string(),
+            name: "empty_table".to_string(),
+            columns: vec![],
+        };
+        assert_eq!(ts.qualified(), "public.empty_table");
+        assert!(ts.columns.is_empty());
     }
 }
