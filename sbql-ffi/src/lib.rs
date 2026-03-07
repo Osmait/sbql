@@ -18,6 +18,7 @@ uniffi::setup_scaffolding!();
 pub enum FfiDbBackend {
     Postgres,
     Sqlite,
+    Redis,
 }
 
 #[derive(Debug, Clone, uniffi::Enum)]
@@ -505,4 +506,197 @@ fn check_for_error(events: Vec<sbql_core::CoreEvent>) -> Result<(), SbqlFfiError
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- parse_uuid tests ---
+
+    #[test]
+    fn parse_uuid_empty_string() {
+        assert!(parse_uuid("").is_err());
+    }
+
+    #[test]
+    fn parse_uuid_invalid() {
+        assert!(parse_uuid("not-a-uuid").is_err());
+    }
+
+    #[test]
+    fn parse_uuid_valid() {
+        let result = parse_uuid("550e8400-e29b-41d4-a716-446655440000");
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap().to_string(),
+            "550e8400-e29b-41d4-a716-446655440000"
+        );
+    }
+
+    // --- extract_connection_list tests ---
+
+    #[test]
+    fn extract_connection_list_with_error() {
+        let events = vec![sbql_core::CoreEvent::Error("boom".into())];
+        let result = extract_connection_list(events);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            SbqlFfiError::Core { msg } => assert_eq!(msg, "boom"),
+            _ => panic!("Expected Core error"),
+        }
+    }
+
+    #[test]
+    fn extract_connection_list_with_list() {
+        let config = sbql_core::ConnectionConfig::new("test", "localhost", 5432, "user", "db");
+        let events = vec![sbql_core::CoreEvent::ConnectionList(vec![config.clone()])];
+        let result = extract_connection_list(events).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "test");
+    }
+
+    #[test]
+    fn extract_connection_list_empty_events() {
+        let events = vec![];
+        let result = extract_connection_list(events).unwrap();
+        assert!(result.is_empty());
+    }
+
+    // --- extract_query_result tests ---
+
+    #[test]
+    fn extract_query_result_with_error() {
+        let events = vec![sbql_core::CoreEvent::Error("query failed".into())];
+        let result = extract_query_result(events);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn extract_query_result_with_result() {
+        let qr = sbql_core::QueryResult {
+            columns: vec!["id".into()],
+            rows: vec![vec!["1".into()]],
+            page: 0,
+            has_next_page: false,
+        };
+        let events = vec![sbql_core::CoreEvent::QueryResult(qr)];
+        let result = extract_query_result(events).unwrap();
+        assert_eq!(result.columns, vec!["id"]);
+        assert_eq!(result.page, 0);
+    }
+
+    #[test]
+    fn extract_query_result_empty_events() {
+        let events = vec![];
+        let result = extract_query_result(events).unwrap();
+        assert!(result.columns.is_empty());
+    }
+
+    // --- check_for_error tests ---
+
+    #[test]
+    fn check_for_error_no_errors() {
+        let events = vec![
+            sbql_core::CoreEvent::CellUpdated,
+            sbql_core::CoreEvent::RowDeleted,
+        ];
+        assert!(check_for_error(events).is_ok());
+    }
+
+    #[test]
+    fn check_for_error_with_error() {
+        let events = vec![
+            sbql_core::CoreEvent::CellUpdated,
+            sbql_core::CoreEvent::Error("failed".into()),
+        ];
+        assert!(check_for_error(events).is_err());
+    }
+
+    // --- SbqlEngine smoke tests ---
+
+    #[test]
+    fn engine_new_does_not_panic() {
+        let _engine = SbqlEngine::new();
+    }
+
+    #[test]
+    fn engine_get_connections_initially_empty_or_loaded() {
+        let engine = SbqlEngine::new();
+        // Should not panic; returns whatever is on disk (may be empty or not)
+        let _conns = engine.get_connections();
+    }
+
+    // SbqlEngine creates its own tokio runtime, so these tests use
+    // #[tokio::test] with spawn_blocking to drop the engine off the async context.
+
+    #[tokio::test]
+    async fn engine_connect_nonexistent_id() {
+        let engine = SbqlEngine::new();
+        let result = engine.connect("550e8400-e29b-41d4-a716-446655440000".into()).await;
+        assert!(result.is_err());
+        tokio::task::spawn_blocking(move || drop(engine)).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn engine_save_connection_invalid_uuid() {
+        let engine = SbqlEngine::new();
+        let config = FfiConnectionConfig {
+            id: "invalid-uuid".into(),
+            name: "test".into(),
+            backend: FfiDbBackend::Sqlite,
+            host: "".into(),
+            port: 0,
+            user: "".into(),
+            database: "".into(),
+            ssl_mode: FfiSslMode::Prefer,
+            file_path: None,
+        };
+        let result = engine.save_connection(config, None).await;
+        assert!(result.is_err());
+        tokio::task::spawn_blocking(move || drop(engine)).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn engine_full_lifecycle_sqlite() {
+        let engine = SbqlEngine::new();
+        let id = uuid::Uuid::new_v4().to_string();
+        let config = FfiConnectionConfig {
+            id: id.clone(),
+            name: "lifecycle_test".into(),
+            backend: FfiDbBackend::Sqlite,
+            host: "".into(),
+            port: 0,
+            user: "".into(),
+            database: "".into(),
+            ssl_mode: FfiSslMode::Prefer,
+            file_path: Some(":memory:".into()),
+        };
+
+        // Save
+        let list = engine.save_connection(config, None).await.unwrap();
+        assert!(list.iter().any(|c| c.id == id));
+
+        // Connect
+        engine.connect(id.clone()).await.unwrap();
+
+        // List tables (SQLite in-memory has none by default)
+        let tables = engine.list_tables().await.unwrap();
+        assert!(tables.is_empty());
+
+        // Execute a query
+        let result = engine
+            .execute_query("SELECT 1 AS val".into())
+            .await
+            .unwrap();
+        assert_eq!(result.columns, vec!["val"]);
+        assert_eq!(result.rows.len(), 1);
+
+        // Disconnect
+        engine.disconnect(id.clone()).await.unwrap();
+
+        // Clean up: delete the connection
+        let _ = engine.delete_connection(id).await;
+        tokio::task::spawn_blocking(move || drop(engine)).await.unwrap();
+    }
 }
