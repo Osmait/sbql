@@ -238,4 +238,60 @@ mod tests {
         assert!(upper.contains("EMAIL"));
         assert!(!upper.contains("ORDER BY ID"));
     }
+
+    #[test]
+    fn test_apply_order_fallback() {
+        // Invalid syntax for single SELECT or complex query
+        let sql = "INVALID SQL STATEMENT";
+        let result = apply_order(sql, "col", SortDirection::Ascending).unwrap();
+        assert_eq!(
+            result,
+            "SELECT * FROM (INVALID SQL STATEMENT) AS _sbql_order ORDER BY col ASC"
+        );
+    }
+
+    #[test]
+    fn test_clear_filter() {
+        let sql = "SELECT * FROM users WHERE status = 'active'";
+        let result = clear_filter(sql).unwrap();
+        let upper = result.to_uppercase();
+        assert!(!upper.contains("WHERE"));
+        assert!(upper.contains("SELECT * FROM USERS"));
+    }
+
+    #[test]
+    fn test_table_select_sql() {
+        assert_eq!(
+            table_select_sql("public", "users"),
+            "SELECT * FROM \"public\".\"users\""
+        );
+    }
+
+    #[test]
+    fn test_parse_filter_query() {
+        assert_eq!(
+            parse_filter_query("col:val"),
+            (Some("col".to_string()), "val")
+        );
+        assert_eq!(
+            parse_filter_query("status: active"),
+            (Some("status".to_string()), "active")
+        );
+        assert_eq!(
+            parse_filter_query("invalid col:val"),
+            (None, "invalid col:val")
+        ); // spaces not allowed in column name
+        assert_eq!(parse_filter_query("plain text"), (None, "plain text"));
+    }
+
+    #[test]
+    fn test_apply_filter_fallback() {
+        // Complex query fallback
+        let sql = "SELECT * FROM users UNION SELECT * FROM admins";
+        let result = apply_filter(sql, "test", None).unwrap();
+        assert!(result.starts_with(
+            "SELECT * FROM (SELECT * FROM users UNION SELECT * FROM admins) AS _sbql_filter"
+        ));
+        assert!(result.contains("WHERE CAST(_sbql_filter.* AS TEXT) ILIKE '%test%'"));
+    }
 }

@@ -28,7 +28,11 @@ impl ConnectionManager {
     }
 
     /// Open (or reuse) a connection pool with an explicit password.
-    pub async fn connect_with_password(&self, config: &ConnectionConfig, password: &str) -> Result<()> {
+    pub async fn connect_with_password(
+        &self,
+        config: &ConnectionConfig,
+        password: &str,
+    ) -> Result<()> {
         // Already connected?
         {
             let guard = self.pools.read().await;
@@ -80,5 +84,56 @@ impl ConnectionManager {
     /// Returns the ids of all currently open connections.
     pub async fn active_ids(&self) -> Vec<Uuid> {
         self.pools.read().await.keys().copied().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_connection_manager_initialization() {
+        let manager = ConnectionManager::new();
+        let ids = manager.active_ids().await;
+        assert!(ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_manager_get_missing_pool() {
+        let manager = ConnectionManager::new();
+        let id = Uuid::new_v4();
+
+        let result = manager.get(id).await;
+        assert!(result.is_err());
+        if let Err(SbqlError::ConnectionNotFound(msg)) = result {
+            assert_eq!(msg, id.to_string());
+        } else {
+            panic!("Expected ConnectionNotFound error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_manager_ping_missing_pool() {
+        let manager = ConnectionManager::new();
+        let id = Uuid::new_v4();
+
+        let result = manager.ping(id).await;
+        assert!(result.is_err());
+        if let Err(SbqlError::ConnectionNotFound(msg)) = result {
+            assert_eq!(msg, id.to_string());
+        } else {
+            panic!("Expected ConnectionNotFound error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_manager_disconnect_missing_pool() {
+        let manager = ConnectionManager::new();
+        let id = Uuid::new_v4();
+
+        // This should just silently return without doing anything or crashing
+        manager.disconnect(id).await;
+        let ids = manager.active_ids().await;
+        assert!(ids.is_empty());
     }
 }

@@ -133,18 +133,28 @@ pub fn config_path() -> Result<PathBuf> {
 /// Load all saved connections from disk.
 pub fn load_connections() -> Result<Vec<ConnectionConfig>> {
     let path = config_path()?;
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let raw = std::fs::read_to_string(&path)?;
-    let cfg: ConfigFile =
-        toml::from_str(&raw).map_err(|e| SbqlError::Serialization(e.to_string()))?;
-    Ok(cfg.connections)
+    load_connections_from(&path)
 }
 
 /// Persist the full list of connections to disk (passwords are NOT written).
 pub fn save_connections(connections: &[ConnectionConfig]) -> Result<()> {
     let path = config_path()?;
+    save_connections_to(&path, connections)
+}
+
+/// Load connections from an arbitrary path (useful for testing).
+pub fn load_connections_from(path: &std::path::Path) -> Result<Vec<ConnectionConfig>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let raw = std::fs::read_to_string(path)?;
+    let cfg: ConfigFile =
+        toml::from_str(&raw).map_err(|e| SbqlError::Serialization(e.to_string()))?;
+    Ok(cfg.connections)
+}
+
+/// Persist connections to an arbitrary path (useful for testing).
+pub fn save_connections_to(path: &std::path::Path, connections: &[ConnectionConfig]) -> Result<()> {
     let cfg = ConfigFile {
         connections: connections.to_vec(),
     };
@@ -173,4 +183,99 @@ fn urlencoding_simple(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sslmode_as_str() {
+        assert_eq!(SslMode::Prefer.as_str(), "prefer");
+        assert_eq!(SslMode::Disable.as_str(), "disable");
+        assert_eq!(SslMode::Require.as_str(), "require");
+        assert_eq!(SslMode::VerifyCa.as_str(), "verify-ca");
+        assert_eq!(SslMode::VerifyFull.as_str(), "verify-full");
+    }
+
+    #[test]
+    fn test_connection_config_new() {
+        let conn = ConnectionConfig::new("local", "localhost", 5432, "postgres", "postgres");
+        assert_eq!(conn.name, "local");
+        assert_eq!(conn.host, "localhost");
+        assert_eq!(conn.port, 5432);
+        assert_eq!(conn.user, "postgres");
+        assert_eq!(conn.database, "postgres");
+        assert_eq!(conn.ssl_mode, SslMode::Prefer);
+    }
+
+    #[test]
+    fn test_connection_string() {
+        let conn = ConnectionConfig::new("local", "localhost", 5432, "postgres", "mydb");
+        let dsn = conn.connection_string("p@ssw/rd");
+        assert_eq!(
+            dsn,
+            "postgresql://postgres:p%40ssw%2Frd@localhost:5432/mydb?sslmode=prefer"
+        );
+    }
+
+    #[test]
+    fn test_urlencoding_simple() {
+        assert_eq!(urlencoding_simple("normal123"), "normal123");
+        assert_eq!(urlencoding_simple("with space"), "with%20space");
+        assert_eq!(urlencoding_simple("special@/#"), "special%40%2F%23");
+        assert_eq!(urlencoding_simple("-_.~"), "-_.~"); // Unreserved characters
+    }
+
+    // -- File I/O tests --
+
+    #[test]
+    fn round_trip_save_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("connections.toml");
+
+        let conns = vec![
+            ConnectionConfig::new("test1", "host1", 5432, "user1", "db1"),
+            ConnectionConfig::new("test2", "host2", 3333, "user2", "db2"),
+        ];
+
+        save_connections_to(&path, &conns).unwrap();
+        let loaded = load_connections_from(&path).unwrap();
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].name, "test1");
+        assert_eq!(loaded[1].name, "test2");
+        assert_eq!(loaded[0].port, 5432);
+        assert_eq!(loaded[1].port, 3333);
+    }
+
+    #[test]
+    fn load_missing_file_empty_vec() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nonexistent.toml");
+        let loaded = load_connections_from(&path).unwrap();
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn load_invalid_toml_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.toml");
+        std::fs::write(&path, "this is not valid [[[ toml").unwrap();
+        let result = load_connections_from(&path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn ssl_mode_serde_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ssl_test.toml");
+
+        let mut conn = ConnectionConfig::new("ssl_test", "h", 5432, "u", "d");
+        conn.ssl_mode = SslMode::VerifyFull;
+        save_connections_to(&path, &[conn]).unwrap();
+
+        let loaded = load_connections_from(&path).unwrap();
+        assert_eq!(loaded[0].ssl_mode, SslMode::VerifyFull);
+    }
 }

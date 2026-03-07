@@ -92,18 +92,16 @@ pub async fn list_tables(pool: &PgPool) -> Result<Vec<TableEntry>> {
     Ok(rows
         .into_iter()
         .map(|r| TableEntry {
-            schema: r.try_get::<String, _>("table_schema").unwrap_or_else(|_| "public".into()),
+            schema: r
+                .try_get::<String, _>("table_schema")
+                .unwrap_or_else(|_| "public".into()),
             name: r.try_get::<String, _>("table_name").unwrap_or_default(),
         })
         .collect())
 }
 
 /// Return the primary key column name(s) for a given table.
-pub async fn get_primary_keys(
-    pool: &PgPool,
-    schema: &str,
-    table: &str,
-) -> Result<Vec<String>> {
+pub async fn get_primary_keys(pool: &PgPool, schema: &str, table: &str) -> Result<Vec<String>> {
     let rows = sqlx::query(
         r#"
         SELECT kcu.column_name
@@ -185,7 +183,8 @@ pub async fn load_diagram(pool: &PgPool) -> Result<DiagramData> {
             name: row.try_get("column_name").unwrap_or_default(),
             data_type: row.try_get("data_type").unwrap_or_default(),
             is_pk: row.try_get("is_pk").unwrap_or(false),
-            is_nullable: row.try_get::<String, _>("is_nullable")
+            is_nullable: row
+                .try_get::<String, _>("is_nullable")
                 .map(|s| s == "YES")
                 .unwrap_or(true),
         };
@@ -194,7 +193,11 @@ pub async fn load_diagram(pool: &PgPool) -> Result<DiagramData> {
 
     let tables: Vec<TableSchema> = table_map
         .into_iter()
-        .map(|((schema, name), columns)| TableSchema { schema, name, columns })
+        .map(|((schema, name), columns)| TableSchema {
+            schema,
+            name,
+            columns,
+        })
         .collect();
 
     // --- Foreign keys ---
@@ -235,7 +238,10 @@ pub async fn load_diagram(pool: &PgPool) -> Result<DiagramData> {
         })
         .collect();
 
-    Ok(DiagramData { tables, foreign_keys })
+    Ok(DiagramData {
+        tables,
+        foreign_keys,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -243,15 +249,8 @@ pub async fn load_diagram(pool: &PgPool) -> Result<DiagramData> {
 // ---------------------------------------------------------------------------
 
 /// Build an `UPDATE` statement for a single cell change, using the detected PK.
-pub fn build_update_sql(
-    schema: &str,
-    table: &str,
-    pk_col: &str,
-    target_col: &str,
-) -> String {
-    format!(
-        r#"UPDATE "{schema}"."{table}" SET "{target_col}" = $1 WHERE "{pk_col}" = $2"#
-    )
+pub fn build_update_sql(schema: &str, table: &str, pk_col: &str, target_col: &str) -> String {
+    format!(r#"UPDATE "{schema}"."{table}" SET "{target_col}" = $1 WHERE "{pk_col}" = $2"#)
 }
 
 /// Execute a single-cell UPDATE.
@@ -284,13 +283,8 @@ pub async fn execute_row_delete(
     pk_col: &str,
     pk_val: &str,
 ) -> Result<()> {
-    let sql = format!(
-        r#"DELETE FROM "{schema}"."{table}" WHERE "{pk_col}"::text = $1"#
-    );
-    sqlx::query(&sql)
-        .bind(pk_val)
-        .execute(pool)
-        .await?;
+    let sql = format!(r#"DELETE FROM "{schema}"."{table}" WHERE "{pk_col}"::text = $1"#);
+    sqlx::query(&sql).bind(pk_val).execute(pool).await?;
     Ok(())
 }
 
@@ -334,4 +328,37 @@ async fn resolve_column_type(
     }
 
     Ok(type_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_table_entry_qualified() {
+        let entry = TableEntry {
+            schema: "public".to_string(),
+            name: "users".to_string(),
+        };
+        assert_eq!(entry.qualified(), "public.users");
+    }
+
+    #[test]
+    fn test_table_schema_qualified() {
+        let ts = TableSchema {
+            schema: "auth".to_string(),
+            name: "sessions".to_string(),
+            columns: vec![],
+        };
+        assert_eq!(ts.qualified(), "auth.sessions");
+    }
+
+    #[test]
+    fn test_build_update_sql() {
+        let sql = build_update_sql("public", "users", "id", "email");
+        assert_eq!(
+            sql,
+            r#"UPDATE "public"."users" SET "email" = $1 WHERE "id" = $2"#
+        );
+    }
 }

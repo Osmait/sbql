@@ -73,3 +73,57 @@ pub fn compute(area: Rect, sidebar_hidden: bool) -> Areas {
         status_bar,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_sidebar_visible() {
+        let area = Rect::new(0, 0, 100, 40);
+        let areas = compute(area, false);
+        assert!(areas.connections.width > 0);
+        assert!(areas.tables.width > 0);
+        assert!(areas.editor.width > 0);
+        assert!(areas.results.width > 0);
+        assert_eq!(areas.status_bar.height, 1);
+    }
+
+    #[test]
+    fn compute_sidebar_hidden() {
+        let area = Rect::new(0, 0, 100, 40);
+        let areas = compute(area, true);
+        assert_eq!(areas.connections.width, 0);
+        assert_eq!(areas.tables.width, 0);
+        assert!(areas.editor.width > 50); // should be wider
+        assert!(areas.results.width > 50);
+    }
+
+    #[test]
+    fn status_bar_always_one_row() {
+        let area = Rect::new(0, 0, 80, 24);
+        let areas = compute(area, false);
+        assert_eq!(areas.status_bar.height, 1);
+        assert_eq!(areas.status_bar.y, 23);
+    }
+
+    #[test]
+    fn small_terminal_no_panic() {
+        let area = Rect::new(0, 0, 10, 5);
+        let _areas = compute(area, false);
+        let _areas = compute(area, true);
+    }
+
+    #[test]
+    fn zero_terminal_no_panic() {
+        let area = Rect::new(0, 0, 0, 0);
+        let _areas = compute(area, false);
+    }
+
+    #[test]
+    fn editor_above_results() {
+        let area = Rect::new(0, 0, 100, 40);
+        let areas = compute(area, false);
+        assert!(areas.editor.y < areas.results.y);
+    }
+}
