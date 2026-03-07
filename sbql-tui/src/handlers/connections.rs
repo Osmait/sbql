@@ -74,12 +74,18 @@ pub fn handle_confirm_delete(_state: &AppState, key: KeyEvent) -> Action {
 }
 
 pub fn handle_form(state: &AppState, key: KeyEvent) -> Action {
+    let form = &state.conn.form;
     match key.code {
         KeyCode::Esc => Action::FormClose,
         KeyCode::Tab | KeyCode::Down => Action::FormNextField,
         KeyCode::BackTab | KeyCode::Up => Action::FormPrevField,
         KeyCode::Enter => Action::FormSubmit,
-        KeyCode::Char(' ') if state.conn.form.field_index == 6 => Action::FormCycleSsl,
+        KeyCode::Char(' ') if form.field_index == 0 => Action::FormCycleBackend,
+        KeyCode::Char(' ')
+            if form.backend == sbql_core::DbBackend::Postgres && form.field_index == 7 =>
+        {
+            Action::FormCycleSsl
+        }
         KeyCode::Backspace => Action::FormBackspace,
         KeyCode::Char(c) => Action::FormInput(c),
         _ => Action::Noop,
@@ -258,10 +264,19 @@ mod tests {
     }
 
     #[test]
+    fn form_space_on_backend_field_cycles() {
+        let mut state = state_with_conns(0);
+        state.conn.form.visible = true;
+        state.conn.form.field_index = 0;
+        let act = handle_form(&state, key(KeyCode::Char(' ')));
+        assert!(matches!(act, Action::FormCycleBackend));
+    }
+
+    #[test]
     fn form_space_on_ssl_field_cycles() {
         let mut state = state_with_conns(0);
         state.conn.form.visible = true;
-        state.conn.form.field_index = 6;
+        state.conn.form.field_index = 7;
         let act = handle_form(&state, key(KeyCode::Char(' ')));
         assert!(matches!(act, Action::FormCycleSsl));
     }

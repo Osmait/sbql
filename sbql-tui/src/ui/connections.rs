@@ -167,7 +167,7 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
     frame.render_widget(block.clone(), area);
     let inner = block.inner(area);
 
-    let field_count = ConnectionForm::field_count();
+    let field_count = form.field_count();
     let mut constraints = vec![Constraint::Length(3); field_count];
     constraints.push(Constraint::Min(1)); // spacer
     constraints.push(Constraint::Length(1)); // help line
@@ -178,7 +178,7 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
         .split(inner);
 
     for i in 0..field_count {
-        let label = ConnectionForm::field_label(i);
+        let label = form.field_label(i);
         let is_active = form.field_index == i;
         let border_style = if is_active {
             Style::default().fg(theme::BLUE)
@@ -193,7 +193,25 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
             Style::default().fg(theme::OVERLAY2)
         };
 
-        if i == 6 {
+        // Backend field (field 0 for all backends)
+        if i == 0 {
+            let backend_display = match form.backend {
+                sbql_core::DbBackend::Postgres => "PostgreSQL",
+                sbql_core::DbBackend::Sqlite => "SQLite",
+            };
+            let hint = if is_active { "  Space: cycle" } else { "" };
+            let para = Paragraph::new(format!("{backend_display}{hint}")).block(
+                Block::default()
+                    .title(Span::styled(format!(" {label} "), title_style))
+                    .borders(Borders::ALL)
+                    .border_style(border_style),
+            );
+            frame.render_widget(para, chunks[i]);
+            continue;
+        }
+
+        // SSL Mode field (only PG, last field)
+        if form.backend == sbql_core::DbBackend::Postgres && i == 7 {
             let ssl_display = form.ssl_mode.as_str().to_owned();
             let hint = if is_active { "  Space: cycle" } else { "" };
             let para = Paragraph::new(format!("{ssl_display}{hint}")).block(
@@ -206,16 +224,27 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
             continue;
         }
 
-        let value = match i {
-            0 => &form.name,
-            1 => &form.host,
-            2 => &form.port,
-            3 => &form.user,
-            4 => &form.database,
-            5 => &form.password,
-            _ => continue,
+        // Text fields
+        let value = match form.backend {
+            sbql_core::DbBackend::Postgres => match i {
+                1 => &form.name,
+                2 => &form.host,
+                3 => &form.port,
+                4 => &form.user,
+                5 => &form.database,
+                6 => &form.password,
+                _ => continue,
+            },
+            sbql_core::DbBackend::Sqlite => match i {
+                1 => &form.name,
+                2 => &form.file_path,
+                _ => continue,
+            },
         };
-        let display = if i == 5 {
+
+        let is_password =
+            form.backend == sbql_core::DbBackend::Postgres && i == 6;
+        let display = if is_password {
             if value.is_empty() && form.editing_id.is_some() {
                 "(unchanged)".to_owned()
             } else {
@@ -234,7 +263,7 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
         frame.render_widget(para, chunks[i]);
     }
 
-    let help = Paragraph::new("Tab/↑↓: next field  Space: cycle SSL  Enter: save  Esc: cancel")
+    let help = Paragraph::new("Tab/↑↓: next field  Space: cycle  Enter: save  Esc: cancel")
         .style(Style::default().fg(theme::OVERLAY0));
     frame.render_widget(help, *chunks.last().unwrap());
 

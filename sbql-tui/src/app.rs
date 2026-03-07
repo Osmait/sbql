@@ -3,7 +3,8 @@ use std::time::Instant;
 
 use ratatui::layout::Rect;
 use sbql_core::{
-    ConnectionConfig, CoreEvent, DiagramData, QueryResult, SortDirection, SslMode, TableEntry,
+    ConnectionConfig, CoreEvent, DbBackend, DiagramData, QueryResult, SortDirection, SslMode,
+    TableEntry,
 };
 use tui_textarea::TextArea;
 use uuid::Uuid;
@@ -48,7 +49,8 @@ pub enum NavMode {
 pub struct ConnectionForm {
     pub visible: bool,
     pub editing_id: Option<Uuid>, // None = new connection
-    pub field_index: usize,       // which field is active (0-6)
+    pub field_index: usize,       // which field is active
+    pub backend: DbBackend,
     pub name: String,
     pub host: String,
     pub port: String,
@@ -56,6 +58,7 @@ pub struct ConnectionForm {
     pub database: String,
     pub password: String,
     pub ssl_mode: SslMode,
+    pub file_path: String,
     pub error: Option<String>,
 }
 
@@ -65,6 +68,7 @@ impl Default for ConnectionForm {
             visible: false,
             editing_id: None,
             field_index: 0,
+            backend: DbBackend::Postgres,
             name: String::new(),
             host: String::new(),
             port: String::new(),
@@ -72,6 +76,7 @@ impl Default for ConnectionForm {
             database: String::new(),
             password: String::new(),
             ssl_mode: SslMode::Prefer,
+            file_path: String::new(),
             error: None,
         }
     }
@@ -92,6 +97,7 @@ impl ConnectionForm {
         Self {
             visible: true,
             editing_id: Some(cfg.id),
+            backend: cfg.backend,
             name: cfg.name.clone(),
             host: cfg.host.clone(),
             port: cfg.port.to_string(),
@@ -99,27 +105,50 @@ impl ConnectionForm {
             database: cfg.database.clone(),
             password: String::new(), // always re-enter
             ssl_mode: cfg.ssl_mode.clone(),
+            file_path: cfg.file_path.clone().unwrap_or_default(),
             field_index: 0,
             error: None,
         }
     }
 
-    /// Returns the label for each field index.
-    pub fn field_label(idx: usize) -> &'static str {
-        match idx {
-            0 => "Name",
-            1 => "Host",
-            2 => "Port",
-            3 => "User",
-            4 => "Database",
-            5 => "Password",
-            6 => "SSL Mode",
-            _ => "",
+    /// Returns the label for each field index, depending on backend.
+    pub fn field_label(&self, idx: usize) -> &'static str {
+        match self.backend {
+            DbBackend::Postgres => match idx {
+                0 => "Backend",
+                1 => "Name",
+                2 => "Host",
+                3 => "Port",
+                4 => "User",
+                5 => "Database",
+                6 => "Password",
+                7 => "SSL Mode",
+                _ => "",
+            },
+            DbBackend::Sqlite => match idx {
+                0 => "Backend",
+                1 => "Name",
+                2 => "File Path",
+                _ => "",
+            },
         }
     }
 
-    pub fn field_count() -> usize {
-        7
+    /// Number of fields depends on the selected backend.
+    pub fn field_count(&self) -> usize {
+        match self.backend {
+            DbBackend::Postgres => 8, // backend, name, host, port, user, database, password, ssl_mode
+            DbBackend::Sqlite => 3,   // backend, name, file_path
+        }
+    }
+
+    /// Toggle backend between Postgres and SQLite, resetting field_index.
+    pub fn cycle_backend(&mut self) {
+        self.backend = match self.backend {
+            DbBackend::Postgres => DbBackend::Sqlite,
+            DbBackend::Sqlite => DbBackend::Postgres,
+        };
+        self.field_index = 0;
     }
 
     /// Cycle through SSL mode options (for the SSL Mode field).
@@ -134,15 +163,24 @@ impl ConnectionForm {
     }
 
     pub fn active_value_mut(&mut self) -> Option<&mut String> {
-        match self.field_index {
-            0 => Some(&mut self.name),
-            1 => Some(&mut self.host),
-            2 => Some(&mut self.port),
-            3 => Some(&mut self.user),
-            4 => Some(&mut self.database),
-            5 => Some(&mut self.password),
-            6 => None, // SSL mode is cycled, not typed
-            _ => Some(&mut self.name),
+        match self.backend {
+            DbBackend::Postgres => match self.field_index {
+                0 => None, // Backend is cycled
+                1 => Some(&mut self.name),
+                2 => Some(&mut self.host),
+                3 => Some(&mut self.port),
+                4 => Some(&mut self.user),
+                5 => Some(&mut self.database),
+                6 => Some(&mut self.password),
+                7 => None, // SSL mode is cycled
+                _ => None,
+            },
+            DbBackend::Sqlite => match self.field_index {
+                0 => None, // Backend is cycled
+                1 => Some(&mut self.name),
+                2 => Some(&mut self.file_path),
+                _ => None,
+            },
         }
     }
 }
@@ -323,6 +361,7 @@ pub struct ConnectionState {
     pub connections: Vec<ConnectionConfig>,
     pub selected: usize,
     pub active_id: Option<Uuid>,
+    pub active_backend: DbBackend,
     pub form: ConnectionForm,
     pub pending_delete: Option<(Uuid, String)>,
 }
@@ -600,6 +639,7 @@ impl AppState {
                 connections,
                 selected: 0,
                 active_id: None,
+                active_backend: DbBackend::Postgres,
                 form: ConnectionForm::default(),
                 pending_delete: None,
             },
@@ -673,6 +713,9 @@ impl AppState {
             CoreEvent::Connected(id) => {
                 self.results.is_loading = false;
                 self.conn.active_id = Some(id);
+                if let Some(cfg) = self.conn.connections.iter().find(|c| c.id == id) {
+                    self.conn.active_backend = cfg.backend;
+                }
                 let name = self
                     .conn
                     .connections
@@ -1207,9 +1250,11 @@ mod tests {
 
     #[test]
     fn connection_form_field_labels() {
-        assert_eq!(ConnectionForm::field_label(0), "Name");
-        assert_eq!(ConnectionForm::field_label(6), "SSL Mode");
-        assert_eq!(ConnectionForm::field_label(7), "");
+        let form = ConnectionForm::default(); // Postgres backend
+        assert_eq!(form.field_label(0), "Backend");
+        assert_eq!(form.field_label(1), "Name");
+        assert_eq!(form.field_label(7), "SSL Mode");
+        assert_eq!(form.field_label(8), "");
     }
 
     #[test]
@@ -1231,11 +1276,14 @@ mod tests {
     fn connection_form_active_value_mut() {
         let mut form = ConnectionForm::default();
         form.field_index = 0;
+        assert!(form.active_value_mut().is_none()); // Backend is cycled
+
+        form.field_index = 1;
         *form.active_value_mut().unwrap() = "test".into();
         assert_eq!(form.name, "test");
 
-        form.field_index = 6;
-        assert!(form.active_value_mut().is_none()); // SSL mode has no text
+        form.field_index = 7;
+        assert!(form.active_value_mut().is_none()); // SSL mode is cycled
     }
 
     #[test]

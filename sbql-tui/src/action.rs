@@ -64,6 +64,7 @@ pub enum Action {
     FormPrevField,
     FormInput(char),
     FormBackspace,
+    FormCycleBackend,
     FormCycleSsl,
     FormSubmit,
 
@@ -334,16 +335,17 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
             state.conn.form.visible = false;
         }
         Action::FormNextField => {
-            state.conn.form.field_index =
-                (state.conn.form.field_index + 1) % ConnectionForm::field_count();
+            let count = state.conn.form.field_count();
+            state.conn.form.field_index = (state.conn.form.field_index + 1) % count;
         }
         Action::FormPrevField => {
+            let count = state.conn.form.field_count();
             state.conn.form.field_index = state
                 .conn
                 .form
                 .field_index
                 .checked_sub(1)
-                .unwrap_or(ConnectionForm::field_count() - 1);
+                .unwrap_or(count - 1);
         }
         Action::FormInput(c) => {
             if let Some(val) = state.conn.form.active_value_mut() {
@@ -354,6 +356,9 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
             if let Some(val) = state.conn.form.active_value_mut() {
                 val.pop();
             }
+        }
+        Action::FormCycleBackend => {
+            state.conn.form.cycle_backend();
         }
         Action::FormCycleSsl => {
             state.conn.form.cycle_ssl_mode();
@@ -368,7 +373,7 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
         }
         Action::OpenSelectedTable => {
             if let Some(t) = state.tables.tables.get(state.tables.selected) {
-                let sql = sbql_core::query_builder::table_select_sql(&t.schema, &t.name);
+                let sql = sbql_core::query_builder::table_select_sql(&t.schema, &t.name, state.conn.active_backend);
                 tracing::info!(
                     "open_selected_table: schema={:?} table={:?} sql={:?}",
                     t.schema,
@@ -752,44 +757,66 @@ fn apply_form_submit(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCo
         state.conn.form.error = Some("Name is required".into());
         return;
     }
-    if form.host.trim().is_empty() {
-        state.conn.form.error = Some("Host is required".into());
-        return;
-    }
-    let port: u16 = match form.port.trim().parse() {
-        Ok(p) => p,
-        Err(_) => {
-            state.conn.form.error = Some("Port must be a number (1-65535)".into());
-            return;
+
+    let (config, password) = match form.backend {
+        sbql_core::DbBackend::Postgres => {
+            if form.host.trim().is_empty() {
+                state.conn.form.error = Some("Host is required".into());
+                return;
+            }
+            let port: u16 = match form.port.trim().parse() {
+                Ok(p) => p,
+                Err(_) => {
+                    state.conn.form.error = Some("Port must be a number (1-65535)".into());
+                    return;
+                }
+            };
+            if form.user.trim().is_empty() {
+                state.conn.form.error = Some("User is required".into());
+                return;
+            }
+            if form.database.trim().is_empty() {
+                state.conn.form.error = Some("Database is required".into());
+                return;
+            }
+
+            let mut config = sbql_core::ConnectionConfig::new(
+                form.name.trim(),
+                form.host.trim(),
+                port,
+                form.user.trim(),
+                form.database.trim(),
+            );
+            config.ssl_mode = form.ssl_mode.clone();
+
+            if let Some(id) = form.editing_id {
+                config.id = id;
+            }
+
+            let password = if form.password.is_empty() && form.editing_id.is_some() {
+                None
+            } else {
+                Some(form.password.clone())
+            };
+            (config, password)
+        }
+        sbql_core::DbBackend::Sqlite => {
+            if form.file_path.trim().is_empty() {
+                state.conn.form.error = Some("File path is required".into());
+                return;
+            }
+
+            let mut config =
+                sbql_core::ConnectionConfig::new_sqlite(form.name.trim(), form.file_path.trim());
+
+            if let Some(id) = form.editing_id {
+                config.id = id;
+            }
+
+            (config, Some(String::new()))
         }
     };
-    if form.user.trim().is_empty() {
-        state.conn.form.error = Some("User is required".into());
-        return;
-    }
-    if form.database.trim().is_empty() {
-        state.conn.form.error = Some("Database is required".into());
-        return;
-    }
 
-    let mut config = sbql_core::ConnectionConfig::new(
-        form.name.trim(),
-        form.host.trim(),
-        port,
-        form.user.trim(),
-        form.database.trim(),
-    );
-    config.ssl_mode = form.ssl_mode.clone();
-
-    if let Some(id) = form.editing_id {
-        config.id = id;
-    }
-
-    let password = if form.password.is_empty() && form.editing_id.is_some() {
-        None
-    } else {
-        Some(form.password.clone())
-    };
     let _ = cmd_tx.send(CoreCommand::SaveConnection { config, password });
     state.conn.form.visible = false;
     state.conn.form.error = None;
@@ -1504,7 +1531,7 @@ mod tests {
     #[test]
     fn form_next_field_wraps() {
         let mut state = AppState::new(vec![]);
-        state.conn.form.field_index = 6;
+        state.conn.form.field_index = 7; // last PG field (SSL Mode)
         let (tx, _rx) = cmd_channel();
         apply(Action::FormNextField, &mut state, &tx);
         assert_eq!(state.conn.form.field_index, 0);
@@ -1516,13 +1543,13 @@ mod tests {
         state.conn.form.field_index = 0;
         let (tx, _rx) = cmd_channel();
         apply(Action::FormPrevField, &mut state, &tx);
-        assert_eq!(state.conn.form.field_index, 6);
+        assert_eq!(state.conn.form.field_index, 7); // wraps to last PG field
     }
 
     #[test]
     fn form_input_char() {
         let mut state = AppState::new(vec![]);
-        state.conn.form.field_index = 0;
+        state.conn.form.field_index = 1; // Name field
         let (tx, _rx) = cmd_channel();
         apply(Action::FormInput('a'), &mut state, &tx);
         assert_eq!(state.conn.form.name, "a");
@@ -1532,7 +1559,7 @@ mod tests {
     fn form_backspace() {
         let mut state = AppState::new(vec![]);
         state.conn.form.name = "ab".into();
-        state.conn.form.field_index = 0;
+        state.conn.form.field_index = 1; // Name field
         let (tx, _rx) = cmd_channel();
         apply(Action::FormBackspace, &mut state, &tx);
         assert_eq!(state.conn.form.name, "a");
