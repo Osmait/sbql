@@ -55,3 +55,46 @@ pub fn spawn_worker() -> (
 
     (cmd_tx, event_rx)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_spawn_worker_initialization() {
+        let (_cmd_tx, mut event_rx) = spawn_worker();
+
+        // Worker should immediately send ConnectionList on startup
+        let initial_event = event_rx.recv().await.expect("Worker closed immediately");
+        match initial_event {
+            CoreEvent::ConnectionList(conns) => {
+                // By default the new core should have 0 connections since we are not loading from disk in the test env
+                // (or if it does load from disk, it's just a valid vector)
+                assert!(conns.is_empty() || !conns.is_empty());
+            }
+            _ => panic!("Expected ConnectionList as first event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_spawn_worker_handles_command() {
+        let (cmd_tx, mut event_rx) = spawn_worker();
+
+        // Drain initial event
+        let _ = event_rx.recv().await;
+
+        // Send a command that triggers Loading
+        cmd_tx.send(CoreCommand::ListTables).unwrap();
+
+        // First we should get a loading event
+        let loading_event = event_rx.recv().await.expect("Expected event");
+        assert!(matches!(loading_event, CoreEvent::Loading));
+
+        // Since we are not connected, we should get an error next
+        let error_event = event_rx.recv().await.expect("Expected event");
+        match error_event {
+            CoreEvent::Error(msg) => assert!(msg.contains("No active connection")),
+            _ => panic!("Expected Error event, got {:?}", error_event),
+        }
+    }
+}

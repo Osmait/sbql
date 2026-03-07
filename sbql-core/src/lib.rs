@@ -13,12 +13,16 @@
 pub mod config;
 pub mod connection;
 pub mod error;
+mod handlers;
 pub mod query;
 pub mod query_builder;
 pub mod schema;
 
 // Re-export the most commonly used types at the crate root.
-pub use config::{load_connections, save_connections, ConnectionConfig, SslMode};
+pub use config::{
+    load_connections, load_connections_from, save_connections, save_connections_to,
+    ConnectionConfig, SslMode,
+};
 pub use error::{Result, SbqlError};
 pub use query::{QueryResult, PAGE_SIZE};
 pub use query_builder::SortDirection;
@@ -121,10 +125,7 @@ pub enum CoreEvent {
     /// Full diagram data (table schemas + FK relationships).
     DiagramLoaded(DiagramData),
     /// Filter value suggestions response.
-    FilterSuggestions {
-        items: Vec<String>,
-        token: u64,
-    },
+    FilterSuggestions { items: Vec<String>, token: u64 },
     /// A long-running operation has started (show a spinner).
     Loading,
     /// An error occurred.
@@ -160,7 +161,7 @@ pub struct Core {
     /// Active filter string (raw, as the user typed it).
     pub active_filter: Option<String>,
     /// In-memory password cache so reconnects work even if keyring lookup fails.
-    password_cache: HashMap<Uuid, String>,
+    pub(crate) password_cache: HashMap<Uuid, String>,
 }
 
 impl Core {
@@ -176,274 +177,36 @@ impl Core {
     /// Process a single [`CoreCommand`] and return zero or more [`CoreEvent`]s.
     pub async fn handle(&mut self, cmd: CoreCommand) -> Vec<CoreEvent> {
         match cmd {
-            // ----------------------------------------------------------------
-            // Connection management
-            // ----------------------------------------------------------------
             CoreCommand::SaveConnection { config, password } => {
-                if let Some(ref pw) = password {
-                    if let Err(e) = config.save_password(pw) {
-                        tracing::warn!("Keyring save failed (will use in-memory cache): {e}");
-                    }
-                    // Cache the new password in memory for this session
-                    self.password_cache.insert(config.id, pw.clone());
-                } else {
-                    // No new password supplied — make sure we still have the old
-                    // one in the cache so a subsequent Connect works.
-                    if !self.password_cache.contains_key(&config.id) {
-                        // Try loading from keyring so the cache is warm
-                        if let Ok(pw) = config.load_password() {
-                            self.password_cache.insert(config.id, pw);
-                        }
-                    }
-                }
-                // Upsert into the in-memory list
-                if let Some(pos) = self.connections.iter().position(|c| c.id == config.id) {
-                    self.connections[pos] = config;
-                } else {
-                    self.connections.push(config);
-                }
-                if let Err(e) = save_connections(&self.connections) {
-                    return vec![CoreEvent::Error(e.to_string())];
-                }
-                vec![CoreEvent::ConnectionList(self.connections.clone())]
+                handlers::connection::save(self, config, password).await
             }
-
-            CoreCommand::DeleteConnection(id) => {
-                if let Some(pos) = self.connections.iter().position(|c| c.id == id) {
-                    let cfg = self.connections.remove(pos);
-                    let _ = cfg.delete_password();
-                    self.manager.disconnect(id).await;
-                }
-                if let Err(e) = save_connections(&self.connections) {
-                    return vec![CoreEvent::Error(e.to_string())];
-                }
-                vec![CoreEvent::ConnectionList(self.connections.clone())]
-            }
-
-            CoreCommand::Connect(id) => {
-                let cfg = match self.connections.iter().find(|c| c.id == id) {
-                    Some(c) => c.clone(),
-                    None => {
-                        return vec![CoreEvent::Error(format!(
-                            "Connection {} not found",
-                            id
-                        ))]
-                    }
-                };
-                // Prefer in-memory cache first to avoid repeated keychain prompts
-                // during the same app session. Fall back to keyring if needed.
-                let password = if let Some(pw) = self.password_cache.get(&id).cloned() {
-                    Ok(pw)
-                } else {
-                    cfg.load_password().map(|pw| {
-                        self.password_cache.insert(id, pw.clone());
-                        pw
-                    }).or_else(|_| {
-                        Err(SbqlError::Keyring(
-                            format!("No password found for '{}'. Try re-entering it (e to edit).", cfg.name)
-                        ))
-                    })
-                };
-                let password = match password {
-                    Ok(p) => p,
-                    Err(e) => {
-                        tracing::error!("Password lookup failed for '{}': {}", cfg.name, e);
-                        return vec![CoreEvent::Error(e.to_string())];
-                    }
-                };
-                match self.manager.connect_with_password(&cfg, &password).await {
-                    Ok(()) => {
-                        self.active_connection = Some(id);
-                        tracing::info!("Connected: {}", cfg.name);
-                        vec![CoreEvent::Connected(id)]
-                    }
-                    Err(e) => {
-                        tracing::error!("Connect failed for '{}': {}", cfg.name, e);
-                        vec![CoreEvent::Error(e.to_string())]
-                    }
-                }
-            }
-
-            CoreCommand::Disconnect(id) => {
-                self.manager.disconnect(id).await;
-                if self.active_connection == Some(id) {
-                    self.active_connection = None;
-                }
-                vec![CoreEvent::Disconnected(id)]
-            }
-
-            // ----------------------------------------------------------------
-            // Schema
-            // ----------------------------------------------------------------
-            CoreCommand::ListTables => {
-                let pool = match self.active_pool() {
-                    Ok(p) => p,
-                    Err(e) => return vec![CoreEvent::Error(e.to_string())],
-                };
-                match schema::list_tables(&pool).await {
-                    Ok(tables) => vec![CoreEvent::TableList(tables)],
-                    Err(e) => vec![CoreEvent::Error(e.to_string())],
-                }
-            }
-
-            // ----------------------------------------------------------------
-            // Query execution
-            // ----------------------------------------------------------------
-            CoreCommand::ExecuteQuery { sql } => {
-                self.base_sql = Some(sql.clone());
-                self.effective_sql = Some(sql.clone());
-                self.sort_state.clear();
-                self.active_filter = None;
-                self.execute_current_page(0).await
-            }
-
-            CoreCommand::FetchPage { page } => self.execute_current_page(page).await,
-
-            // ----------------------------------------------------------------
-            // Order / filter pushdown
-            // ----------------------------------------------------------------
+            CoreCommand::DeleteConnection(id) => handlers::connection::delete(self, id).await,
+            CoreCommand::Connect(id) => handlers::connection::connect(self, id).await,
+            CoreCommand::Disconnect(id) => handlers::connection::disconnect(self, id).await,
+            CoreCommand::ListTables => handlers::schema::list_tables(self).await,
+            CoreCommand::ExecuteQuery { sql } => handlers::query::execute(self, sql).await,
+            CoreCommand::FetchPage { page } => handlers::query::fetch_page(self, page).await,
             CoreCommand::ApplyOrder { column, direction } => {
-                let base = match &self.effective_sql {
-                    Some(s) => s.clone(),
-                    None => return vec![CoreEvent::Error("No active query".into())],
-                };
-                // Strip any existing ORDER BY before applying new one
-                let without_order = query_builder::clear_order(&base)
-                    .unwrap_or(base.clone());
-                match query_builder::apply_order(&without_order, &column, direction) {
-                    Ok(new_sql) => {
-                        self.effective_sql = Some(new_sql);
-                        self.sort_state.clear();
-                        self.sort_state.insert(column, direction);
-                        self.execute_current_page(0).await
-                    }
-                    Err(e) => vec![CoreEvent::Error(e.to_string())],
-                }
+                handlers::order_filter::apply_order(self, column, direction).await
             }
-
-            CoreCommand::ClearOrder => {
-                let effective = match &self.effective_sql {
-                    Some(s) => s.clone(),
-                    None => return vec![],
-                };
-                match query_builder::clear_order(&effective) {
-                    Ok(new_sql) => {
-                        self.effective_sql = Some(new_sql);
-                        self.sort_state.clear();
-                        self.execute_current_page(0).await
-                    }
-                    Err(e) => vec![CoreEvent::Error(e.to_string())],
-                }
+            CoreCommand::ClearOrder => handlers::order_filter::clear_order(self).await,
+            CoreCommand::ApplyFilter { query } => {
+                handlers::order_filter::apply_filter(self, query).await
             }
-
-            CoreCommand::ApplyFilter { query: filter } => {
-                // Always apply the filter on top of the base SQL to avoid
-                // stacking multiple WHERE clauses.
-                let base = match &self.base_sql {
-                    Some(s) => s.clone(),
-                    None => return vec![CoreEvent::Error("No active query".into())],
-                };
-                let cols = if self.last_columns.is_empty() {
-                    None
-                } else {
-                    Some(self.last_columns.as_slice())
-                };
-                match query_builder::apply_filter(&base, &filter, cols) {
-                    Ok(filtered_sql) => {
-                        // Re-apply existing sort on top of the filtered SQL
-                        let final_sql = if let Some((col, &dir)) = self.sort_state.iter().next() {
-                            query_builder::apply_order(&filtered_sql, col, dir)
-                                .unwrap_or(filtered_sql)
-                        } else {
-                            filtered_sql
-                        };
-                        self.effective_sql = Some(final_sql);
-                        self.active_filter = Some(filter);
-                        self.execute_current_page(0).await
-                    }
-                    Err(e) => vec![CoreEvent::Error(e.to_string())],
-                }
-            }
-
-            CoreCommand::ClearFilter => {
-                self.active_filter = None;
-                // Rebuild effective SQL from base + current sort
-                let base = match &self.base_sql {
-                    Some(s) => s.clone(),
-                    None => return vec![],
-                };
-                let final_sql = if let Some((col, &dir)) = self.sort_state.iter().next() {
-                    query_builder::apply_order(&base, col, dir).unwrap_or(base)
-                } else {
-                    base
-                };
-                self.effective_sql = Some(final_sql);
-                self.execute_current_page(0).await
-            }
-
+            CoreCommand::ClearFilter => handlers::order_filter::clear_filter(self).await,
             CoreCommand::SuggestFilterValues {
                 column,
                 prefix,
                 limit,
                 token,
             } => {
-                let pool = match self.active_pool() {
-                    Ok(p) => p,
-                    Err(e) => return vec![CoreEvent::Error(e.to_string())],
-                };
-                let base = match &self.base_sql {
-                    Some(s) => s.clone(),
-                    None => {
-                        return vec![CoreEvent::FilterSuggestions {
-                            items: Vec::new(),
-                            token,
-                        }]
-                    }
-                };
-
-                let column = self
-                    .last_columns
-                    .iter()
-                    .find(|c| c.eq_ignore_ascii_case(&column))
-                    .cloned()
-                    // If we don't have column metadata yet, use user-selected
-                    // column name and let the query fail naturally if invalid.
-                    .unwrap_or(column);
-
-                match query::suggest_distinct_values(&pool, &base, &column, &prefix, limit).await {
-                    Ok(items) => vec![CoreEvent::FilterSuggestions { items, token }],
-                    Err(e) => vec![CoreEvent::Error(e.to_string())],
-                }
+                handlers::order_filter::suggest_filter_values(self, column, prefix, limit, token)
+                    .await
             }
-
-            // ----------------------------------------------------------------
-            // Primary key lookup
-            // ----------------------------------------------------------------
             CoreCommand::GetPrimaryKeys { schema, table } => {
-                let pool = match self.active_pool() {
-                    Ok(p) => p,
-                    Err(e) => return vec![CoreEvent::Error(e.to_string())],
-                };
-                match schema::get_primary_keys(&pool, &schema, &table).await {
-                    Ok(columns) => vec![CoreEvent::PrimaryKeys { schema, table, columns }],
-                    Err(e) => vec![CoreEvent::Error(e.to_string())],
-                }
+                handlers::schema::get_primary_keys(self, schema, table).await
             }
-
-            CoreCommand::LoadDiagram => {
-                let pool = match self.active_pool() {
-                    Ok(p) => p,
-                    Err(e) => return vec![CoreEvent::Error(e.to_string())],
-                };
-                match schema::load_diagram(&pool).await {
-                    Ok(data) => vec![CoreEvent::DiagramLoaded(data)],
-                    Err(e) => vec![CoreEvent::Error(e.to_string())],
-                }
-            }
-
-            // ----------------------------------------------------------------
-            // Cell update
-            // ----------------------------------------------------------------
+            CoreCommand::LoadDiagram => handlers::schema::load_diagram(self).await,
             CoreCommand::UpdateCell {
                 schema,
                 table,
@@ -452,62 +215,34 @@ impl Core {
                 target_col,
                 new_val,
             } => {
-                let pool = match self.active_pool() {
-                    Ok(p) => p,
-                    Err(e) => return vec![CoreEvent::Error(e.to_string())],
-                };
-                match schema::execute_cell_update(
-                    &pool,
-                    &schema,
-                    &table,
-                    &pk_col,
-                    &pk_val,
-                    &target_col,
-                    &new_val,
+                handlers::mutation::update_cell(
+                    self, schema, table, pk_col, pk_val, target_col, new_val,
                 )
                 .await
-                {
-                    Ok(()) => {
-                        vec![CoreEvent::CellUpdated]
-                    }
-                    Err(e) => vec![CoreEvent::Error(e.to_string())],
-                }
             }
-
             CoreCommand::DeleteRow {
                 schema,
                 table,
                 pk_col,
                 pk_val,
-            } => {
-                let pool = match self.active_pool() {
-                    Ok(p) => p,
-                    Err(e) => return vec![CoreEvent::Error(e.to_string())],
-                };
-                match schema::execute_row_delete(&pool, &schema, &table, &pk_col, &pk_val).await {
-                    Ok(()) => vec![CoreEvent::RowDeleted],
-                    Err(e) => vec![CoreEvent::Error(e.to_string())],
-                }
-            }
+            } => handlers::mutation::delete_row(self, schema, table, pk_col, pk_val).await,
         }
     }
 
     // -----------------------------------------------------------------------
-    // Private helpers
+    // Helpers used by handler modules
     // -----------------------------------------------------------------------
 
-    fn active_pool(&self) -> Result<sqlx::PgPool> {
+    pub(crate) fn active_pool(&self) -> Result<sqlx::PgPool> {
         let id = self
             .active_connection
             .ok_or(SbqlError::NoActiveConnection)?;
-        // ConnectionManager::get is async; we use block_in_place since this is
-        // called from within an already-running tokio multi-thread runtime.
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(self.manager.get(id))
         })
     }
 
-    async fn execute_current_page(&mut self, page: usize) -> Vec<CoreEvent> {
+    pub(crate) async fn execute_current_page(&mut self, page: usize) -> Vec<CoreEvent> {
         let sql = match &self.effective_sql {
             Some(s) => s.clone(),
             None => return vec![CoreEvent::Error("No active query".into())],
@@ -518,9 +253,6 @@ impl Core {
         };
         match query::execute_page(&pool, &sql, page).await {
             Ok(result) => {
-                // Keep previous column metadata when a filter returns zero rows.
-                // `execute_page` infers columns from returned rows, so empty
-                // result sets would otherwise clear the known schema.
                 if !result.columns.is_empty() {
                     self.last_columns = result.columns.clone();
                 }
@@ -529,5 +261,192 @@ impl Core {
             }
             Err(e) => vec![CoreEvent::Error(e.to_string())],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_core_initialization() {
+        let core = Core::new();
+        // Just verify it doesn't crash on default initialization
+        assert!(core.active_connection.is_none());
+        assert!(core.base_sql.is_none());
+        assert!(core.effective_sql.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_core_handle_unknown_connection() {
+        let mut core = Core::new();
+        // Ensure no connections exist
+        core.connections.clear();
+
+        // Handling Connect with a nonexistent UUID should yield an error event
+        let random_id = Uuid::new_v4();
+        let events = core.handle(CoreCommand::Connect(random_id)).await;
+
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            CoreEvent::Error(msg) => assert!(msg.contains("not found")),
+            _ => panic!("Expected error event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_core_handle_disconnect_without_active() {
+        let mut core = Core::new();
+        let id = Uuid::new_v4();
+
+        let events = core.handle(CoreCommand::Disconnect(id)).await;
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            CoreEvent::Disconnected(disconnected_id) => assert_eq!(*disconnected_id, id),
+            _ => panic!("Expected disconnected event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_core_handle_query_without_connection() {
+        let mut core = Core::new();
+        // Sending a query when disconnected should fail
+        let events = core
+            .handle(CoreCommand::ExecuteQuery {
+                sql: "SELECT 1".into(),
+            })
+            .await;
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            CoreEvent::Error(msg) => assert!(msg.contains("No active connection")),
+            _ => panic!("Expected error event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_core_handle_schema_without_connection() {
+        let mut core = Core::new();
+        let events = core.handle(CoreCommand::ListTables).await;
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            CoreEvent::Error(msg) => assert!(msg.contains("No active connection")),
+            _ => panic!("Expected error event"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Query handler state tests (no DB needed)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_execute_query_sets_sql_state() {
+        let mut core = Core::default();
+        // Execute will fail (no pool) but should set base_sql/effective_sql first
+        core.active_connection = None;
+        let _events = core
+            .handle(CoreCommand::ExecuteQuery {
+                sql: "SELECT 1".into(),
+            })
+            .await;
+        assert_eq!(core.base_sql, Some("SELECT 1".into()));
+        assert_eq!(core.effective_sql, Some("SELECT 1".into()));
+        assert!(core.sort_state.is_empty());
+        assert!(core.active_filter.is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Order/filter handler state tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_apply_order_without_active_query() {
+        let mut core = Core::default();
+        core.effective_sql = None;
+        let events = core
+            .handle(CoreCommand::ApplyOrder {
+                column: "id".into(),
+                direction: SortDirection::Ascending,
+            })
+            .await;
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            CoreEvent::Error(msg) => assert!(msg.contains("No active query")),
+            _ => panic!("Expected error event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_apply_filter_without_base_sql() {
+        let mut core = Core::default();
+        core.base_sql = None;
+        let events = core
+            .handle(CoreCommand::ApplyFilter {
+                query: "name:Alice".into(),
+            })
+            .await;
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            CoreEvent::Error(msg) => assert!(msg.contains("No active query")),
+            _ => panic!("Expected error event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_clear_filter_without_base_sql() {
+        let mut core = Core::default();
+        core.base_sql = None;
+        let events = core.handle(CoreCommand::ClearFilter).await;
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_clear_order_without_effective_sql() {
+        let mut core = Core::default();
+        core.effective_sql = None;
+        let events = core.handle(CoreCommand::ClearOrder).await;
+        assert!(events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_fetch_page_without_effective_sql() {
+        let mut core = Core::default();
+        core.effective_sql = None;
+        let events = core.handle(CoreCommand::FetchPage { page: 0 }).await;
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            CoreEvent::Error(msg) => assert!(msg.contains("No active query")),
+            _ => panic!("Expected error event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_suggest_filter_values_no_connection() {
+        let mut core = Core::default();
+        core.base_sql = Some("SELECT 1".into());
+        // No active connection → Error
+        let events = core
+            .handle(CoreCommand::SuggestFilterValues {
+                column: "name".into(),
+                prefix: "A".into(),
+                limit: 10,
+                token: 1,
+            })
+            .await;
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            CoreEvent::Error(msg) => assert!(msg.contains("No active connection")),
+            _ => panic!("Expected Error event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_clears_active() {
+        let mut core = Core::default();
+        let id = Uuid::new_v4();
+        core.active_connection = Some(id);
+        let events = core.handle(CoreCommand::Disconnect(id)).await;
+        assert!(core.active_connection.is_none());
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], CoreEvent::Disconnected(d) if *d == id));
     }
 }

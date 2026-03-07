@@ -86,3 +86,113 @@ pub fn is_commit(k: &KeyEvent) -> bool {
         (KeyCode::Char('w'), KeyModifiers::CONTROL)
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyEventKind, KeyEventState};
+
+    fn make_key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        }
+    }
+
+    // -- is_quit --
+
+    #[test]
+    fn q_is_quit() {
+        assert!(is_quit(&make_key(KeyCode::Char('q'), KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn ctrl_c_is_quit() {
+        assert!(is_quit(&make_key(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL
+        )));
+    }
+
+    #[test]
+    fn ctrl_q_is_quit() {
+        assert!(is_quit(&make_key(
+            KeyCode::Char('q'),
+            KeyModifiers::CONTROL
+        )));
+    }
+
+    #[test]
+    fn shift_q_not_quit() {
+        assert!(!is_quit(&make_key(
+            KeyCode::Char('Q'),
+            KeyModifiers::SHIFT
+        )));
+    }
+
+    #[test]
+    fn random_key_not_quit() {
+        assert!(!is_quit(&make_key(KeyCode::Char('x'), KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn esc_not_quit() {
+        assert!(!is_quit(&make_key(KeyCode::Esc, KeyModifiers::NONE)));
+    }
+
+    // -- is_run_query --
+
+    #[test]
+    fn ctrl_s_is_run_query() {
+        assert!(is_run_query(&make_key(
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL
+        )));
+    }
+
+    #[test]
+    fn f5_is_run_query() {
+        assert!(is_run_query(&make_key(KeyCode::F(5), KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn enter_not_run_query() {
+        assert!(!is_run_query(&make_key(KeyCode::Enter, KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn s_without_ctrl_not_run_query() {
+        assert!(!is_run_query(&make_key(
+            KeyCode::Char('s'),
+            KeyModifiers::NONE
+        )));
+    }
+
+    // -- is_commit --
+
+    #[test]
+    fn ctrl_w_is_commit() {
+        assert!(is_commit(&make_key(
+            KeyCode::Char('w'),
+            KeyModifiers::CONTROL
+        )));
+    }
+
+    #[test]
+    fn w_without_ctrl_not_commit() {
+        assert!(!is_commit(&make_key(
+            KeyCode::Char('w'),
+            KeyModifiers::NONE
+        )));
+    }
+
+    #[test]
+    fn ctrl_s_not_commit() {
+        assert!(!is_commit(&make_key(
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL
+        )));
+    }
+}
