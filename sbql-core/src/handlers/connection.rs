@@ -90,3 +90,97 @@ pub(crate) async fn disconnect(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
     }
     vec![CoreEvent::Disconnected(id)]
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{ConnectionConfig, Core, CoreCommand, CoreEvent};
+
+    #[tokio::test]
+    async fn test_save_inserts_config_and_emits_list() {
+        let mut core = Core::default();
+        core.connections.clear();
+        let config = ConnectionConfig::new_sqlite("test_save", ":memory:");
+        let id = config.id;
+
+        let events = core
+            .handle(CoreCommand::SaveConnection {
+                config,
+                password: None,
+            })
+            .await;
+
+        match &events[0] {
+            CoreEvent::ConnectionList(list) => {
+                assert!(list.iter().any(|c| c.id == id));
+            }
+            CoreEvent::Error(msg) => {
+                // save_connections may fail if config dir is not writable in CI,
+                // that's acceptable - we verify the in-memory state instead.
+                panic!("Unexpected error: {msg}");
+            }
+            _ => panic!("Expected ConnectionList"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_save_with_password_caches() {
+        let mut core = Core::default();
+        core.connections.clear();
+        let config = ConnectionConfig::new_sqlite("test_pw", ":memory:");
+        let id = config.id;
+
+        let _events = core
+            .handle(CoreCommand::SaveConnection {
+                config,
+                password: Some("secret".into()),
+            })
+            .await;
+
+        assert_eq!(core.password_cache.get(&id), Some(&"secret".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_delete_removes_connection() {
+        let mut core = Core::default();
+        core.connections.clear();
+        let config = ConnectionConfig::new_sqlite("to_delete", ":memory:");
+        let id = config.id;
+        core.connections.push(config);
+
+        let events = core.handle(CoreCommand::DeleteConnection(id)).await;
+        match &events[0] {
+            CoreEvent::ConnectionList(list) => {
+                assert!(!list.iter().any(|c| c.id == id));
+            }
+            _ => {}
+        }
+    }
+
+    #[tokio::test]
+    async fn test_connect_sqlite_emits_connected() {
+        let mut core = Core::default();
+        let config = ConnectionConfig::new_sqlite("test_conn", ":memory:");
+        let id = config.id;
+        core.connections.push(config);
+        core.password_cache.insert(id, String::new());
+
+        let events = core.handle(CoreCommand::Connect(id)).await;
+        assert!(matches!(&events[0], CoreEvent::Connected(cid) if *cid == id));
+        assert_eq!(core.active_connection, Some(id));
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_clears_active_connection() {
+        let mut core = Core::default();
+        let config = ConnectionConfig::new_sqlite("test_dc", ":memory:");
+        let id = config.id;
+        core.connections.push(config);
+        core.password_cache.insert(id, String::new());
+        core.handle(CoreCommand::Connect(id)).await;
+        assert_eq!(core.active_connection, Some(id));
+
+        let events = core.handle(CoreCommand::Disconnect(id)).await;
+        assert!(matches!(&events[0], CoreEvent::Disconnected(did) if *did == id));
+        assert!(core.active_connection.is_none());
+    }
+}

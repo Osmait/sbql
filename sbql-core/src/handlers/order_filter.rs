@@ -125,3 +125,162 @@ pub(crate) async fn suggest_filter_values(
         Err(e) => vec![CoreEvent::Error(e.to_string())],
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{ConnectionConfig, Core, CoreCommand, CoreEvent, SortDirection};
+
+    /// Connect a Core to SQLite in-memory, create a table, insert data, and execute a query.
+    async fn setup_sqlite_with_query() -> Core {
+        let mut core = Core::default();
+        let config = ConnectionConfig::new_sqlite("test", ":memory:");
+        let id = config.id;
+        core.connections.push(config);
+        core.password_cache.insert(id, String::new());
+        core.handle(CoreCommand::Connect(id)).await;
+
+        // Create test data
+        let pool = core.active_pool().await.unwrap();
+        if let crate::pool::DbPool::Sqlite(sq) = &pool {
+            sqlx::query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)")
+                .execute(sq)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO users VALUES (1, 'Alice', 'alice@example.com')")
+                .execute(sq)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO users VALUES (2, 'Bob', 'bob@example.com')")
+                .execute(sq)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO users VALUES (3, 'Charlie', 'charlie@example.com')")
+                .execute(sq)
+                .await
+                .unwrap();
+        }
+
+        // Execute initial query so base_sql is set
+        core.handle(CoreCommand::ExecuteQuery {
+            sql: "SELECT * FROM users".into(),
+        })
+        .await;
+
+        core
+    }
+
+    #[tokio::test]
+    async fn test_apply_order_no_effective_sql() {
+        let mut core = Core::default();
+        core.effective_sql = None;
+        let events = core
+            .handle(CoreCommand::ApplyOrder {
+                column: "id".into(),
+                direction: SortDirection::Ascending,
+            })
+            .await;
+        assert!(matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active query")));
+    }
+
+    #[tokio::test]
+    async fn test_apply_order_updates_sort_state() {
+        let mut core = setup_sqlite_with_query().await;
+
+        let events = core
+            .handle(CoreCommand::ApplyOrder {
+                column: "name".into(),
+                direction: SortDirection::Descending,
+            })
+            .await;
+
+        // Should get a QueryResult back
+        assert!(events.iter().any(|e| matches!(e, CoreEvent::QueryResult(_))));
+        // sort_state should be updated
+        assert_eq!(
+            core.sort_state.get("name"),
+            Some(&SortDirection::Descending)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_clear_order_restores_base() {
+        let mut core = setup_sqlite_with_query().await;
+
+        // Apply order first
+        core.handle(CoreCommand::ApplyOrder {
+            column: "name".into(),
+            direction: SortDirection::Ascending,
+        })
+        .await;
+        assert!(!core.sort_state.is_empty());
+
+        // Clear order
+        let events = core.handle(CoreCommand::ClearOrder).await;
+        assert!(events.iter().any(|e| matches!(e, CoreEvent::QueryResult(_))));
+        assert!(core.sort_state.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_apply_filter_sets_active_filter() {
+        let mut core = setup_sqlite_with_query().await;
+
+        let events = core
+            .handle(CoreCommand::ApplyFilter {
+                query: "name:Alice".into(),
+            })
+            .await;
+        assert!(events.iter().any(|e| matches!(e, CoreEvent::QueryResult(_))));
+        assert_eq!(core.active_filter, Some("name:Alice".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_clear_filter_preserves_sort() {
+        let mut core = setup_sqlite_with_query().await;
+
+        // Apply sort + filter
+        core.handle(CoreCommand::ApplyOrder {
+            column: "name".into(),
+            direction: SortDirection::Ascending,
+        })
+        .await;
+        core.handle(CoreCommand::ApplyFilter {
+            query: "alice".into(),
+        })
+        .await;
+        assert!(core.active_filter.is_some());
+
+        // Clear filter - sort should be preserved
+        core.handle(CoreCommand::ClearFilter).await;
+        assert!(core.active_filter.is_none());
+        assert_eq!(
+            core.sort_state.get("name"),
+            Some(&SortDirection::Ascending)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_suggest_filter_values_no_base_sql() {
+        let mut core = Core::default();
+        let config = ConnectionConfig::new_sqlite("test", ":memory:");
+        let id = config.id;
+        core.connections.push(config);
+        core.password_cache.insert(id, String::new());
+        core.handle(CoreCommand::Connect(id)).await;
+        // base_sql is None → empty suggestions
+        let events = core
+            .handle(CoreCommand::SuggestFilterValues {
+                column: "name".into(),
+                prefix: "".into(),
+                limit: 10,
+                token: 42,
+            })
+            .await;
+        match &events[0] {
+            CoreEvent::FilterSuggestions { items, token } => {
+                assert!(items.is_empty());
+                assert_eq!(*token, 42);
+            }
+            _ => panic!("Expected FilterSuggestions"),
+        }
+    }
+}

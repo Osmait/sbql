@@ -40,3 +40,34 @@ pub(crate) async fn load_diagram(core: &mut Core) -> Vec<CoreEvent> {
         Err(e) => vec![CoreEvent::Error(e.to_string())],
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{Core, CoreCommand, CoreEvent};
+
+    #[tokio::test]
+    async fn test_list_tables_no_connection() {
+        let mut core = Core::default();
+        let events = core.handle(CoreCommand::ListTables).await;
+        assert!(matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection")));
+    }
+
+    #[tokio::test]
+    async fn test_get_primary_keys_no_connection() {
+        let mut core = Core::default();
+        let events = core
+            .handle(CoreCommand::GetPrimaryKeys {
+                schema: "public".into(),
+                table: "users".into(),
+            })
+            .await;
+        assert!(matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection")));
+    }
+
+    #[tokio::test]
+    async fn test_load_diagram_no_connection() {
+        let mut core = Core::default();
+        let events = core.handle(CoreCommand::LoadDiagram).await;
+        assert!(matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection")));
+    }
+}
