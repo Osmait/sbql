@@ -1,0 +1,51 @@
+{
+  "originHash" : "22abf5511412af0b765df253216833375f281176f824da8cd1fdc0200475f95f",
+  "pins" : [
+    {
+      "identity" : "neon",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ChimeHQ/Neon",
+      "state" : {
+        "branch" : "main",
+        "revision" : "56bd2b1febeab0e10e72e2491746eda6787165b6"
+      }
+    },
+    {
+      "identity" : "rearrange",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ChimeHQ/Rearrange",
+      "state" : {
+        "revision" : "f1d74e1642956f0300756ad8d1d64e9034857bc3",
+        "version" : "2.0.0"
+      }
+    },
+    {
+      "identity" : "swifttreesitter",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ChimeHQ/SwiftTreeSitter",
+      "state" : {
+        "branch" : "main",
+        "revision" : "f97df585296977d8fcaf644cbde567151d1367b8"
+      }
+    },
+    {
+      "identity" : "tree-sitter",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tree-sitter/tree-sitter",
+      "state" : {
+        "revision" : "da6fe9beb4f7f67beb75914ca8e0d48ae48d6406",
+        "version" : "0.25.10"
+      }
+    },
+    {
+      "identity" : "tree-sitter-sql",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/DerekStride/tree-sitter-sql",
+      "state" : {
+        "branch" : "gh-pages",
+        "revision" : "851e9cb257ba7c66cc8c14214a31c44d2f1e954e"
+      }
+    }
+  ],
+  "version" : 3
+}

@@ -1,0 +1,665 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		FEF983612F5CA00000AF2D82 /* SbqlFFI.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = FEF983602F5CA00000AF2D82 /* SbqlFFI.xcframework */; };
+		FEF986802F5CBC0100AF2D82 /* Neon in Frameworks */ = {isa = PBXBuildFile; productRef = FEA000012F6B000000000003 /* Neon */; };
+		FEF986812F5CBC0100AF2D82 /* TreeSitterClient in Frameworks */ = {isa = PBXBuildFile; productRef = FEA000012F6B000000000004 /* TreeSitterClient */; };
+		FEF986822F5CBC0100AF2D82 /* TreeSitterSql in Frameworks */ = {isa = PBXBuildFile; productRef = FEA000012F6B000000000005 /* TreeSitterSql */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		FEF983402F5C847900AF2D82 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FEF9832A2F5C847800AF2D82 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FEF983312F5C847800AF2D82;
+			remoteInfo = "sbql-macos";
+		};
+		FEF9834A2F5C847900AF2D82 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FEF9832A2F5C847800AF2D82 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FEF983312F5C847800AF2D82;
+			remoteInfo = "sbql-macos";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		FEF983322F5C847800AF2D82 /* sbql-macos.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "sbql-macos.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		FEF9833F2F5C847900AF2D82 /* sbql-macosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "sbql-macosTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		FEF983492F5C847900AF2D82 /* sbql-macosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "sbql-macosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		FEF983602F5CA00000AF2D82 /* SbqlFFI.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = SbqlFFI.xcframework; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		FEF983342F5C847800AF2D82 /* sbql-macos */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "sbql-macos";
+			sourceTree = "<group>";
+		};
+		FEF983422F5C847900AF2D82 /* sbql-macosTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "sbql-macosTests";
+			sourceTree = "<group>";
+		};
+		FEF9834C2F5C847900AF2D82 /* sbql-macosUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "sbql-macosUITests";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		FEF9832F2F5C847800AF2D82 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FEF986822F5CBC0100AF2D82 /* TreeSitterSql in Frameworks */,
+				FEF986812F5CBC0100AF2D82 /* TreeSitterClient in Frameworks */,
+				FEF986802F5CBC0100AF2D82 /* Neon in Frameworks */,
+				FEF983612F5CA00000AF2D82 /* SbqlFFI.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FEF9833C2F5C847900AF2D82 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FEF983462F5C847900AF2D82 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		FEF983292F5C847800AF2D82 = {
+			isa = PBXGroup;
+			children = (
+				FEF983342F5C847800AF2D82 /* sbql-macos */,
+				FEF983422F5C847900AF2D82 /* sbql-macosTests */,
+				FEF9834C2F5C847900AF2D82 /* sbql-macosUITests */,
+				FEF983622F5CA00000AF2D82 /* Frameworks */,
+				FEF983332F5C847800AF2D82 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		FEF983332F5C847800AF2D82 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				FEF983322F5C847800AF2D82 /* sbql-macos.app */,
+				FEF9833F2F5C847900AF2D82 /* sbql-macosTests.xctest */,
+				FEF983492F5C847900AF2D82 /* sbql-macosUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		FEF983622F5CA00000AF2D82 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				FEF983602F5CA00000AF2D82 /* SbqlFFI.xcframework */,
+			);
+			path = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		FEF983312F5C847800AF2D82 /* sbql-macos */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FEF983532F5C847900AF2D82 /* Build configuration list for PBXNativeTarget "sbql-macos" */;
+			buildPhases = (
+				FEF9832E2F5C847800AF2D82 /* Sources */,
+				FEF9832F2F5C847800AF2D82 /* Frameworks */,
+				FEF983302F5C847800AF2D82 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				FEF983342F5C847800AF2D82 /* sbql-macos */,
+			);
+			name = "sbql-macos";
+			packageProductDependencies = (
+				FEA000012F6B000000000003 /* Neon */,
+				FEA000012F6B000000000005 /* TreeSitterSql */,
+			);
+			productName = "sbql-macos";
+			productReference = FEF983322F5C847800AF2D82 /* sbql-macos.app */;
+			productType = "com.apple.product-type.application";
+		};
+		FEF9833E2F5C847900AF2D82 /* sbql-macosTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FEF983562F5C847900AF2D82 /* Build configuration list for PBXNativeTarget "sbql-macosTests" */;
+			buildPhases = (
+				FEF9833B2F5C847900AF2D82 /* Sources */,
+				FEF9833C2F5C847900AF2D82 /* Frameworks */,
+				FEF9833D2F5C847900AF2D82 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FEF983412F5C847900AF2D82 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				FEF983422F5C847900AF2D82 /* sbql-macosTests */,
+			);
+			name = "sbql-macosTests";
+			packageProductDependencies = (
+			);
+			productName = "sbql-macosTests";
+			productReference = FEF9833F2F5C847900AF2D82 /* sbql-macosTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		FEF983482F5C847900AF2D82 /* sbql-macosUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FEF983592F5C847900AF2D82 /* Build configuration list for PBXNativeTarget "sbql-macosUITests" */;
+			buildPhases = (
+				FEF983452F5C847900AF2D82 /* Sources */,
+				FEF983462F5C847900AF2D82 /* Frameworks */,
+				FEF983472F5C847900AF2D82 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FEF9834B2F5C847900AF2D82 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				FEF9834C2F5C847900AF2D82 /* sbql-macosUITests */,
+			);
+			name = "sbql-macosUITests";
+			packageProductDependencies = (
+			);
+			productName = "sbql-macosUITests";
+			productReference = FEF983492F5C847900AF2D82 /* sbql-macosUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		FEF9832A2F5C847800AF2D82 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2630;
+				LastUpgradeCheck = 2630;
+				TargetAttributes = {
+					FEF983312F5C847800AF2D82 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+					FEF9833E2F5C847900AF2D82 = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = FEF983312F5C847800AF2D82;
+					};
+					FEF983482F5C847900AF2D82 = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = FEF983312F5C847800AF2D82;
+					};
+				};
+			};
+			buildConfigurationList = FEF9832D2F5C847800AF2D82 /* Build configuration list for PBXProject "sbql-macos" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = FEF983292F5C847800AF2D82;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				FEA000012F6B000000000001 /* XCRemoteSwiftPackageReference "Neon" */,
+				FEA000012F6B000000000002 /* XCRemoteSwiftPackageReference "tree-sitter-sql" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = FEF983332F5C847800AF2D82 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				FEF983312F5C847800AF2D82 /* sbql-macos */,
+				FEF9833E2F5C847900AF2D82 /* sbql-macosTests */,
+				FEF983482F5C847900AF2D82 /* sbql-macosUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		FEF983302F5C847800AF2D82 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FEF9833D2F5C847900AF2D82 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FEF983472F5C847900AF2D82 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		FEF9832E2F5C847800AF2D82 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FEF9833B2F5C847900AF2D82 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FEF983452F5C847900AF2D82 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		FEF983412F5C847900AF2D82 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FEF983312F5C847800AF2D82 /* sbql-macos */;
+			targetProxy = FEF983402F5C847900AF2D82 /* PBXContainerItemProxy */;
+		};
+		FEF9834B2F5C847900AF2D82 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FEF983312F5C847800AF2D82 /* sbql-macos */;
+			targetProxy = FEF9834A2F5C847900AF2D82 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		FEF983512F5C847900AF2D82 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = GKFPD2WC2B;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		FEF983522F5C847900AF2D82 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = GKFPD2WC2B;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		FEF983542F5C847900AF2D82 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "sbql-macos/sbql_macos.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GKFPD2WC2B;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lsqlite3",
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					Security,
+					"-framework",
+					CoreFoundation,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.burgos.sbql-macos";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		FEF983552F5C847900AF2D82 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "sbql-macos/sbql_macos.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GKFPD2WC2B;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lsqlite3",
+					"-framework",
+					SystemConfiguration,
+					"-framework",
+					Security,
+					"-framework",
+					CoreFoundation,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.burgos.sbql-macos";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		FEF983572F5C847900AF2D82 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GKFPD2WC2B;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.burgos.sbql-macosTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/sbql-macos.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/sbql-macos";
+			};
+			name = Debug;
+		};
+		FEF983582F5C847900AF2D82 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GKFPD2WC2B;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.burgos.sbql-macosTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/sbql-macos.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/sbql-macos";
+			};
+			name = Release;
+		};
+		FEF9835A2F5C847900AF2D82 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GKFPD2WC2B;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.burgos.sbql-macosUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = "sbql-macos";
+			};
+			name = Debug;
+		};
+		FEF9835B2F5C847900AF2D82 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GKFPD2WC2B;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.burgos.sbql-macosUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = "sbql-macos";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		FEF9832D2F5C847800AF2D82 /* Build configuration list for PBXProject "sbql-macos" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FEF983512F5C847900AF2D82 /* Debug */,
+				FEF983522F5C847900AF2D82 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FEF983532F5C847900AF2D82 /* Build configuration list for PBXNativeTarget "sbql-macos" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FEF983542F5C847900AF2D82 /* Debug */,
+				FEF983552F5C847900AF2D82 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FEF983562F5C847900AF2D82 /* Build configuration list for PBXNativeTarget "sbql-macosTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FEF983572F5C847900AF2D82 /* Debug */,
+				FEF983582F5C847900AF2D82 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FEF983592F5C847900AF2D82 /* Build configuration list for PBXNativeTarget "sbql-macosUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FEF9835A2F5C847900AF2D82 /* Debug */,
+				FEF9835B2F5C847900AF2D82 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		FEA000012F6B000000000001 /* XCRemoteSwiftPackageReference "Neon" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ChimeHQ/Neon";
+			requirement = {
+				kind = branch;
+				branch = main;
+			};
+		};
+		FEA000012F6B000000000002 /* XCRemoteSwiftPackageReference "tree-sitter-sql" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/DerekStride/tree-sitter-sql";
+			requirement = {
+				kind = branch;
+				branch = "gh-pages";
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		FEA000012F6B000000000003 /* Neon */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FEA000012F6B000000000001 /* XCRemoteSwiftPackageReference "Neon" */;
+			productName = Neon;
+		};
+		FEA000012F6B000000000005 /* TreeSitterSql */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FEA000012F6B000000000002 /* XCRemoteSwiftPackageReference "tree-sitter-sql" */;
+			productName = TreeSitterSql;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = FEF9832A2F5C847800AF2D82 /* Project object */;
+}
