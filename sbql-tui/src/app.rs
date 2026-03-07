@@ -483,7 +483,7 @@ impl AppState {
                 self.tables = tables;
                 self.selected_table = 0;
             }
-            CoreEvent::QueryResult(result) => {
+            CoreEvent::QueryResult(mut result) => {
                 self.is_loading = false;
                 self.current_page = result.page;
                 tracing::info!(
@@ -506,6 +506,12 @@ impl AppState {
                 // Always discard staged changes when a new result set arrives
                 // (covers fresh query, page change, and post-commit refresh).
                 self.discard_pending();
+
+                // Preserve previous columns when current page has no rows.
+                if result.columns.is_empty() && !self.results.columns.is_empty() {
+                    result.columns = self.results.columns.clone();
+                }
+
                 self.results = result;
                 self.error_msg = None;
                 // Clear any stale status message now that we have fresh results

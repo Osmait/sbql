@@ -405,13 +405,10 @@ impl Core {
                     .last_columns
                     .iter()
                     .find(|c| c.eq_ignore_ascii_case(&column))
-                    .cloned();
-                let Some(column) = column else {
-                    return vec![CoreEvent::FilterSuggestions {
-                        items: Vec::new(),
-                        token,
-                    }];
-                };
+                    .cloned()
+                    // If we don't have column metadata yet, use user-selected
+                    // column name and let the query fail naturally if invalid.
+                    .unwrap_or(column);
 
                 match query::suggest_distinct_values(&pool, &base, &column, &prefix, limit).await {
                     Ok(items) => vec![CoreEvent::FilterSuggestions { items, token }],
@@ -521,7 +518,12 @@ impl Core {
         };
         match query::execute_page(&pool, &sql, page).await {
             Ok(result) => {
-                self.last_columns = result.columns.clone();
+                // Keep previous column metadata when a filter returns zero rows.
+                // `execute_page` infers columns from returned rows, so empty
+                // result sets would otherwise clear the known schema.
+                if !result.columns.is_empty() {
+                    self.last_columns = result.columns.clone();
+                }
                 self.last_page = result.page;
                 vec![CoreEvent::QueryResult(result)]
             }
