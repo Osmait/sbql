@@ -1,0 +1,10 @@
+[workspace]
+# We want git tags + GitHub releases, not crates.io publishing.
+publish = false
+git_only = true
+
+# Run `release` only when the merged commit comes from a release-plz PR.
+release_always = false
+
+# Keep default branch naming explicit for auto-merge workflow lookup.
+pr_branch_prefix = "release-plz-"
