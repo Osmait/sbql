@@ -1,8 +1,9 @@
-//! Schema introspection via `information_schema`.
+//! Schema introspection via `information_schema` (PG) or `sqlite_master` + PRAGMAs (SQLite).
 
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Row, SqlitePool};
 
 use crate::error::{Result, SbqlError};
+use crate::pool::DbPool;
 
 /// A table entry returned by schema introspection.
 #[derive(Debug, Clone)]
@@ -72,22 +73,113 @@ pub struct DiagramData {
 }
 
 // ---------------------------------------------------------------------------
-// Queries
+// Dispatch
 // ---------------------------------------------------------------------------
 
-/// List all user-visible tables (excludes pg_catalog, information_schema).
-pub async fn list_tables(pool: &PgPool) -> Result<Vec<TableEntry>> {
+/// List all user-visible tables.
+pub async fn list_tables(pool: &DbPool) -> Result<Vec<TableEntry>> {
+    match pool {
+        DbPool::Postgres(pg) => list_tables_pg(pg).await,
+        DbPool::Sqlite(sq) => list_tables_sqlite(sq).await,
+    }
+}
+
+/// Return the primary key column name(s) for a given table.
+pub async fn get_primary_keys(pool: &DbPool, schema: &str, table: &str) -> Result<Vec<String>> {
+    match pool {
+        DbPool::Postgres(pg) => get_primary_keys_pg(pg, schema, table).await,
+        DbPool::Sqlite(sq) => get_primary_keys_sqlite(sq, table).await,
+    }
+}
+
+/// Load all table schemas + FK relationships for the diagram view.
+pub async fn load_diagram(pool: &DbPool) -> Result<DiagramData> {
+    match pool {
+        DbPool::Postgres(pg) => load_diagram_pg(pg).await,
+        DbPool::Sqlite(sq) => load_diagram_sqlite(sq).await,
+    }
+}
+
+/// Execute a single-cell UPDATE.
+pub async fn execute_cell_update(
+    pool: &DbPool,
+    schema: &str,
+    table: &str,
+    pk_col: &str,
+    pk_val: &str,
+    target_col: &str,
+    new_val: &str,
+) -> Result<()> {
+    match pool {
+        DbPool::Postgres(pg) => {
+            execute_cell_update_pg(pg, schema, table, pk_col, pk_val, target_col, new_val).await
+        }
+        DbPool::Sqlite(sq) => {
+            execute_cell_update_sqlite(sq, table, pk_col, pk_val, target_col, new_val).await
+        }
+    }
+}
+
+/// Execute a single-row DELETE identified by its primary key.
+pub async fn execute_row_delete(
+    pool: &DbPool,
+    schema: &str,
+    table: &str,
+    pk_col: &str,
+    pk_val: &str,
+) -> Result<()> {
+    match pool {
+        DbPool::Postgres(pg) => execute_row_delete_pg(pg, schema, table, pk_col, pk_val).await,
+        DbPool::Sqlite(sq) => execute_row_delete_sqlite(sq, table, pk_col, pk_val).await,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PostgreSQL implementations
+// ---------------------------------------------------------------------------
+
+async fn list_tables_pg(pool: &PgPool) -> Result<Vec<TableEntry>> {
     let rows = sqlx::query(
         r#"
         SELECT table_schema, table_name
         FROM information_schema.tables
-        WHERE table_type = 'BASE TABLE'
+        WHERE table_type IN ('BASE TABLE', 'VIEW')
           AND table_schema NOT IN ('pg_catalog', 'information_schema')
         ORDER BY table_schema, table_name
         "#,
     )
     .fetch_all(pool)
     .await?;
+
+    if rows.is_empty() {
+        eprintln!("[sbql-core] list_tables_pg: information_schema returned 0 rows, trying pg_catalog fallback");
+        // Fallback: use pg_catalog which is always accessible
+        let fallback_rows = sqlx::query(
+            r#"
+            SELECT n.nspname AS table_schema, c.relname AS table_name
+            FROM pg_catalog.pg_class c
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE c.relkind IN ('r', 'v', 'm', 'p')
+              AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+              AND has_table_privilege(c.oid, 'SELECT')
+            ORDER BY n.nspname, c.relname
+            "#,
+        )
+        .fetch_all(pool)
+        .await?;
+
+        eprintln!("[sbql-core] list_tables_pg: pg_catalog fallback returned {} rows", fallback_rows.len());
+
+        return Ok(fallback_rows
+            .into_iter()
+            .map(|r| TableEntry {
+                schema: r
+                    .try_get::<String, _>("table_schema")
+                    .unwrap_or_else(|_| "public".into()),
+                name: r.try_get::<String, _>("table_name").unwrap_or_default(),
+            })
+            .collect());
+    }
 
     Ok(rows
         .into_iter()
@@ -100,8 +192,7 @@ pub async fn list_tables(pool: &PgPool) -> Result<Vec<TableEntry>> {
         .collect())
 }
 
-/// Return the primary key column name(s) for a given table.
-pub async fn get_primary_keys(pool: &PgPool, schema: &str, table: &str) -> Result<Vec<String>> {
+async fn get_primary_keys_pg(pool: &PgPool, schema: &str, table: &str) -> Result<Vec<String>> {
     let rows = sqlx::query(
         r#"
         SELECT kcu.column_name
@@ -135,8 +226,7 @@ pub async fn get_primary_keys(pool: &PgPool, schema: &str, table: &str) -> Resul
     Ok(pks)
 }
 
-/// Load all table schemas + FK relationships for the diagram view.
-pub async fn load_diagram(pool: &PgPool) -> Result<DiagramData> {
+async fn load_diagram_pg(pool: &PgPool) -> Result<DiagramData> {
     // --- Columns with PK flag ---
     let col_rows = sqlx::query(
         r#"
@@ -244,17 +334,7 @@ pub async fn load_diagram(pool: &PgPool) -> Result<DiagramData> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Cell update helpers
-// ---------------------------------------------------------------------------
-
-/// Build an `UPDATE` statement for a single cell change, using the detected PK.
-pub fn build_update_sql(schema: &str, table: &str, pk_col: &str, target_col: &str) -> String {
-    format!(r#"UPDATE "{schema}"."{table}" SET "{target_col}" = $1 WHERE "{pk_col}" = $2"#)
-}
-
-/// Execute a single-cell UPDATE.
-pub async fn execute_cell_update(
+async fn execute_cell_update_pg(
     pool: &PgPool,
     schema: &str,
     table: &str,
@@ -275,8 +355,7 @@ pub async fn execute_cell_update(
     Ok(())
 }
 
-/// Execute a single-row DELETE identified by its primary key.
-pub async fn execute_row_delete(
+async fn execute_row_delete_pg(
     pool: &PgPool,
     schema: &str,
     table: &str,
@@ -328,6 +407,159 @@ async fn resolve_column_type(
     }
 
     Ok(type_name)
+}
+
+// ---------------------------------------------------------------------------
+// SQLite implementations
+// ---------------------------------------------------------------------------
+
+async fn list_tables_sqlite(pool: &SqlitePool) -> Result<Vec<TableEntry>> {
+    let rows = sqlx::query(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| TableEntry {
+            schema: "main".to_string(),
+            name: r.try_get::<String, _>("name").unwrap_or_default(),
+        })
+        .collect())
+}
+
+async fn get_primary_keys_sqlite(pool: &SqlitePool, table: &str) -> Result<Vec<String>> {
+    let sql = format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\""));
+    let rows = sqlx::query(&sql).fetch_all(pool).await?;
+
+    let mut pks: Vec<(i32, String)> = Vec::new();
+    for row in rows {
+        let pk: i32 = row.try_get("pk").unwrap_or(0);
+        if pk > 0 {
+            let name: String = row.try_get("name").unwrap_or_default();
+            pks.push((pk, name));
+        }
+    }
+    pks.sort_by_key(|(pk, _)| *pk);
+    let pks: Vec<String> = pks.into_iter().map(|(_, name)| name).collect();
+
+    if pks.is_empty() {
+        return Err(SbqlError::Schema(format!(
+            "No primary key found for {table}"
+        )));
+    }
+
+    Ok(pks)
+}
+
+async fn load_diagram_sqlite(pool: &SqlitePool) -> Result<DiagramData> {
+    // 1. Get all tables
+    let table_rows = sqlx::query(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let table_names: Vec<String> = table_rows
+        .into_iter()
+        .filter_map(|r| r.try_get::<String, _>("name").ok())
+        .collect();
+
+    let mut tables = Vec::new();
+    let mut foreign_keys = Vec::new();
+
+    for table_name in &table_names {
+        // 2. Columns from PRAGMA table_info
+        let col_sql = format!(
+            "PRAGMA table_info(\"{}\")",
+            table_name.replace('"', "\"\"")
+        );
+        let col_rows = sqlx::query(&col_sql).fetch_all(pool).await?;
+
+        let columns: Vec<ColumnInfo> = col_rows
+            .into_iter()
+            .map(|r| {
+                let pk: i32 = r.try_get("pk").unwrap_or(0);
+                let notnull: bool = r.try_get("notnull").unwrap_or(false);
+                ColumnInfo {
+                    name: r.try_get("name").unwrap_or_default(),
+                    data_type: r.try_get("type").unwrap_or_default(),
+                    is_pk: pk > 0,
+                    is_nullable: !notnull && pk == 0,
+                }
+            })
+            .collect();
+
+        tables.push(TableSchema {
+            schema: "main".to_string(),
+            name: table_name.clone(),
+            columns,
+        });
+
+        // 3. Foreign keys from PRAGMA foreign_key_list
+        let fk_sql = format!(
+            "PRAGMA foreign_key_list(\"{}\")",
+            table_name.replace('"', "\"\"")
+        );
+        let fk_rows = sqlx::query(&fk_sql).fetch_all(pool).await?;
+
+        for fk_row in fk_rows {
+            let id: i32 = fk_row.try_get("id").unwrap_or(0);
+            foreign_keys.push(ForeignKey {
+                from_schema: "main".to_string(),
+                from_table: table_name.clone(),
+                from_col: fk_row.try_get("from").unwrap_or_default(),
+                to_schema: "main".to_string(),
+                to_table: fk_row.try_get("table").unwrap_or_default(),
+                to_col: fk_row.try_get("to").unwrap_or_default(),
+                constraint_name: format!("fk_{table_name}_{id}"),
+            });
+        }
+    }
+
+    Ok(DiagramData {
+        tables,
+        foreign_keys,
+    })
+}
+
+async fn execute_cell_update_sqlite(
+    pool: &SqlitePool,
+    table: &str,
+    pk_col: &str,
+    pk_val: &str,
+    target_col: &str,
+    new_val: &str,
+) -> Result<()> {
+    let sql = format!(
+        r#"UPDATE "{table}" SET "{target_col}" = $1 WHERE "{pk_col}" = $2"#
+    );
+    sqlx::query(&sql)
+        .bind(new_val)
+        .bind(pk_val)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+async fn execute_row_delete_sqlite(
+    pool: &SqlitePool,
+    table: &str,
+    pk_col: &str,
+    pk_val: &str,
+) -> Result<()> {
+    let sql = format!(r#"DELETE FROM "{table}" WHERE "{pk_col}" = $1"#);
+    sqlx::query(&sql).bind(pk_val).execute(pool).await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Kept for backward compat (used in tests)
+// ---------------------------------------------------------------------------
+
+pub fn build_update_sql(schema: &str, table: &str, pk_col: &str, target_col: &str) -> String {
+    format!(r#"UPDATE "{schema}"."{table}" SET "{target_col}" = $1 WHERE "{pk_col}" = $2"#)
 }
 
 #[cfg(test)]

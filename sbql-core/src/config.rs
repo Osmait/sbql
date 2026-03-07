@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{Result, SbqlError};
+use crate::pool::DbBackend;
 
 const KEYRING_SERVICE: &str = "sbql";
 
@@ -38,12 +39,17 @@ impl SslMode {
 pub struct ConnectionConfig {
     pub id: Uuid,
     pub name: String,
+    #[serde(default)]
+    pub backend: DbBackend,
     pub host: String,
     pub port: u16,
     pub user: String,
     pub database: String,
     #[serde(default)]
     pub ssl_mode: SslMode,
+    /// File path for SQLite databases (only used when `backend == Sqlite`).
+    #[serde(default)]
+    pub file_path: Option<String>,
 }
 
 impl ConnectionConfig {
@@ -57,25 +63,48 @@ impl ConnectionConfig {
         Self {
             id: Uuid::new_v4(),
             name: name.into(),
+            backend: DbBackend::Postgres,
             host: host.into(),
             port,
             user: user.into(),
             database: database.into(),
             ssl_mode: SslMode::Prefer,
+            file_path: None,
         }
     }
 
-    /// Build the libpq-style connection string (without the password).
+    /// Create a new SQLite connection config.
+    pub fn new_sqlite(name: impl Into<String>, file_path: impl Into<String>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            backend: DbBackend::Sqlite,
+            host: String::new(),
+            port: 0,
+            user: String::new(),
+            database: String::new(),
+            ssl_mode: SslMode::default(),
+            file_path: Some(file_path.into()),
+        }
+    }
+
+    /// Build the connection string appropriate for this backend.
     pub fn connection_string(&self, password: &str) -> String {
-        format!(
-            "postgresql://{}:{}@{}:{}/{}?sslmode={}",
-            self.user,
-            urlencoding_simple(password),
-            self.host,
-            self.port,
-            self.database,
-            self.ssl_mode.as_str(),
-        )
+        match self.backend {
+            DbBackend::Postgres => format!(
+                "postgresql://{}:{}@{}:{}/{}?sslmode={}",
+                self.user,
+                urlencoding_simple(password),
+                self.host,
+                self.port,
+                self.database,
+                self.ssl_mode.as_str(),
+            ),
+            DbBackend::Sqlite => {
+                let path = self.file_path.as_deref().unwrap_or(":memory:");
+                format!("sqlite:{path}")
+            }
+        }
     }
 
     /// Keyring key for this connection's password.
@@ -83,8 +112,11 @@ impl ConnectionConfig {
         format!("sbql/{}", self.id)
     }
 
-    /// Store the password in the OS keyring.
+    /// Store the password in the OS keyring. No-op for SQLite.
     pub fn save_password(&self, password: &str) -> Result<()> {
+        if self.backend == DbBackend::Sqlite {
+            return Ok(());
+        }
         let entry = Entry::new(KEYRING_SERVICE, &self.keyring_user())
             .map_err(|e| SbqlError::Keyring(e.to_string()))?;
         entry
@@ -92,8 +124,11 @@ impl ConnectionConfig {
             .map_err(|e| SbqlError::Keyring(e.to_string()))
     }
 
-    /// Retrieve the password from the OS keyring.
+    /// Retrieve the password from the OS keyring. Returns empty string for SQLite.
     pub fn load_password(&self) -> Result<String> {
+        if self.backend == DbBackend::Sqlite {
+            return Ok(String::new());
+        }
         let entry = Entry::new(KEYRING_SERVICE, &self.keyring_user())
             .map_err(|e| SbqlError::Keyring(e.to_string()))?;
         entry.get_password().map_err(|e| {
@@ -101,8 +136,11 @@ impl ConnectionConfig {
         })
     }
 
-    /// Delete the password from the OS keyring.
+    /// Delete the password from the OS keyring. No-op for SQLite.
     pub fn delete_password(&self) -> Result<()> {
+        if self.backend == DbBackend::Sqlite {
+            return Ok(());
+        }
         let entry = Entry::new(KEYRING_SERVICE, &self.keyring_user())
             .map_err(|e| SbqlError::Keyring(e.to_string()))?;
         entry
@@ -277,5 +315,66 @@ mod tests {
 
         let loaded = load_connections_from(&path).unwrap();
         assert_eq!(loaded[0].ssl_mode, SslMode::VerifyFull);
+    }
+
+    #[test]
+    fn round_trip_sqlite_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sqlite_conns.toml");
+
+        let conns = vec![
+            ConnectionConfig::new_sqlite("my_sqlite", "/tmp/test.db"),
+            ConnectionConfig::new("pg_conn", "localhost", 5432, "user", "db"),
+        ];
+        save_connections_to(&path, &conns).unwrap();
+        let loaded = load_connections_from(&path).unwrap();
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].backend, DbBackend::Sqlite);
+        assert_eq!(loaded[0].file_path, Some("/tmp/test.db".to_string()));
+        assert_eq!(loaded[0].name, "my_sqlite");
+
+        assert_eq!(loaded[1].backend, DbBackend::Postgres);
+        assert!(loaded[1].file_path.is_none());
+    }
+
+    #[test]
+    fn backward_compat_no_backend_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old_format.toml");
+
+        // Simulate an old TOML file without `backend` or `file_path` fields
+        let toml_content = r#"
+[[connections]]
+id = "00000000-0000-0000-0000-000000000001"
+name = "legacy"
+host = "localhost"
+port = 5432
+user = "postgres"
+database = "mydb"
+"#;
+        std::fs::write(&path, toml_content).unwrap();
+        let loaded = load_connections_from(&path).unwrap();
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].backend, DbBackend::Postgres); // default
+        assert!(loaded[0].file_path.is_none()); // default
+        assert_eq!(loaded[0].name, "legacy");
+    }
+
+    #[test]
+    fn sqlite_connection_string() {
+        let conn = ConnectionConfig::new_sqlite("test", "/data/app.db");
+        assert_eq!(conn.connection_string(""), "sqlite:/data/app.db");
+    }
+
+    #[test]
+    fn sqlite_new_sqlite_constructor() {
+        let conn = ConnectionConfig::new_sqlite("mydb", "/tmp/test.sqlite");
+        assert_eq!(conn.backend, DbBackend::Sqlite);
+        assert_eq!(conn.name, "mydb");
+        assert_eq!(conn.file_path, Some("/tmp/test.sqlite".to_string()));
+        assert!(conn.host.is_empty());
+        assert_eq!(conn.port, 0);
     }
 }

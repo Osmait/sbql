@@ -1,7 +1,9 @@
 use sqlx::postgres::PgRow;
-use sqlx::{Column, Decode, PgPool, Postgres, Row, TypeInfo, ValueRef};
+use sqlx::sqlite::SqliteRow;
+use sqlx::{Column, Decode, PgPool, Postgres, Row, SqlitePool, TypeInfo, ValueRef};
 
 use crate::error::Result;
+use crate::pool::DbPool;
 
 pub const PAGE_SIZE: usize = 100;
 
@@ -21,12 +23,32 @@ pub struct QueryResult {
 
 /// Execute a raw SQL string and return the first `PAGE_SIZE` rows of page
 /// `page` (0-indexed).
-///
-/// The function appends `LIMIT <PAGE_SIZE+1> OFFSET <page * PAGE_SIZE>` only
-/// when the query does not already contain a top-level LIMIT clause.  The
-/// extra +1 row is fetched to cheaply determine `has_next_page` without a
-/// COUNT query.
-pub async fn execute_page(pool: &PgPool, sql: &str, page: usize) -> Result<QueryResult> {
+pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<QueryResult> {
+    match pool {
+        DbPool::Postgres(pg) => execute_page_pg(pg, sql, page).await,
+        DbPool::Sqlite(sq) => execute_page_sqlite(sq, sql, page).await,
+    }
+}
+
+/// Suggest distinct values for a column using prefix search.
+pub async fn suggest_distinct_values(
+    pool: &DbPool,
+    sql: &str,
+    column: &str,
+    prefix: &str,
+    limit: usize,
+) -> Result<Vec<String>> {
+    match pool {
+        DbPool::Postgres(pg) => suggest_distinct_values_pg(pg, sql, column, prefix, limit).await,
+        DbPool::Sqlite(sq) => suggest_distinct_values_sqlite(sq, sql, column, prefix, limit).await,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PostgreSQL implementation
+// ---------------------------------------------------------------------------
+
+async fn execute_page_pg(pool: &PgPool, sql: &str, page: usize) -> Result<QueryResult> {
     let paginated = build_paginated_sql(sql, page);
     let rows: Vec<PgRow> = sqlx::query(&paginated).fetch_all(pool).await?;
 
@@ -42,7 +64,7 @@ pub async fn execute_page(pool: &PgPool, sql: &str, page: usize) -> Result<Query
         .map(|r| r.columns().iter().map(|c| c.name().to_owned()).collect())
         .unwrap_or_default();
 
-    let result_rows: Vec<Vec<String>> = rows_to_show.iter().map(|r| row_to_strings(r)).collect();
+    let result_rows: Vec<Vec<String>> = rows_to_show.iter().map(|r| pg_row_to_strings(r)).collect();
 
     Ok(QueryResult {
         columns,
@@ -52,8 +74,7 @@ pub async fn execute_page(pool: &PgPool, sql: &str, page: usize) -> Result<Query
     })
 }
 
-/// Suggest distinct values for a column using prefix search (`prefix%`).
-pub async fn suggest_distinct_values(
+async fn suggest_distinct_values_pg(
     pool: &PgPool,
     sql: &str,
     column: &str,
@@ -82,36 +103,73 @@ pub async fn suggest_distinct_values(
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// SQLite implementation
 // ---------------------------------------------------------------------------
 
-/// Append LIMIT/OFFSET to `sql` when there is no existing top-level LIMIT.
-/// We do a simple case-insensitive string scan — the authoritative pushdown
-/// logic lives in `query_builder.rs`; this is just the fallback for raw
-/// user-typed SQL.
-pub fn build_paginated_sql(sql: &str, page: usize) -> String {
-    let trimmed = sql.trim_end_matches(';').trim();
-    let upper = trimmed.to_uppercase();
+async fn execute_page_sqlite(pool: &SqlitePool, sql: &str, page: usize) -> Result<QueryResult> {
+    let paginated = build_paginated_sql(sql, page);
+    let rows: Vec<SqliteRow> = sqlx::query(&paginated).fetch_all(pool).await?;
 
-    // Detect whether there is already a LIMIT clause at the top level.
-    // A heuristic: if "LIMIT" appears after the last SELECT it is top-level.
-    let has_limit = upper.contains("LIMIT");
-
-    if has_limit {
-        // Respect the user's existing LIMIT; just return as-is.
-        trimmed.to_owned()
+    let has_next_page = rows.len() > PAGE_SIZE;
+    let rows_to_show = if has_next_page {
+        &rows[..PAGE_SIZE]
     } else {
-        let offset = page * PAGE_SIZE;
-        // Fetch one extra row to probe for next page.
-        format!(
-            "SELECT * FROM ({trimmed}) AS _sbql_page LIMIT {} OFFSET {offset}",
-            PAGE_SIZE + 1
-        )
-    }
+        &rows[..]
+    };
+
+    let columns: Vec<String> = rows_to_show
+        .first()
+        .map(|r| r.columns().iter().map(|c| c.name().to_owned()).collect())
+        .unwrap_or_default();
+
+    let result_rows: Vec<Vec<String>> = rows_to_show
+        .iter()
+        .map(|r| sqlite_row_to_strings(r))
+        .collect();
+
+    Ok(QueryResult {
+        columns,
+        rows: result_rows,
+        page,
+        has_next_page,
+    })
 }
 
+async fn suggest_distinct_values_sqlite(
+    pool: &SqlitePool,
+    sql: &str,
+    column: &str,
+    prefix: &str,
+    limit: usize,
+) -> Result<Vec<String>> {
+    let trimmed = sql.trim_end_matches(';').trim();
+    let col_ident = quote_ident(column);
+    // SQLite: use LIKE with COLLATE NOCASE instead of ILIKE
+    let stmt = format!(
+        "SELECT DISTINCT CAST(_sbql_s.{col_ident} AS TEXT) AS v FROM ({trimmed}) AS _sbql_s WHERE CAST(_sbql_s.{col_ident} AS TEXT) LIKE $1 COLLATE NOCASE ORDER BY v LIMIT $2"
+    );
+    let pattern = format!("{}%", prefix.replace('%', "\\%").replace('_', "\\_"));
+    let rows = sqlx::query(&stmt)
+        .bind(pattern)
+        .bind(limit as i64)
+        .fetch_all(pool)
+        .await?;
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        if let Ok(Some(v)) = row.try_get::<Option<String>, _>("v") {
+            out.push(v);
+        }
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Row conversion helpers
+// ---------------------------------------------------------------------------
+
 /// Convert a single `PgRow` into a `Vec<String>`, stringifying every column.
-fn row_to_strings(row: &PgRow) -> Vec<String> {
+fn pg_row_to_strings(row: &PgRow) -> Vec<String> {
     row.columns()
         .iter()
         .map(|col| {
@@ -120,6 +178,50 @@ fn row_to_strings(row: &PgRow) -> Vec<String> {
             pg_value_to_string(row, idx, type_name)
         })
         .collect()
+}
+
+/// Convert a single `SqliteRow` into a `Vec<String>`.
+fn sqlite_row_to_strings(row: &SqliteRow) -> Vec<String> {
+    row.columns()
+        .iter()
+        .map(|col| {
+            let idx = col.ordinal();
+            sqlite_value_to_string(row, idx)
+        })
+        .collect()
+}
+
+/// Stringify a SQLite column value.
+fn sqlite_value_to_string(row: &SqliteRow, idx: usize) -> String {
+    // Check for NULL first
+    if let Ok(raw) = row.try_get_raw(idx) {
+        if raw.is_null() {
+            return String::new();
+        }
+    }
+
+    // Try String first (covers TEXT)
+    if let Ok(v) = row.try_get::<String, _>(idx) {
+        return v;
+    }
+    // Try i64 (covers INTEGER)
+    if let Ok(v) = row.try_get::<i64, _>(idx) {
+        return v.to_string();
+    }
+    // Try f64 (covers REAL)
+    if let Ok(v) = row.try_get::<f64, _>(idx) {
+        return v.to_string();
+    }
+    // Try bool
+    if let Ok(v) = row.try_get::<bool, _>(idx) {
+        return v.to_string();
+    }
+    // Try Vec<u8> (covers BLOB)
+    if let Ok(v) = row.try_get::<Vec<u8>, _>(idx) {
+        return format!("\\x{}", hex_encode(&v));
+    }
+
+    "<unknown>".to_string()
 }
 
 /// Stringify a PostgreSQL column value by its type name.
@@ -366,6 +468,28 @@ fn pg_value_to_string(row: &PgRow, idx: usize, type_name: &str) -> String {
     format!("<{}>", type_name)
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Append LIMIT/OFFSET to `sql` when there is no existing top-level LIMIT.
+pub fn build_paginated_sql(sql: &str, page: usize) -> String {
+    let trimmed = sql.trim_end_matches(';').trim();
+    let upper = trimmed.to_uppercase();
+
+    let has_limit = upper.contains("LIMIT");
+
+    if has_limit {
+        trimmed.to_owned()
+    } else {
+        let offset = page * PAGE_SIZE;
+        format!(
+            "SELECT * FROM ({trimmed}) AS _sbql_page LIMIT {} OFFSET {offset}",
+            PAGE_SIZE + 1
+        )
+    }
+}
+
 /// Encode a byte slice as lowercase hex.
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -398,7 +522,6 @@ mod tests {
     #[test]
     fn paginated_with_existing_limit() {
         let result = build_paginated_sql("SELECT * FROM users LIMIT 10", 0);
-        // Should not add another LIMIT
         assert_eq!(result, "SELECT * FROM users LIMIT 10");
     }
 

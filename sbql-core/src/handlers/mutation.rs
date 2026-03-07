@@ -9,7 +9,7 @@ pub(crate) async fn update_cell(
     target_col: String,
     new_val: String,
 ) -> Vec<CoreEvent> {
-    let pool = match core.active_pool() {
+    let pool = match core.active_pool().await {
         Ok(p) => p,
         Err(e) => return vec![CoreEvent::Error(e.to_string())],
     };
@@ -26,7 +26,7 @@ pub(crate) async fn delete_row(
     pk_col: String,
     pk_val: String,
 ) -> Vec<CoreEvent> {
-    let pool = match core.active_pool() {
+    let pool = match core.active_pool().await {
         Ok(p) => p,
         Err(e) => return vec![CoreEvent::Error(e.to_string())],
     };

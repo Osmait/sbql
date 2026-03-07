@@ -14,6 +14,7 @@ pub mod config;
 pub mod connection;
 pub mod error;
 mod handlers;
+pub mod pool;
 pub mod query;
 pub mod query_builder;
 pub mod schema;
@@ -23,6 +24,7 @@ pub use config::{
     load_connections, load_connections_from, save_connections, save_connections_to,
     ConnectionConfig, SslMode,
 };
+pub use pool::{DbBackend, DbPool};
 pub use error::{Result, SbqlError};
 pub use query::{QueryResult, PAGE_SIZE};
 pub use query_builder::SortDirection;
@@ -233,13 +235,23 @@ impl Core {
     // Helpers used by handler modules
     // -----------------------------------------------------------------------
 
-    pub(crate) fn active_pool(&self) -> Result<sqlx::PgPool> {
+    pub(crate) async fn active_pool(&self) -> Result<DbPool> {
         let id = self
             .active_connection
             .ok_or(SbqlError::NoActiveConnection)?;
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.manager.get(id))
-        })
+        self.manager.get(id).await
+    }
+
+    pub(crate) fn active_backend(&self) -> Result<DbBackend> {
+        let id = self
+            .active_connection
+            .ok_or(SbqlError::NoActiveConnection)?;
+        let cfg = self
+            .connections
+            .iter()
+            .find(|c| c.id == id)
+            .ok_or_else(|| SbqlError::ConnectionNotFound(id.to_string()))?;
+        Ok(cfg.backend)
     }
 
     pub(crate) async fn execute_current_page(&mut self, page: usize) -> Vec<CoreEvent> {
@@ -247,7 +259,7 @@ impl Core {
             Some(s) => s.clone(),
             None => return vec![CoreEvent::Error("No active query".into())],
         };
-        let pool = match self.active_pool() {
+        let pool = match self.active_pool().await {
             Ok(p) => p,
             Err(e) => return vec![CoreEvent::Error(e.to_string())],
         };

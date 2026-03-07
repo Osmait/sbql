@@ -3,6 +3,7 @@ use sbql_core::{
     schema::{
         execute_cell_update, execute_row_delete, get_primary_keys, list_tables, load_diagram,
     },
+    DbPool,
 };
 use sqlx::{PgPool, Row};
 use testcontainers::runners::AsyncRunner;
@@ -23,9 +24,10 @@ async fn test_database_schema_and_mutations() {
     );
 
     // 2. Connect to the database using sqlx
-    let pool = PgPool::connect(&connection_string)
+    let pg_pool = PgPool::connect(&connection_string)
         .await
         .expect("Failed to connect to DB");
+    let pool = DbPool::Postgres(pg_pool.clone());
 
     // 3. Setup test schema and data
     sqlx::query(
@@ -35,7 +37,7 @@ async fn test_database_schema_and_mutations() {
             active BOOLEAN DEFAULT true
         );",
     )
-    .execute(&pool)
+    .execute(&pg_pool)
     .await
     .expect("Failed to create users table");
 
@@ -47,12 +49,12 @@ async fn test_database_schema_and_mutations() {
             content TEXT
         );",
     )
-    .execute(&pool)
+    .execute(&pg_pool)
     .await
     .expect("Failed to create posts table");
 
     sqlx::query("CREATE TYPE status_enum AS ENUM ('new', 'active', 'closed');")
-        .execute(&pool)
+        .execute(&pg_pool)
         .await
         .expect("Failed to create enum");
 
@@ -67,29 +69,29 @@ async fn test_database_schema_and_mutations() {
             status status_enum
         );",
     )
-    .execute(&pool)
+    .execute(&pg_pool)
     .await
     .expect("Failed to create complex types table");
 
     sqlx::query("INSERT INTO users (username) VALUES ('alice'), ('bob');")
-        .execute(&pool)
+        .execute(&pg_pool)
         .await
         .expect("Failed to insert users");
 
     sqlx::query(
-        "INSERT INTO posts (user_id, title, content) VALUES 
+        "INSERT INTO posts (user_id, title, content) VALUES
         (1, 'Alice First Post', 'Hello world'),
         (2, 'Bob Post', 'Hi there');",
     )
-    .execute(&pool)
+    .execute(&pg_pool)
     .await
     .expect("Failed to insert posts");
 
     sqlx::query(
-        "INSERT INTO complex_types (js_data, tags, uid, created_at, raw_bytes, status) VALUES 
+        "INSERT INTO complex_types (js_data, tags, uid, created_at, raw_bytes, status) VALUES
         ('{\"key\": \"value\"}', ARRAY['rust', 'sql'], '123e4567-e89b-12d3-a456-426614174000', '2026-03-06T12:00:00Z', '\\xDEADBEEF', 'active');"
     )
-    .execute(&pool)
+    .execute(&pg_pool)
     .await
     .expect("Failed to insert complex types");
 
@@ -177,7 +179,7 @@ async fn test_database_schema_and_mutations() {
 
     // Verify the update
     let updated_username: String = sqlx::query("SELECT username FROM users WHERE id = 1")
-        .fetch_one(&pool)
+        .fetch_one(&pg_pool)
         .await
         .unwrap()
         .get("username");
@@ -191,7 +193,7 @@ async fn test_database_schema_and_mutations() {
 
     // Verify the deletion
     let post_count: i64 = sqlx::query("SELECT COUNT(*) FROM posts WHERE id = 2")
-        .fetch_one(&pool)
+        .fetch_one(&pg_pool)
         .await
         .unwrap()
         .get(0);
@@ -207,11 +209,12 @@ async fn test_execute_page_pagination() {
         "postgresql://postgres:postgres@{}:{}/postgres",
         host_ip, host_port
     );
-    let pool = PgPool::connect(&connection_string).await.unwrap();
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
 
     // Create a table with many rows to test pagination
     sqlx::query("CREATE TABLE many_rows (id SERIAL PRIMARY KEY, val TEXT);")
-        .execute(&pool)
+        .execute(&pg_pool)
         .await
         .unwrap();
 
@@ -219,7 +222,7 @@ async fn test_execute_page_pagination() {
     for i in 0..150 {
         sqlx::query("INSERT INTO many_rows (val) VALUES ($1)")
             .bind(format!("row_{}", i))
-            .execute(&pool)
+            .execute(&pg_pool)
             .await
             .unwrap();
     }
@@ -250,10 +253,11 @@ async fn test_execute_page_empty_result() {
         "postgresql://postgres:postgres@{}:{}/postgres",
         host_ip, host_port
     );
-    let pool = PgPool::connect(&connection_string).await.unwrap();
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
 
     sqlx::query("CREATE TABLE empty_table (id SERIAL PRIMARY KEY, name TEXT);")
-        .execute(&pool)
+        .execute(&pg_pool)
         .await
         .unwrap();
 
@@ -274,7 +278,8 @@ async fn test_boolean_and_numeric_types() {
         "postgresql://postgres:postgres@{}:{}/postgres",
         host_ip, host_port
     );
-    let pool = PgPool::connect(&connection_string).await.unwrap();
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
 
     sqlx::query(
         "CREATE TABLE type_test (
@@ -289,7 +294,7 @@ async fn test_boolean_and_numeric_types() {
             null_text TEXT
         );",
     )
-    .execute(&pool)
+    .execute(&pg_pool)
     .await
     .unwrap();
 
@@ -297,7 +302,7 @@ async fn test_boolean_and_numeric_types() {
         "INSERT INTO type_test (bool_val, small_val, int_val, big_val, real_val, double_val, numeric_val, null_text)
          VALUES (true, 42, 1000, 9999999999, 3.14, 2.718281828, 123.45, NULL);"
     )
-    .execute(&pool)
+    .execute(&pg_pool)
     .await
     .unwrap();
 
@@ -333,7 +338,8 @@ async fn test_date_time_types() {
         "postgresql://postgres:postgres@{}:{}/postgres",
         host_ip, host_port
     );
-    let pool = PgPool::connect(&connection_string).await.unwrap();
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
 
     sqlx::query(
         "CREATE TABLE time_test (
@@ -343,14 +349,14 @@ async fn test_date_time_types() {
             t TIME
         );",
     )
-    .execute(&pool)
+    .execute(&pg_pool)
     .await
     .unwrap();
 
     sqlx::query(
         "INSERT INTO time_test (ts, d, t) VALUES ('2024-01-15 10:30:00', '2024-01-15', '10:30:00');"
     )
-    .execute(&pool)
+    .execute(&pg_pool)
     .await
     .unwrap();
 
@@ -379,7 +385,8 @@ async fn test_array_types() {
         "postgresql://postgres:postgres@{}:{}/postgres",
         host_ip, host_port
     );
-    let pool = PgPool::connect(&connection_string).await.unwrap();
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
 
     sqlx::query(
         "CREATE TABLE array_test (
@@ -389,14 +396,14 @@ async fn test_array_types() {
             bool_arr BOOLEAN[]
         );",
     )
-    .execute(&pool)
+    .execute(&pg_pool)
     .await
     .unwrap();
 
     sqlx::query(
         "INSERT INTO array_test (int_arr, float_arr, bool_arr) VALUES (ARRAY[1,2,3], ARRAY[1.5,2.5], ARRAY[true,false]);"
     )
-    .execute(&pool)
+    .execute(&pg_pool)
     .await
     .unwrap();
 
@@ -425,15 +432,16 @@ async fn test_suggest_distinct_values() {
         "postgresql://postgres:postgres@{}:{}/postgres",
         host_ip, host_port
     );
-    let pool = PgPool::connect(&connection_string).await.unwrap();
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
 
     sqlx::query("CREATE TABLE suggest_test (id SERIAL PRIMARY KEY, name TEXT);")
-        .execute(&pool)
+        .execute(&pg_pool)
         .await
         .unwrap();
 
     sqlx::query("INSERT INTO suggest_test (name) VALUES ('Alice'), ('Alicia'), ('Bob'), ('Charlie');")
-        .execute(&pool)
+        .execute(&pg_pool)
         .await
         .unwrap();
 
@@ -461,15 +469,16 @@ async fn test_suggest_distinct_values_special_chars() {
         "postgresql://postgres:postgres@{}:{}/postgres",
         host_ip, host_port
     );
-    let pool = PgPool::connect(&connection_string).await.unwrap();
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
 
     sqlx::query("CREATE TABLE special_test (id SERIAL PRIMARY KEY, val TEXT);")
-        .execute(&pool)
+        .execute(&pg_pool)
         .await
         .unwrap();
 
     sqlx::query("INSERT INTO special_test (val) VALUES ('100% done'), ('50% complete'), ('hello');")
-        .execute(&pool)
+        .execute(&pg_pool)
         .await
         .unwrap();
 
@@ -497,16 +506,17 @@ async fn test_user_defined_limit_respected() {
         "postgresql://postgres:postgres@{}:{}/postgres",
         host_ip, host_port
     );
-    let pool = PgPool::connect(&connection_string).await.unwrap();
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
 
     sqlx::query("CREATE TABLE limit_test (id SERIAL PRIMARY KEY);")
-        .execute(&pool)
+        .execute(&pg_pool)
         .await
         .unwrap();
 
     for _ in 0..10 {
         sqlx::query("INSERT INTO limit_test DEFAULT VALUES")
-            .execute(&pool)
+            .execute(&pg_pool)
             .await
             .unwrap();
     }

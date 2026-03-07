@@ -2,17 +2,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use sqlx::postgres::PgPoolOptions;
-use sqlx::PgPool;
+use sqlx::sqlite::SqlitePoolOptions;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::config::ConnectionConfig;
 use crate::error::{Result, SbqlError};
+use crate::pool::{DbBackend, DbPool};
 
-/// Manages a map of live `PgPool` instances keyed by connection id.
+/// Manages a map of live [`DbPool`] instances keyed by connection id.
 #[derive(Clone, Default)]
 pub struct ConnectionManager {
-    pools: Arc<RwLock<HashMap<Uuid, PgPool>>>,
+    pools: Arc<RwLock<HashMap<Uuid, DbPool>>>,
 }
 
 impl ConnectionManager {
@@ -43,11 +44,32 @@ impl ConnectionManager {
 
         let url = config.connection_string(password);
 
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .acquire_timeout(std::time::Duration::from_secs(10))
-            .connect(&url)
-            .await?;
+        let pool = match config.backend {
+            DbBackend::Postgres => {
+                let pg = PgPoolOptions::new()
+                    .max_connections(5)
+                    .acquire_timeout(std::time::Duration::from_secs(10))
+                    .connect(&url)
+                    .await?;
+                DbPool::Postgres(pg)
+            }
+            DbBackend::Sqlite => {
+                let sq = SqlitePoolOptions::new()
+                    .max_connections(5)
+                    .acquire_timeout(std::time::Duration::from_secs(10))
+                    .after_connect(|conn, _meta| {
+                        Box::pin(async move {
+                            sqlx::query("PRAGMA foreign_keys = ON")
+                                .execute(&mut *conn)
+                                .await?;
+                            Ok(())
+                        })
+                    })
+                    .connect(&url)
+                    .await?;
+                DbPool::Sqlite(sq)
+            }
+        };
 
         self.pools.write().await.insert(config.id, pool);
         tracing::info!("Connected to '{}' ({})", config.name, config.id);
@@ -60,12 +82,19 @@ impl ConnectionManager {
         let pool = guard
             .get(&id)
             .ok_or_else(|| SbqlError::ConnectionNotFound(id.to_string()))?;
-        sqlx::query("SELECT 1").execute(pool).await?;
+        match pool {
+            DbPool::Postgres(pg) => {
+                sqlx::query("SELECT 1").execute(pg).await?;
+            }
+            DbPool::Sqlite(sq) => {
+                sqlx::query("SELECT 1").execute(sq).await?;
+            }
+        }
         Ok(())
     }
 
     /// Get a clone of the pool for the given connection id.
-    pub async fn get(&self, id: Uuid) -> Result<PgPool> {
+    pub async fn get(&self, id: Uuid) -> Result<DbPool> {
         let guard = self.pools.read().await;
         guard
             .get(&id)
