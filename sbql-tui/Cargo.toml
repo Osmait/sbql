@@ -13,7 +13,7 @@ name = "sbql"
 path = "src/main.rs"
 
 [dependencies]
-sbql-core = { path = "../sbql-core", version = "0.1.0" }
+sbql-core.workspace = true
 tokio.workspace = true
 serde.workspace = true
 uuid.workspace = true

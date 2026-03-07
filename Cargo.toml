@@ -12,6 +12,9 @@ authors = ["sbql contributors"]
 license = "MIT"
 
 [workspace.dependencies]
+# Local workspace crate
+sbql-core = { path = "sbql-core", version = "0.1.0" }
+
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
