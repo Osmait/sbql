@@ -1,4 +1,5 @@
 use std::io;
+use std::path::PathBuf;
 
 use crossterm::{
     event::{
@@ -30,6 +31,28 @@ mod worker;
 use app::AppState;
 use events::{spawn_event_reader, AppEvent};
 use worker::spawn_worker;
+
+/// Path to `~/.config/sbql/last-connection` (stores the UUID of the last active connection).
+fn last_connection_path() -> Option<PathBuf> {
+    sbql_core::config_path().ok().map(|p| p.with_file_name("last-connection"))
+}
+
+fn load_last_connection_id() -> Option<String> {
+    let path = last_connection_path()?;
+    std::fs::read_to_string(path).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+fn save_last_connection_id(id: &uuid::Uuid) {
+    if let Some(path) = last_connection_path() {
+        let _ = std::fs::write(path, id.to_string());
+    }
+}
+
+fn clear_last_connection_id() {
+    if let Some(path) = last_connection_path() {
+        let _ = std::fs::remove_file(path);
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -135,15 +158,28 @@ async fn main() -> anyhow::Result<()> {
                 tracing::debug!("CoreEvent: {:?}", ce);
                 let auto_list = matches!(ce, sbql_core::CoreEvent::Connected(_));
                 let tables_loaded = matches!(ce, sbql_core::CoreEvent::TableList(_));
+
+                // Persist / clear last-connection on connect / disconnect
+                if let sbql_core::CoreEvent::Connected(id) = &ce {
+                    save_last_connection_id(id);
+                }
+                if matches!(ce, sbql_core::CoreEvent::Disconnected(_)) {
+                    clear_last_connection_id();
+                }
                 if !auto_connected {
                     if let sbql_core::CoreEvent::ConnectionList(ref conns) = ce {
-                        if let Some(ref name) = auto_connect_name {
-                            if let Some(cfg) =
-                                conns.iter().find(|c| c.name.eq_ignore_ascii_case(name))
-                            {
-                                let _ = cmd_tx.send(CoreCommand::Connect(cfg.id));
-                                auto_connected = true;
-                            }
+                        // 1. CLI argument takes priority (match by name)
+                        // 2. Otherwise, try the last-connected ID from disk
+                        let target = auto_connect_name.as_ref().and_then(|name| {
+                            conns.iter().find(|c| c.name.eq_ignore_ascii_case(name))
+                        }).or_else(|| {
+                            let last_id = load_last_connection_id()?;
+                            conns.iter().find(|c| c.id.to_string() == last_id)
+                        });
+
+                        if let Some(cfg) = target {
+                            let _ = cmd_tx.send(CoreCommand::Connect(cfg.id));
+                            auto_connected = true;
                         }
                     }
                 }

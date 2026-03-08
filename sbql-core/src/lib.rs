@@ -21,7 +21,7 @@ pub mod schema;
 
 // Re-export the most commonly used types at the crate root.
 pub use config::{
-    load_connections, load_connections_from, save_connections, save_connections_to,
+    config_path, load_connections, load_connections_from, save_connections, save_connections_to,
     ConnectionConfig, SslMode,
 };
 pub use pool::{DbBackend, DbPool};
