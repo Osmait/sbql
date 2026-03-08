@@ -5,6 +5,7 @@ use crate::app::{
     AppState, ConnectionForm, DiagramGlyphMode, EditorMode, FocusedPanel,
     NavMode, PendingEdit,
 };
+use crate::completion;
 use sbql_core::CoreCommand;
 
 /// A pure description of a state change or side effect.
@@ -48,6 +49,12 @@ pub enum Action {
     EditorInput(Input),
     EditorCursorMove(CursorMove),
     RunQuery,
+
+    // -- Completion --
+    CompletionUp,
+    CompletionDown,
+    CompletionAccept,
+    CompletionDismiss,
 
     // -- Connections --
     ConnectSelected,
@@ -137,6 +144,9 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
         }
         Action::SetEditorMode(m) => {
             state.editor.mode = m;
+            if m == EditorMode::Normal {
+                state.editor.completion.dismiss();
+            }
         }
         Action::ToggleSidebar => {
             state.layout.sidebar_hidden = !state.layout.sidebar_hidden;
@@ -268,6 +278,9 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
         // -- Editor --
         Action::EditorInput(input) => {
             state.editor.textarea.input(input);
+            state.editor.invalidate_highlight();
+            // Recompute completions inline
+            recompute_completions(state);
         }
         Action::EditorCursorMove(mv) => {
             state.editor.textarea.move_cursor(mv);
@@ -277,9 +290,46 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
             if !sql.trim().is_empty() {
                 state.results.sort_state.clear();
                 state.active_filter = None;
+                state.editor.completion.dismiss();
                 let _ = cmd_tx.send(CoreCommand::ExecuteQuery { sql });
                 state.focused = FocusedPanel::Results;
             }
+        }
+
+        // -- Completion --
+        Action::CompletionUp => {
+            state.editor.completion.move_up();
+        }
+        Action::CompletionDown => {
+            state.editor.completion.move_down();
+        }
+        Action::CompletionAccept => {
+            if let Some(item) = state.editor.completion.selected_item().cloned() {
+                let prefix_len = state.editor.completion.prefix.len();
+                // Delete the prefix by sending backspace inputs
+                for _ in 0..prefix_len {
+                    state.editor.textarea.input(Input {
+                        key: tui_textarea::Key::Backspace,
+                        ctrl: false,
+                        alt: false,
+                        shift: false,
+                    });
+                }
+                // Insert the completion text char-by-char
+                for ch in item.text.chars() {
+                    state.editor.textarea.input(Input {
+                        key: tui_textarea::Key::Char(ch),
+                        ctrl: false,
+                        alt: false,
+                        shift: false,
+                    });
+                }
+                state.editor.invalidate_highlight();
+                state.editor.completion.dismiss();
+            }
+        }
+        Action::CompletionDismiss => {
+            state.editor.completion.dismiss();
         }
 
         // -- Connections --
@@ -445,6 +495,7 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
         // -- Diagram --
         Action::OpenDiagram => {
             if state.conn.active_id.is_some() {
+                state.diagram_requested = true;
                 let _ = cmd_tx.send(CoreCommand::LoadDiagram);
             } else {
                 state.error_msg =
@@ -1048,6 +1099,30 @@ fn diagram_visible_table_indices(diag: &crate::app::DiagramState) -> Vec<usize> 
 #[cfg(test)]
 pub(crate) fn parse_filter_input_test(input: &str) -> Option<(String, &str)> {
     parse_filter_input(input)
+}
+
+/// Recompute autocomplete completions based on current editor state.
+fn recompute_completions(state: &mut AppState) {
+    let lines: Vec<String> = state.editor.textarea.lines().iter().map(|s| s.to_string()).collect();
+    let (row, col) = state.editor.textarea.cursor();
+    let prefix = completion::extract_prefix(&lines, row, col);
+    if prefix.len() >= 2 {
+        let items = completion::compute_completions(
+            &prefix,
+            &state.tables.tables,
+            state.cached_diagram.as_ref(),
+        );
+        if items.is_empty() {
+            state.editor.completion.dismiss();
+        } else {
+            state.editor.completion.prefix = prefix;
+            state.editor.completion.items = items;
+            state.editor.completion.selected = 0;
+            state.editor.completion.visible = true;
+        }
+    } else {
+        state.editor.completion.dismiss();
+    }
 }
 
 /// Apply live filter if the debounce deadline has passed. Called from tick.

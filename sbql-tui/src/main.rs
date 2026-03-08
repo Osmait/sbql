@@ -18,8 +18,10 @@ use tokio::sync::mpsc;
 
 mod action;
 mod app;
+mod completion;
 mod events;
 mod handlers;
+mod highlight;
 #[cfg(test)]
 mod test_helpers;
 mod ui;
@@ -132,6 +134,7 @@ async fn main() -> anyhow::Result<()> {
             AppEvent::Core(ce) => {
                 tracing::debug!("CoreEvent: {:?}", ce);
                 let auto_list = matches!(ce, sbql_core::CoreEvent::Connected(_));
+                let tables_loaded = matches!(ce, sbql_core::CoreEvent::TableList(_));
                 if !auto_connected {
                     if let sbql_core::CoreEvent::ConnectionList(ref conns) = ce {
                         if let Some(ref name) = auto_connect_name {
@@ -147,6 +150,10 @@ async fn main() -> anyhow::Result<()> {
                 state.apply_core_event(ce);
                 if auto_list {
                     let _ = cmd_tx.send(CoreCommand::ListTables);
+                }
+                if tables_loaded {
+                    // Pre-load diagram data so autocomplete has column info.
+                    let _ = cmd_tx.send(CoreCommand::LoadDiagram);
                 }
             }
 

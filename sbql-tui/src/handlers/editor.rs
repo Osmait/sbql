@@ -47,7 +47,20 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
             if is_run_query(&key) {
                 return Action::RunQuery;
             }
-            if key.code == KeyCode::Esc {
+            if state.editor.completion.visible {
+                match key.code {
+                    KeyCode::Up => return Action::CompletionUp,
+                    KeyCode::Down => return Action::CompletionDown,
+                    KeyCode::Tab | KeyCode::Enter => return Action::CompletionAccept,
+                    KeyCode::Esc => {
+                        return Action::Batch(vec![
+                            Action::CompletionDismiss,
+                            Action::SetEditorMode(EditorMode::Normal),
+                        ]);
+                    }
+                    _ => {} // fall through to normal editor input
+                }
+            } else if key.code == KeyCode::Esc {
                 return Action::SetEditorMode(EditorMode::Normal);
             }
             Action::EditorInput(Input::from(key))

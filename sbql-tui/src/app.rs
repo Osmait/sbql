@@ -2,12 +2,16 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use ratatui::layout::Rect;
+use ratatui::style::Style;
 use sbql_core::{
     ConnectionConfig, CoreEvent, DbBackend, DiagramData, QueryResult, SortDirection, SslMode,
     TableEntry,
 };
 use tui_textarea::TextArea;
 use uuid::Uuid;
+
+use crate::completion::CompletionState;
+use crate::highlight::SqlHighlighter;
 
 // ---------------------------------------------------------------------------
 // Focus model
@@ -394,12 +398,24 @@ pub struct TableBrowserState {
 pub struct EditorState {
     pub textarea: TextArea<'static>,
     pub mode: EditorMode,
+    // Syntax highlighting
+    pub scroll_row: usize,
+    pub scroll_col: usize,
+    pub highlight_cache: Option<Vec<Vec<(Style, String)>>>,
+    pub highlighter: SqlHighlighter,
+    // Autocomplete
+    pub completion: CompletionState,
 }
 
 impl EditorState {
     /// Get the current SQL text from the editor.
     pub fn sql(&self) -> String {
         self.textarea.lines().join("\n")
+    }
+
+    /// Invalidate the cached highlight spans (call on any text change).
+    pub fn invalidate_highlight(&mut self) {
+        self.highlight_cache = None;
     }
 }
 
@@ -629,6 +645,12 @@ pub struct AppState {
     // ---- diagram mode ----
     /// When Some, the diagram full-screen overlay is active.
     pub diagram: Option<DiagramState>,
+    /// True when the user explicitly requested the diagram overlay (Shift+D).
+    /// Prevents auto-loaded diagram data from opening the overlay.
+    pub diagram_requested: bool,
+
+    // ---- cached diagram data for completions ----
+    pub cached_diagram: Option<DiagramData>,
 
     // ---- status / error ----
     pub status_msg: Option<String>,
@@ -670,6 +692,11 @@ impl AppState {
             editor: EditorState {
                 textarea,
                 mode: EditorMode::Normal,
+                scroll_row: 0,
+                scroll_col: 0,
+                highlight_cache: None,
+                highlighter: SqlHighlighter::new(),
+                completion: CompletionState::default(),
             },
             results: ResultsState {
                 data: QueryResult::default(),
@@ -709,6 +736,8 @@ impl AppState {
             filter: FilterBar::default(),
             active_filter: None,
             diagram: None,
+            diagram_requested: false,
+            cached_diagram: None,
             status_msg: None,
             error_msg: None,
             should_quit: false,
@@ -891,7 +920,11 @@ impl AppState {
             }
             CoreEvent::DiagramLoaded(data) => {
                 self.results.is_loading = false;
-                self.diagram = Some(DiagramState::new(data));
+                self.cached_diagram = Some(data.clone());
+                if self.diagram_requested {
+                    self.diagram_requested = false;
+                    self.diagram = Some(DiagramState::new(data));
+                }
             }
             CoreEvent::FilterSuggestions { items, token } => {
                 self.results.is_loading = false;
@@ -1220,11 +1253,24 @@ mod tests {
     }
 
     #[test]
-    fn core_event_diagram_loaded() {
+    fn core_event_diagram_loaded_without_request() {
         let mut state = AppState::new(vec![]);
         let data = DiagramData::default();
         state.apply_core_event(CoreEvent::DiagramLoaded(data));
+        // Should NOT open overlay unless user requested it
+        assert!(state.diagram.is_none());
+        assert!(state.cached_diagram.is_some());
+    }
+
+    #[test]
+    fn core_event_diagram_loaded_with_request() {
+        let mut state = AppState::new(vec![]);
+        state.diagram_requested = true;
+        let data = DiagramData::default();
+        state.apply_core_event(CoreEvent::DiagramLoaded(data));
         assert!(state.diagram.is_some());
+        assert!(state.cached_diagram.is_some());
+        assert!(!state.diagram_requested);
     }
 
     #[test]
