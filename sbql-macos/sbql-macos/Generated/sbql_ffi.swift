@@ -1751,6 +1751,7 @@ public enum FfiDbBackend {
     
     case postgres
     case sqlite
+    case redis
 }
 
 
@@ -1772,6 +1773,8 @@ public struct FfiConverterTypeFfiDbBackend: FfiConverterRustBuffer {
         
         case 2: return .sqlite
         
+        case 3: return .redis
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -1786,6 +1789,10 @@ public struct FfiConverterTypeFfiDbBackend: FfiConverterRustBuffer {
         
         case .sqlite:
             writeInt(&buf, Int32(2))
+        
+        
+        case .redis:
+            writeInt(&buf, Int32(3))
         
         }
     }

@@ -19,10 +19,18 @@ final class AppViewModel {
         case diagram = "Diagram"
     }
 
+    private static let lastConnectionKey = "lastConnectionId"
+
     // MARK: - Lifecycle
 
     func onAppear() {
         connections.loadFromDisk()
+
+        // Auto-connect to the last used connection
+        if let lastId = UserDefaults.standard.string(forKey: Self.lastConnectionKey),
+           connections.connections.contains(where: { $0.id == lastId }) {
+            Task { await connect(id: lastId) }
+        }
     }
 
     // MARK: - Connection flow
@@ -31,6 +39,7 @@ final class AppViewModel {
         do {
             try await service.connect(id: id)
             connections.markConnected(id: id)
+            UserDefaults.standard.set(id, forKey: Self.lastConnectionKey)
             showToast("Connected")
         } catch {
             showError(error)
@@ -61,6 +70,7 @@ final class AppViewModel {
             connections.tables = []
             results.clear()
             editor.lastQueryDuration = nil
+            UserDefaults.standard.removeObject(forKey: Self.lastConnectionKey)
             showToast("Disconnected")
         } catch {
             showError(error)
