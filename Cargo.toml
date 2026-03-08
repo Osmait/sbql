@@ -55,3 +55,8 @@ tui-textarea = { version = "0.7", features = ["crossterm"] }
 
 # Ordered map (used by diagram data loader)
 indexmap = "2"
+
+# Tree-sitter (syntax highlighting)
+tree-sitter = "0.25"
+tree-sitter-highlight = "0.25"
+tree-sitter-sequel = "0.3"

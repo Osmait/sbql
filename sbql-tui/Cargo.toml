@@ -23,3 +23,6 @@ tracing-subscriber.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 tui-textarea.workspace = true
+tree-sitter.workspace = true
+tree-sitter-highlight.workspace = true
+tree-sitter-sequel.workspace = true
