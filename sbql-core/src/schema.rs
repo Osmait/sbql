@@ -120,7 +120,9 @@ pub async fn execute_cell_update(
         DbPool::Sqlite(sq) => {
             execute_cell_update_sqlite(sq, table, pk_col, pk_val, target_col, new_val).await
         }
-        DbPool::Redis(_) => Err(SbqlError::Schema("Cell update not supported for Redis".into())),
+        DbPool::Redis(_) => Err(SbqlError::Schema(
+            "Cell update not supported for Redis".into(),
+        )),
     }
 }
 
@@ -135,7 +137,9 @@ pub async fn execute_row_delete(
     match pool {
         DbPool::Postgres(pg) => execute_row_delete_pg(pg, schema, table, pk_col, pk_val).await,
         DbPool::Sqlite(sq) => execute_row_delete_sqlite(sq, table, pk_col, pk_val).await,
-        DbPool::Redis(_) => Err(SbqlError::Schema("Row delete not supported for Redis".into())),
+        DbPool::Redis(_) => Err(SbqlError::Schema(
+            "Row delete not supported for Redis".into(),
+        )),
     }
 }
 
@@ -157,7 +161,9 @@ async fn list_tables_pg(pool: &PgPool) -> Result<Vec<TableEntry>> {
     .await?;
 
     if rows.is_empty() {
-        eprintln!("[sbql-core] list_tables_pg: information_schema returned 0 rows, trying pg_catalog fallback");
+        tracing::warn!(
+            "list_tables_pg: information_schema returned 0 rows, trying pg_catalog fallback"
+        );
         // Fallback: use pg_catalog which is always accessible
         let fallback_rows = sqlx::query(
             r#"
@@ -173,7 +179,10 @@ async fn list_tables_pg(pool: &PgPool) -> Result<Vec<TableEntry>> {
         .fetch_all(pool)
         .await?;
 
-        eprintln!("[sbql-core] list_tables_pg: pg_catalog fallback returned {} rows", fallback_rows.len());
+        tracing::debug!(
+            "list_tables_pg: pg_catalog fallback returned {} rows",
+            fallback_rows.len()
+        );
 
         return Ok(fallback_rows
             .into_iter()
@@ -476,10 +485,7 @@ async fn load_diagram_sqlite(pool: &SqlitePool) -> Result<DiagramData> {
 
     for table_name in &table_names {
         // 2. Columns from PRAGMA table_info
-        let col_sql = format!(
-            "PRAGMA table_info(\"{}\")",
-            table_name.replace('"', "\"\"")
-        );
+        let col_sql = format!("PRAGMA table_info(\"{}\")", table_name.replace('"', "\"\""));
         let col_rows = sqlx::query(&col_sql).fetch_all(pool).await?;
 
         let columns: Vec<ColumnInfo> = col_rows
@@ -537,9 +543,7 @@ async fn execute_cell_update_sqlite(
     target_col: &str,
     new_val: &str,
 ) -> Result<()> {
-    let sql = format!(
-        r#"UPDATE "{table}" SET "{target_col}" = $1 WHERE "{pk_col}" = $2"#
-    );
+    let sql = format!(r#"UPDATE "{table}" SET "{target_col}" = $1 WHERE "{pk_col}" = $2"#);
     sqlx::query(&sql)
         .bind(new_val)
         .bind(pk_val)
@@ -559,17 +563,13 @@ async fn execute_row_delete_sqlite(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Kept for backward compat (used in tests)
-// ---------------------------------------------------------------------------
-
-pub fn build_update_sql(schema: &str, table: &str, pk_col: &str, target_col: &str) -> String {
-    format!(r#"UPDATE "{schema}"."{table}" SET "{target_col}" = $1 WHERE "{pk_col}" = $2"#)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn build_update_sql(schema: &str, table: &str, pk_col: &str, target_col: &str) -> String {
+        format!(r#"UPDATE "{schema}"."{table}" SET "{target_col}" = $1 WHERE "{pk_col}" = $2"#)
+    }
 
     #[test]
     fn test_table_entry_qualified() {

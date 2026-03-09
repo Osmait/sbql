@@ -209,7 +209,7 @@ mod tests {
     use super::*;
     use crate::app::{CellEditState, DiagramState};
     use crate::test_helpers::{key, key_mod, make_state_with_results};
-    use sbql_core::{DiagramData, TableEntry};
+    use sbql_core::DiagramData;
 
     // -- Priority: diagram intercepts all --
 
@@ -227,7 +227,14 @@ mod tests {
     fn cell_edit_mode_intercepts() {
         let mut state = make_state_with_results();
         state.mutation.cell_edit = Some(CellEditState::new(
-            0, 0, "id".into(), "1".into(), "public".into(), "users".into(), "id".into(), "1".into(),
+            0,
+            0,
+            "id".into(),
+            "1".into(),
+            "public".into(),
+            "users".into(),
+            "id".into(),
+            "1".into(),
         ));
         let act = handle_key(&state, key(KeyCode::Esc));
         assert!(matches!(act, Action::CancelCellEdit));

@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 // MARK: - Window Accessor
 
@@ -7,45 +7,19 @@ import AppKit
 struct WindowAccessor: NSViewRepresentable {
     let configure: (NSWindow) -> Void
 
-    func makeNSView(context: Context) -> NSView {
+    func makeNSView(context _: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
             if let window = view.window {
-                self.configure(window)
+                configure(window)
             }
         }
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
+    func updateNSView(_ nsView: NSView, context _: Context) {
         if let window = nsView.window {
             configure(window)
-        }
-    }
-}
-
-extension View {
-    /// Apply the sbql surface card style.
-    func sbqlCard() -> some View {
-        self
-            .background(SbqlTheme.Colors.surface)
-            .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.large))
-            .overlay(
-                RoundedRectangle(cornerRadius: SbqlTheme.Radius.large)
-                    .stroke(SbqlTheme.Colors.border, lineWidth: 1)
-            )
-    }
-
-    /// Conditional modifier.
-    @ViewBuilder
-    func `if`<Transform: View>(
-        _ condition: Bool,
-        transform: (Self) -> Transform
-    ) -> some View {
-        if condition {
-            transform(self)
-        } else {
-            self
         }
     }
 }

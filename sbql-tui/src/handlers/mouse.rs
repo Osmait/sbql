@@ -44,9 +44,7 @@ fn map_mouse(state: &AppState, mouse: MouseEvent) -> Action {
     }
 
     match mouse.kind {
-        MouseEventKind::Down(MouseButton::Left) => {
-            map_mouse_click(state, mouse.column, mouse.row)
-        }
+        MouseEventKind::Down(MouseButton::Left) => map_mouse_click(state, mouse.column, mouse.row),
         MouseEventKind::ScrollDown => match state.focused {
             FocusedPanel::Results => Action::MoveRowDown,
             FocusedPanel::Connections => {
@@ -72,9 +70,7 @@ fn map_mouse(state: &AppState, mouse: MouseEvent) -> Action {
             FocusedPanel::Connections => {
                 Action::SelectConnection(state.conn.selected.saturating_sub(1))
             }
-            FocusedPanel::Tables => {
-                Action::SelectTable(state.tables.selected.saturating_sub(1))
-            }
+            FocusedPanel::Tables => Action::SelectTable(state.tables.selected.saturating_sub(1)),
             _ => Action::Noop,
         },
         _ => Action::Noop,
@@ -131,8 +127,12 @@ fn map_mouse_click(state: &AppState, col: u16, row: u16) -> Action {
                 let col_scroll = state.results.col_scroll;
                 let mut acc = 0usize;
                 let mut clicked_col = col_scroll;
-                for (ci, &w) in
-                    state.layout.last_col_widths.iter().enumerate().skip(col_scroll)
+                for (ci, &w) in state
+                    .layout
+                    .last_col_widths
+                    .iter()
+                    .enumerate()
+                    .skip(col_scroll)
                 {
                     let next_acc = acc + w as usize + 1;
                     if inner_x < next_acc {

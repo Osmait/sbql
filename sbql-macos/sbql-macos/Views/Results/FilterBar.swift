@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 struct FilterBar: View {
     @Environment(AppViewModel.self) private var appVM
@@ -68,7 +68,7 @@ private struct FilterBarTextField: NSViewRepresentable {
         }
     }
 
-    static func dismantleNSView(_ tf: NSTextField, coordinator: Coordinator) {
+    static func dismantleNSView(_: NSTextField, coordinator: Coordinator) {
         coordinator.completionPanel.dismiss()
         coordinator.debounceTask?.cancel()
         coordinator.valueSuggestTask?.cancel()
@@ -110,16 +110,16 @@ private struct FilterBarTextField: NSViewRepresentable {
                 guard let self else { return }
                 let q = text.trimmingCharacters(in: .whitespaces)
                 if q.isEmpty {
-                    await self.appVM.clearFilter()
+                    await appVM.clearFilter()
                 } else {
-                    await self.appVM.applyFilter(query: q)
+                    await appVM.applyFilter(query: q)
                 }
             }
         }
 
         func control(
-            _ control: NSControl,
-            textView: NSTextView,
+            _: NSControl,
+            textView _: NSTextView,
             doCommandBy sel: Selector
         ) -> Bool {
             switch sel {
@@ -147,9 +147,9 @@ private struct FilterBarTextField: NSViewRepresentable {
                     Task { @MainActor [weak self] in
                         guard let self else { return }
                         if q.isEmpty {
-                            await self.appVM.clearFilter()
+                            await appVM.clearFilter()
                         } else {
-                            await self.appVM.applyFilter(query: q)
+                            await appVM.applyFilter(query: q)
                         }
                     }
                 }
@@ -176,7 +176,7 @@ private struct FilterBarTextField: NSViewRepresentable {
 
             if let colonIdx = text.firstIndex(of: ":") {
                 // Format is column:prefix → suggest values
-                let column = String(text[text.startIndex..<colonIdx])
+                let column = String(text[text.startIndex ..< colonIdx])
                 let prefix = String(text[text.index(after: colonIdx)...])
                 let columns = appVM.results.currentResult.columns
 
@@ -188,7 +188,7 @@ private struct FilterBarTextField: NSViewRepresentable {
                 valueSuggestTask?.cancel()
                 valueSuggestTask = Task { @MainActor [weak self] in
                     guard let self else { return }
-                    let values = await self.appVM.suggestFilterValues(
+                    let values = await appVM.suggestFilterValues(
                         column: column, prefix: prefix
                     )
                     guard !Task.isCancelled else { return }
@@ -196,10 +196,10 @@ private struct FilterBarTextField: NSViewRepresentable {
                         CompletionItem(text: $0, detail: column, kind: .keyword)
                     }
                     if items.isEmpty {
-                        self.completionPanel.dismiss()
+                        completionPanel.dismiss()
                     } else {
-                        self.completionPanel.show(
-                            items: items, at: self.screenPointBelow(tf)
+                        completionPanel.show(
+                            items: items, at: screenPointBelow(tf)
                         )
                     }
                 }
@@ -235,11 +235,10 @@ private struct FilterBarTextField: NSViewRepresentable {
                     updateCompletions(textField: tf)
                 }
             } else {
-                let newText: String
-                if let colonIdx = text.firstIndex(of: ":") {
-                    newText = String(text[text.startIndex...colonIdx]) + item.text
+                let newText: String = if let colonIdx = text.firstIndex(of: ":") {
+                    String(text[text.startIndex ... colonIdx]) + item.text
                 } else {
-                    newText = item.text
+                    item.text
                 }
                 appVM.results.filterText = newText
                 textField?.stringValue = newText

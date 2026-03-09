@@ -13,12 +13,10 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
                 Action::ClearPendingG
             }
         }
-        KeyCode::Up | KeyCode::Char('k') => {
-            Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::SelectConnection(state.conn.selected.saturating_sub(1)),
-            ])
-        }
+        KeyCode::Up | KeyCode::Char('k') => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::SelectConnection(state.conn.selected.saturating_sub(1)),
+        ]),
         KeyCode::Char('G') => {
             if !state.conn.connections.is_empty() {
                 Action::Batch(vec![
@@ -36,39 +34,25 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
                 Action::SetPendingG
             }
         }
-        KeyCode::Enter => {
-            Action::Batch(vec![Action::ClearPendingG, Action::ConnectSelected])
-        }
-        KeyCode::Char('n') => {
-            Action::Batch(vec![Action::ClearPendingG, Action::OpenNewConnForm])
-        }
-        KeyCode::Char('e') => {
-            Action::Batch(vec![Action::ClearPendingG, Action::OpenEditConnForm])
-        }
+        KeyCode::Enter => Action::Batch(vec![Action::ClearPendingG, Action::ConnectSelected]),
+        KeyCode::Char('n') => Action::Batch(vec![Action::ClearPendingG, Action::OpenNewConnForm]),
+        KeyCode::Char('e') => Action::Batch(vec![Action::ClearPendingG, Action::OpenEditConnForm]),
         KeyCode::Char('d') => {
             Action::Batch(vec![Action::ClearPendingG, Action::InitDeleteConnection])
         }
-        KeyCode::Char('x') => {
-            Action::Batch(vec![Action::ClearPendingG, Action::DisconnectActive])
-        }
-        KeyCode::Esc => {
-            Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::FocusPanel(FocusedPanel::Editor),
-            ])
-        }
+        KeyCode::Char('x') => Action::Batch(vec![Action::ClearPendingG, Action::DisconnectActive]),
+        KeyCode::Esc => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::FocusPanel(FocusedPanel::Editor),
+        ]),
         _ => Action::ClearPendingG,
     }
 }
 
 pub fn handle_confirm_delete(_state: &AppState, key: KeyEvent) -> Action {
     match key.code {
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-            Action::ConfirmDeleteConnection
-        }
-        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-            Action::CancelDeleteConnection
-        }
+        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => Action::ConfirmDeleteConnection,
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => Action::CancelDeleteConnection,
         _ => Action::Noop,
     }
 }

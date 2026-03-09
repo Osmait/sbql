@@ -6,7 +6,9 @@ struct DiagramCanvas: View {
     @State private var dragStart: [String: CGPoint] = [:]
     @State private var viewportSize: CGSize = .zero
 
-    private var diagram: DiagramViewModel { appVM.diagram }
+    private var diagram: DiagramViewModel {
+        appVM.diagram
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -132,8 +134,8 @@ struct DiagramCanvas: View {
 
     private func fksForTable(_ tableId: String) -> [DiagramForeignKey] {
         diagram.diagramData.foreignKeys.filter {
-            "\($0.fromSchema).\($0.fromTable)" == tableId ||
-            "\($0.toSchema).\($0.toTable)" == tableId
+            tableId == "\($0.fromSchema).\($0.fromTable)" ||
+                tableId == "\($0.toSchema).\($0.toTable)"
         }
     }
 

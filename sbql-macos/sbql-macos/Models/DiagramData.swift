@@ -9,14 +9,20 @@ struct DiagramModel {
 }
 
 struct DiagramTable: Identifiable, Hashable {
-    var id: String { "\(schema).\(name)" }
+    var id: String {
+        "\(schema).\(name)"
+    }
+
     let schema: String
     let name: String
     let columns: [DiagramColumn]
 }
 
 struct DiagramColumn: Identifiable, Hashable {
-    var id: String { "\(tableId).\(name)" }
+    var id: String {
+        "\(tableId).\(name)"
+    }
+
     let tableId: String
     let name: String
     let dataType: String
@@ -26,7 +32,10 @@ struct DiagramColumn: Identifiable, Hashable {
 }
 
 struct DiagramForeignKey: Identifiable, Hashable {
-    var id: String { constraintName }
+    var id: String {
+        constraintName
+    }
+
     let fromSchema: String
     let fromTable: String
     let fromCol: String
@@ -49,7 +58,7 @@ extension DiagramModel {
             fkColumnSet.insert("\(fk.toSchema).\(fk.toTable).\(fk.toCol)")
         }
 
-        self.tables = ffi.tables.map { ffiTable in
+        tables = ffi.tables.map { ffiTable in
             let tableId = "\(ffiTable.schema).\(ffiTable.name)"
             return DiagramTable(
                 schema: ffiTable.schema,
@@ -67,18 +76,18 @@ extension DiagramModel {
                 }
             )
         }
-        self.foreignKeys = rawFKs
+        foreignKeys = rawFKs
     }
 }
 
 extension DiagramForeignKey {
     init(ffi: FfiForeignKey) {
-        self.fromSchema     = ffi.fromSchema
-        self.fromTable      = ffi.fromTable
-        self.fromCol        = ffi.fromCol
-        self.toSchema       = ffi.toSchema
-        self.toTable        = ffi.toTable
-        self.toCol          = ffi.toCol
-        self.constraintName = ffi.constraintName
+        fromSchema = ffi.fromSchema
+        fromTable = ffi.fromTable
+        fromCol = ffi.fromCol
+        toSchema = ffi.toSchema
+        toTable = ffi.toTable
+        toCol = ffi.toCol
+        constraintName = ffi.constraintName
     }
 }

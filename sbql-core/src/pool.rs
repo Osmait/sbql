@@ -18,7 +18,7 @@ pub enum DbBackend {
 pub enum DbPool {
     Postgres(PgPool),
     Sqlite(SqlitePool),
-    Redis(redis::aio::ConnectionManager),
+    Redis(Box<redis::aio::ConnectionManager>),
 }
 
 impl std::fmt::Debug for DbPool {
@@ -26,7 +26,10 @@ impl std::fmt::Debug for DbPool {
         match self {
             DbPool::Postgres(_) => f.debug_tuple("Postgres").field(&"PgPool(..)").finish(),
             DbPool::Sqlite(_) => f.debug_tuple("Sqlite").field(&"SqlitePool(..)").finish(),
-            DbPool::Redis(_) => f.debug_tuple("Redis").field(&"ConnectionManager(..)").finish(),
+            DbPool::Redis(_) => f
+                .debug_tuple("Redis")
+                .field(&"ConnectionManager(..)")
+                .finish(),
         }
     }
 }

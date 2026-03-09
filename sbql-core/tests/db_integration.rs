@@ -440,10 +440,12 @@ async fn test_suggest_distinct_values() {
         .await
         .unwrap();
 
-    sqlx::query("INSERT INTO suggest_test (name) VALUES ('Alice'), ('Alicia'), ('Bob'), ('Charlie');")
-        .execute(&pg_pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO suggest_test (name) VALUES ('Alice'), ('Alicia'), ('Bob'), ('Charlie');",
+    )
+    .execute(&pg_pool)
+    .await
+    .unwrap();
 
     let suggestions = sbql_core::query::suggest_distinct_values(
         &pool,
@@ -477,10 +479,12 @@ async fn test_suggest_distinct_values_special_chars() {
         .await
         .unwrap();
 
-    sqlx::query("INSERT INTO special_test (val) VALUES ('100% done'), ('50% complete'), ('hello');")
-        .execute(&pg_pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO special_test (val) VALUES ('100% done'), ('50% complete'), ('hello');",
+    )
+    .execute(&pg_pool)
+    .await
+    .unwrap();
 
     // The % in prefix should be escaped
     let suggestions = sbql_core::query::suggest_distinct_values(

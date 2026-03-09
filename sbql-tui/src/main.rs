@@ -34,12 +34,17 @@ use worker::spawn_worker;
 
 /// Path to `~/.config/sbql/last-connection` (stores the UUID of the last active connection).
 fn last_connection_path() -> Option<PathBuf> {
-    sbql_core::config_path().ok().map(|p| p.with_file_name("last-connection"))
+    sbql_core::config_path()
+        .ok()
+        .map(|p| p.with_file_name("last-connection"))
 }
 
 fn load_last_connection_id() -> Option<String> {
     let path = last_connection_path()?;
-    std::fs::read_to_string(path).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 fn save_last_connection_id(id: &uuid::Uuid) {
@@ -170,12 +175,15 @@ async fn main() -> anyhow::Result<()> {
                     if let sbql_core::CoreEvent::ConnectionList(ref conns) = ce {
                         // 1. CLI argument takes priority (match by name)
                         // 2. Otherwise, try the last-connected ID from disk
-                        let target = auto_connect_name.as_ref().and_then(|name| {
-                            conns.iter().find(|c| c.name.eq_ignore_ascii_case(name))
-                        }).or_else(|| {
-                            let last_id = load_last_connection_id()?;
-                            conns.iter().find(|c| c.id.to_string() == last_id)
-                        });
+                        let target = auto_connect_name
+                            .as_ref()
+                            .and_then(|name| {
+                                conns.iter().find(|c| c.name.eq_ignore_ascii_case(name))
+                            })
+                            .or_else(|| {
+                                let last_id = load_last_connection_id()?;
+                                conns.iter().find(|c| c.id.to_string() == last_id)
+                            });
 
                         if let Some(cfg) = target {
                             let _ = cmd_tx.send(CoreCommand::Connect(cfg.id));
@@ -193,7 +201,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
 
-            AppEvent::Resize(_, _) => {
+            AppEvent::Resize => {
                 state.layout.needs_redraw = true;
             }
 

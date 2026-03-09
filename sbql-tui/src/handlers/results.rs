@@ -13,26 +13,26 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
         state.results.data.columns.len(),
     );
     match (key.code, key.modifiers) {
-        (KeyCode::Down | KeyCode::Char('j'), KeyModifiers::NONE) => {
-            Action::Batch(vec![Action::ClearPendingG, Action::ClearPendingD, Action::MoveRowDown])
-        }
-        (KeyCode::Up | KeyCode::Char('k'), KeyModifiers::NONE) => {
-            Action::Batch(vec![Action::ClearPendingG, Action::ClearPendingD, Action::MoveRowUp])
-        }
-        (KeyCode::Right | KeyCode::Char('l'), KeyModifiers::NONE) => {
-            Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::ClearPendingD,
-                Action::MoveColRight,
-            ])
-        }
-        (KeyCode::Left | KeyCode::Char('h'), KeyModifiers::NONE) => {
-            Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::ClearPendingD,
-                Action::MoveColLeft,
-            ])
-        }
+        (KeyCode::Down | KeyCode::Char('j'), KeyModifiers::NONE) => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::ClearPendingD,
+            Action::MoveRowDown,
+        ]),
+        (KeyCode::Up | KeyCode::Char('k'), KeyModifiers::NONE) => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::ClearPendingD,
+            Action::MoveRowUp,
+        ]),
+        (KeyCode::Right | KeyCode::Char('l'), KeyModifiers::NONE) => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::ClearPendingD,
+            Action::MoveColRight,
+        ]),
+        (KeyCode::Left | KeyCode::Char('h'), KeyModifiers::NONE) => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::ClearPendingD,
+            Action::MoveColLeft,
+        ]),
         (KeyCode::Char('g'), KeyModifiers::NONE) => {
             if state.vim.pending_g {
                 Action::Batch(vec![
@@ -51,20 +51,16 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
                 Action::MoveRowLast,
             ])
         }
-        (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
-            Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::ClearPendingD,
-                Action::MoveHalfPageDown,
-            ])
-        }
-        (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
-            Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::ClearPendingD,
-                Action::MoveHalfPageUp,
-            ])
-        }
+        (KeyCode::Char('d'), KeyModifiers::CONTROL) => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::ClearPendingD,
+            Action::MoveHalfPageDown,
+        ]),
+        (KeyCode::Char('u'), KeyModifiers::CONTROL) => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::ClearPendingD,
+            Action::MoveHalfPageUp,
+        ]),
         (KeyCode::Char('d'), KeyModifiers::NONE) => {
             if state.mutation.pending_d {
                 Action::Batch(vec![
@@ -83,16 +79,13 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
                 Action::MoveColFirst,
             ])
         }
-        (KeyCode::Char('$'), KeyModifiers::NONE) => {
-            Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::ClearPendingD,
-                Action::MoveColLast,
-            ])
-        }
+        (KeyCode::Char('$'), KeyModifiers::NONE) => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::ClearPendingD,
+            Action::MoveColLast,
+        ]),
         (KeyCode::PageDown, _) => {
-            let mut actions =
-                vec![Action::ClearPendingG, Action::ClearPendingD];
+            let mut actions = vec![Action::ClearPendingG, Action::ClearPendingD];
             if state.results.data.has_next_page {
                 let next = state.results.current_page + 1;
                 actions.push(Action::SendCommand(sbql_core::CoreCommand::FetchPage {
@@ -102,8 +95,7 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
             Action::Batch(actions)
         }
         (KeyCode::PageUp, _) => {
-            let mut actions =
-                vec![Action::ClearPendingG, Action::ClearPendingD];
+            let mut actions = vec![Action::ClearPendingG, Action::ClearPendingD];
             if state.results.current_page > 0 {
                 let prev = state.results.current_page - 1;
                 actions.push(Action::SendCommand(sbql_core::CoreCommand::FetchPage {
@@ -119,35 +111,28 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
                 Action::EnterCellEdit,
             ])
         }
-        _ if is_commit(&key) => {
-            Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::ClearPendingD,
-                Action::CommitPending,
-            ])
-        }
-        (KeyCode::Char('o'), KeyModifiers::NONE) => {
-            Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::ClearPendingD,
-                Action::ToggleSort,
-            ])
-        }
-        (KeyCode::Char('/'), KeyModifiers::NONE)
-        | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
+        _ if is_commit(&key) => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::ClearPendingD,
+            Action::CommitPending,
+        ]),
+        (KeyCode::Char('o'), KeyModifiers::NONE) => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::ClearPendingD,
+            Action::ToggleSort,
+        ]),
+        (KeyCode::Char('/'), KeyModifiers::NONE) | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
             Action::Batch(vec![
                 Action::ClearPendingG,
                 Action::ClearPendingD,
                 Action::OpenFilter,
             ])
         }
-        (KeyCode::Esc, _) => {
-            Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::ClearPendingD,
-                Action::DiscardPendingOrEsc,
-            ])
-        }
+        (KeyCode::Esc, _) => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::ClearPendingD,
+            Action::DiscardPendingOrEsc,
+        ]),
         _ => Action::Batch(vec![Action::ClearPendingG, Action::ClearPendingD]),
     }
 }
@@ -160,8 +145,7 @@ pub fn extract_schema_table_from_sql(sql: &str) -> Option<(String, String)> {
     let rest = sql[from_pos + 5..].trim_start();
 
     fn parse_ident(s: &str) -> (&str, &str) {
-        if s.starts_with('"') {
-            let inner = &s[1..];
+        if let Some(inner) = s.strip_prefix('"') {
             if let Some(end) = inner.find('"') {
                 (&inner[..end], &inner[end + 1..])
             } else {
@@ -181,8 +165,8 @@ pub fn extract_schema_table_from_sql(sql: &str) -> Option<(String, String)> {
     }
 
     let after_first = after_first.trim_start();
-    if after_first.starts_with('.') {
-        let after_dot = after_first[1..].trim_start();
+    if let Some(stripped) = after_first.strip_prefix('.') {
+        let after_dot = stripped.trim_start();
         let (second, _) = parse_ident(after_dot);
         if second.is_empty() {
             return None;
@@ -403,8 +387,7 @@ mod tests {
 
     #[test]
     fn extract_with_where_clause() {
-        let result =
-            extract_schema_table_from_sql("SELECT * FROM orders WHERE status = 'active'");
+        let result = extract_schema_table_from_sql("SELECT * FROM orders WHERE status = 'active'");
         assert_eq!(result, Some(("public".into(), "orders".into())));
     }
 }

@@ -4,9 +4,9 @@ import SwiftUI
 @Observable
 final class AppViewModel {
     let connections = ConnectionsViewModel()
-    let editor      = EditorViewModel()
-    let results     = ResultsViewModel()
-    let diagram     = DiagramViewModel()
+    let editor = EditorViewModel()
+    let results = ResultsViewModel()
+    let diagram = DiagramViewModel()
 
     var activeTab: ActiveTab = .query
     var toastMessage: String?
@@ -15,7 +15,7 @@ final class AppViewModel {
     private let service = SbqlService.shared
 
     enum ActiveTab: String, CaseIterable {
-        case query   = "Query"
+        case query = "Query"
         case diagram = "Diagram"
     }
 
@@ -28,7 +28,8 @@ final class AppViewModel {
 
         // Auto-connect to the last used connection
         if let lastId = UserDefaults.standard.string(forKey: Self.lastConnectionKey),
-           connections.connections.contains(where: { $0.id == lastId }) {
+           connections.connections.contains(where: { $0.id == lastId })
+        {
             Task { await connect(id: lastId) }
         }
     }
@@ -240,7 +241,7 @@ final class AppViewModel {
 
     // MARK: - Mutations
 
-    func updateCell(
+    private func updateCell(
         schema: String, table: String,
         pkCol: String, pkVal: String,
         targetCol: String, newVal: String
@@ -252,23 +253,6 @@ final class AppViewModel {
                 targetCol: targetCol, newVal: newVal
             )
             showToast("Cell updated")
-        } catch {
-            showError(error)
-        }
-    }
-
-    func deleteRow(
-        schema: String, table: String,
-        pkCol: String, pkVal: String
-    ) async {
-        do {
-            try await service.deleteRow(
-                schema: schema, table: table,
-                pkCol: pkCol, pkVal: pkVal
-            )
-            showToast("Row deleted")
-            // Re-fetch current page
-            await fetchPage(results.currentResult.page)
         } catch {
             showError(error)
         }

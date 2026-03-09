@@ -24,8 +24,8 @@ pub use config::{
     config_path, load_connections, load_connections_from, save_connections, save_connections_to,
     ConnectionConfig, SslMode,
 };
-pub use pool::{DbBackend, DbPool};
 pub use error::{Result, SbqlError};
+pub use pool::{DbBackend, DbPool};
 pub use query::{QueryResult, PAGE_SIZE};
 pub use query_builder::SortDirection;
 pub use schema::{ColumnInfo, DiagramData, ForeignKey, TableEntry, TableSchema};
@@ -277,6 +277,7 @@ impl Core {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 

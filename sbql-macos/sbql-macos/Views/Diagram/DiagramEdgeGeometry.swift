@@ -2,7 +2,7 @@ import SwiftUI
 
 /// A precomputed FK edge between two column rows.
 struct DiagramEdge: Identifiable {
-    let id: String          // constraint name
+    let id: String // constraint name
     let fromTableId: String
     let toTableId: String
     let fromCol: String
@@ -14,7 +14,6 @@ struct DiagramEdge: Identifiable {
 
 /// Computes drawable edges anchored to specific column rows at left/right node edges.
 enum DiagramEdgeGeometry {
-
     static func edges(
         for foreignKeys: [DiagramForeignKey],
         tables: [DiagramTable],

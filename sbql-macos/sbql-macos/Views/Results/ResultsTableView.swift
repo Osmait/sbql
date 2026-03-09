@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 /// High-performance NSTableView wrapper with virtualized rows and column sorting.
 struct ResultsTableView: NSViewRepresentable {
@@ -44,7 +44,7 @@ struct ResultsTableView: NSViewRepresentable {
         return scrollView
     }
 
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+    func updateNSView(_: NSScrollView, context: Context) {
         context.coordinator.appVM = appVM
         context.coordinator.rebuildColumns()
         context.coordinator.tableView?.reloadData()
@@ -84,7 +84,7 @@ struct ResultsTableView: NSViewRepresentable {
 
         // MARK: - NSTableViewDataSource
 
-        func numberOfRows(in tableView: NSTableView) -> Int {
+        func numberOfRows(in _: NSTableView) -> Int {
             appVM.results.currentResult.rows.count
         }
 
@@ -121,7 +121,7 @@ struct ResultsTableView: NSViewRepresentable {
                 let attrs: [NSAttributedString.Key: Any] = [
                     .strikethroughStyle: NSUnderlineStyle.single.rawValue,
                     .foregroundColor: NSColor(SbqlTheme.Colors.danger),
-                    .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+                    .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
                 ]
                 cellView.attributedStringValue = NSAttributedString(string: value, attributes: attrs)
                 cellView.drawsBackground = true
@@ -143,9 +143,8 @@ struct ResultsTableView: NSViewRepresentable {
             return cellView
         }
 
-        func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-            let rowView = SbqlTableRowView()
-            return rowView
+        func tableView(_: NSTableView, rowViewForRow _: Int) -> NSTableRowView? {
+            SbqlTableRowView()
         }
 
         // MARK: - Double-click editing
@@ -161,23 +160,24 @@ struct ResultsTableView: NSViewRepresentable {
             let pks = appVM.results.primaryKeys
             guard appVM.results.activeSchema != nil,
                   appVM.results.activeTable != nil,
-                  !pks.isEmpty else {
+                  !pks.isEmpty
+            else {
                 appVM.showToast("Cannot edit: no primary key info")
                 return
             }
 
             guard let pkCol = pks.first,
-                  result.columns.contains(pkCol) else {
+                  result.columns.contains(pkCol)
+            else {
                 appVM.showToast("Cannot edit: PK column not in result")
                 return
             }
 
             let targetCol = result.columns[col]
-            let currentVal: String
-            if let dirtyVal = appVM.results.dirtyCells[CellKey(row: row, col: col)] {
-                currentVal = dirtyVal
+            let currentVal: String = if let dirtyVal = appVM.results.dirtyCells[CellKey(row: row, col: col)] {
+                dirtyVal
             } else {
-                currentVal = result.rows[row][col]
+                result.rows[row][col]
             }
 
             // Get the cell rect for popover positioning
@@ -192,15 +192,14 @@ struct ResultsTableView: NSViewRepresentable {
                 guard let self else { return }
                 popover.close()
                 let key = CellKey(row: row, col: col)
-                self.appVM.results.dirtyCells[key] = newVal
-                self.tableView?.reloadData(forRowIndexes: IndexSet(integer: row),
-                                           columnIndexes: IndexSet(integer: col))
+                appVM.results.dirtyCells[key] = newVal
+                tableView?.reloadData(forRowIndexes: IndexSet(integer: row),
+                                      columnIndexes: IndexSet(integer: col))
             }
 
             let hostingController = NSHostingController(rootView:
                 editorView
-                    .environment(\.colorScheme, .dark)
-            )
+                    .environment(\.colorScheme, .dark))
             popover.contentViewController = hostingController
             popover.show(relativeTo: cellRect, of: sender, preferredEdge: .maxY)
         }
@@ -233,7 +232,7 @@ struct ResultsTableView: NSViewRepresentable {
                 appVM.results.pendingDeletions.insert(row)
             }
             tableView?.reloadData(forRowIndexes: IndexSet(integer: row),
-                                  columnIndexes: IndexSet(0..<(tableView?.numberOfColumns ?? 0)))
+                                  columnIndexes: IndexSet(0 ..< (tableView?.numberOfColumns ?? 0)))
         }
 
         // MARK: - Sort
@@ -243,11 +242,10 @@ struct ResultsTableView: NSViewRepresentable {
             guard colIndex < result.columns.count else { return }
             let colName = result.columns[colIndex]
 
-            let direction: FfiSortDirection
-            if appVM.results.sortedColumn == colName && appVM.results.sortDirection == .ascending {
-                direction = .descending
+            let direction: FfiSortDirection = if appVM.results.sortedColumn == colName, appVM.results.sortDirection == .ascending {
+                .descending
             } else {
-                direction = .ascending
+                .ascending
             }
 
             appVM.results.sortedColumn = colName
@@ -312,7 +310,7 @@ private class SbqlTableHeaderView: NSTableHeaderView {
 
         // Draw each column's header cell manually (since we skip super)
         if let tableView {
-            for idx in 0..<tableView.tableColumns.count {
+            for idx in 0 ..< tableView.tableColumns.count {
                 let cellRect = headerRect(ofColumn: idx)
                 if dirtyRect.intersects(cellRect) {
                     tableView.tableColumns[idx].headerCell.draw(withFrame: cellRect, in: self)
@@ -337,16 +335,16 @@ private class SbqlHeaderCell: NSTableHeaderCell {
         self.init(textCell: title)
         self.coordinator = coordinator
         self.colIndex = colIndex
-        self.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        self.textColor = NSColor(SbqlTheme.Colors.textSecondary)
+        font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        textColor = NSColor(SbqlTheme.Colors.textSecondary)
     }
 
-    override func trackMouse(with event: NSEvent, in cellFrame: NSRect, of controlView: NSView, untilMouseUp flag: Bool) -> Bool {
+    override func trackMouse(with _: NSEvent, in _: NSRect, of _: NSView, untilMouseUp _: Bool) -> Bool {
         coordinator?.sortByColumn(colIndex)
         return true
     }
 
-    override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {
+    override func draw(withFrame cellFrame: NSRect, in _: NSView) {
         // Background
         NSColor(SbqlTheme.Colors.surface).setFill()
         cellFrame.fill()
@@ -355,7 +353,7 @@ private class SbqlHeaderCell: NSTableHeaderCell {
         let titleStr = stringValue
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-            .foregroundColor: NSColor(SbqlTheme.Colors.textSecondary)
+            .foregroundColor: NSColor(SbqlTheme.Colors.textSecondary),
         ]
         let size = titleStr.size(withAttributes: attrs)
         let textRect = NSRect(
@@ -368,11 +366,12 @@ private class SbqlHeaderCell: NSTableHeaderCell {
 
         // Sort indicator
         if let coordinator, let appVM = coordinator.appVM as AppViewModel?,
-           appVM.results.sortedColumn == titleStr {
+           appVM.results.sortedColumn == titleStr
+        {
             let arrow = appVM.results.sortDirection == .ascending ? "\u{25B2}" : "\u{25BC}"
             let arrowAttrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 8),
-                .foregroundColor: NSColor(SbqlTheme.Colors.accent)
+                .foregroundColor: NSColor(SbqlTheme.Colors.accent),
             ]
             let arrowSize = arrow.size(withAttributes: arrowAttrs)
             let arrowRect = NSRect(

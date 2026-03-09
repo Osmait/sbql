@@ -14,23 +14,12 @@ pub struct CompletionItem {
     pub kind: CompletionKind,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct CompletionState {
     pub visible: bool,
     pub items: Vec<CompletionItem>,
     pub selected: usize,
     pub prefix: String,
-}
-
-impl Default for CompletionState {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            items: Vec::new(),
-            selected: 0,
-            prefix: String::new(),
-        }
-    }
 }
 
 impl CompletionState {
@@ -64,16 +53,81 @@ impl CompletionState {
 
 /// SQL keywords offered by autocomplete.
 pub const SQL_KEYWORDS: &[&str] = &[
-    "SELECT", "FROM", "WHERE", "AND", "OR", "NOT", "IN", "IS", "NULL",
-    "AS", "ON", "JOIN", "INNER", "LEFT", "RIGHT", "OUTER", "FULL", "CROSS",
-    "GROUP", "BY", "ORDER", "ASC", "DESC", "HAVING", "LIMIT", "OFFSET",
-    "INSERT", "INTO", "VALUES", "UPDATE", "SET", "DELETE", "CREATE", "TABLE",
-    "ALTER", "DROP", "INDEX", "VIEW", "DISTINCT", "ALL", "EXISTS", "BETWEEN",
-    "LIKE", "ILIKE", "CASE", "WHEN", "THEN", "ELSE", "END", "CAST",
-    "UNION", "INTERSECT", "EXCEPT", "WITH", "RECURSIVE", "RETURNING",
-    "PRIMARY", "KEY", "FOREIGN", "REFERENCES", "CONSTRAINT", "UNIQUE",
-    "CHECK", "DEFAULT", "CASCADE", "RESTRICT", "TRUE", "FALSE",
-    "COUNT", "SUM", "AVG", "MIN", "MAX", "COALESCE", "NULLIF",
+    "SELECT",
+    "FROM",
+    "WHERE",
+    "AND",
+    "OR",
+    "NOT",
+    "IN",
+    "IS",
+    "NULL",
+    "AS",
+    "ON",
+    "JOIN",
+    "INNER",
+    "LEFT",
+    "RIGHT",
+    "OUTER",
+    "FULL",
+    "CROSS",
+    "GROUP",
+    "BY",
+    "ORDER",
+    "ASC",
+    "DESC",
+    "HAVING",
+    "LIMIT",
+    "OFFSET",
+    "INSERT",
+    "INTO",
+    "VALUES",
+    "UPDATE",
+    "SET",
+    "DELETE",
+    "CREATE",
+    "TABLE",
+    "ALTER",
+    "DROP",
+    "INDEX",
+    "VIEW",
+    "DISTINCT",
+    "ALL",
+    "EXISTS",
+    "BETWEEN",
+    "LIKE",
+    "ILIKE",
+    "CASE",
+    "WHEN",
+    "THEN",
+    "ELSE",
+    "END",
+    "CAST",
+    "UNION",
+    "INTERSECT",
+    "EXCEPT",
+    "WITH",
+    "RECURSIVE",
+    "RETURNING",
+    "PRIMARY",
+    "KEY",
+    "FOREIGN",
+    "REFERENCES",
+    "CONSTRAINT",
+    "UNIQUE",
+    "CHECK",
+    "DEFAULT",
+    "CASCADE",
+    "RESTRICT",
+    "TRUE",
+    "FALSE",
+    "COUNT",
+    "SUM",
+    "AVG",
+    "MIN",
+    "MAX",
+    "COALESCE",
+    "NULLIF",
 ];
 
 /// Walk backwards from the cursor to find the current word prefix.
@@ -203,8 +257,14 @@ mod tests {
     #[test]
     fn compute_completions_tables() {
         let tables = vec![
-            TableEntry { schema: "public".into(), name: "users".into() },
-            TableEntry { schema: "public".into(), name: "posts".into() },
+            TableEntry {
+                schema: "public".into(),
+                name: "users".into(),
+            },
+            TableEntry {
+                schema: "public".into(),
+                name: "posts".into(),
+            },
         ];
         let items = compute_completions("us", &tables, None);
         assert!(items.iter().any(|i| i.text == "users"));

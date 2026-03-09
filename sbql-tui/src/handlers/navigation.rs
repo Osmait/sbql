@@ -85,7 +85,7 @@ pub fn tab_prev(current: FocusedPanel, sidebar_hidden: bool) -> FocusedPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{AppState, NavMode};
+    use crate::app::AppState;
     use crate::test_helpers::key;
     use crossterm::event::KeyCode;
 
@@ -93,15 +93,24 @@ mod tests {
 
     #[test]
     fn tab_next_full_cycle_sidebar_visible() {
-        assert_eq!(tab_next(FocusedPanel::Connections, false), FocusedPanel::Tables);
+        assert_eq!(
+            tab_next(FocusedPanel::Connections, false),
+            FocusedPanel::Tables
+        );
         assert_eq!(tab_next(FocusedPanel::Tables, false), FocusedPanel::Editor);
         assert_eq!(tab_next(FocusedPanel::Editor, false), FocusedPanel::Results);
-        assert_eq!(tab_next(FocusedPanel::Results, false), FocusedPanel::Connections);
+        assert_eq!(
+            tab_next(FocusedPanel::Results, false),
+            FocusedPanel::Connections
+        );
     }
 
     #[test]
     fn tab_next_sidebar_hidden_skips_left_panels() {
-        assert_eq!(tab_next(FocusedPanel::Connections, true), FocusedPanel::Editor);
+        assert_eq!(
+            tab_next(FocusedPanel::Connections, true),
+            FocusedPanel::Editor
+        );
         assert_eq!(tab_next(FocusedPanel::Editor, true), FocusedPanel::Results);
         assert_eq!(tab_next(FocusedPanel::Results, true), FocusedPanel::Editor);
     }
@@ -110,8 +119,14 @@ mod tests {
 
     #[test]
     fn tab_prev_full_cycle_sidebar_visible() {
-        assert_eq!(tab_prev(FocusedPanel::Connections, false), FocusedPanel::Results);
-        assert_eq!(tab_prev(FocusedPanel::Tables, false), FocusedPanel::Connections);
+        assert_eq!(
+            tab_prev(FocusedPanel::Connections, false),
+            FocusedPanel::Results
+        );
+        assert_eq!(
+            tab_prev(FocusedPanel::Tables, false),
+            FocusedPanel::Connections
+        );
         assert_eq!(tab_prev(FocusedPanel::Editor, false), FocusedPanel::Tables);
         assert_eq!(tab_prev(FocusedPanel::Results, false), FocusedPanel::Editor);
     }

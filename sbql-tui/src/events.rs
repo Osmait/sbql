@@ -16,8 +16,7 @@ pub enum AppEvent {
     /// A mouse event.
     Mouse(MouseEvent),
     /// Terminal was resized.
-    #[allow(dead_code)]
-    Resize(u16, u16),
+    Resize,
     /// A response arrived from the Core worker.
     Core(CoreEvent),
     /// The crossterm reader thread encountered an error.
@@ -43,8 +42,8 @@ pub fn spawn_event_reader(tx: mpsc::UnboundedSender<AppEvent>) {
                     break;
                 }
             }
-            Ok(Event::Resize(w, h)) => {
-                if tx.send(AppEvent::Resize(w, h)).is_err() {
+            Ok(Event::Resize(_, _)) => {
+                if tx.send(AppEvent::Resize).is_err() {
                     break;
                 }
             }
@@ -90,63 +89,45 @@ pub fn is_commit(k: &KeyEvent) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyEventKind, KeyEventState};
-
-    fn make_key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
-        KeyEvent {
-            code,
-            modifiers,
-            kind: KeyEventKind::Press,
-            state: KeyEventState::empty(),
-        }
-    }
+    use crate::test_helpers::key_mod;
 
     // -- is_quit --
 
     #[test]
     fn q_is_quit() {
-        assert!(is_quit(&make_key(KeyCode::Char('q'), KeyModifiers::NONE)));
+        assert!(is_quit(&key_mod(KeyCode::Char('q'), KeyModifiers::NONE)));
     }
 
     #[test]
     fn ctrl_c_is_quit() {
-        assert!(is_quit(&make_key(
-            KeyCode::Char('c'),
-            KeyModifiers::CONTROL
-        )));
+        assert!(is_quit(&key_mod(KeyCode::Char('c'), KeyModifiers::CONTROL)));
     }
 
     #[test]
     fn ctrl_q_is_quit() {
-        assert!(is_quit(&make_key(
-            KeyCode::Char('q'),
-            KeyModifiers::CONTROL
-        )));
+        assert!(is_quit(&key_mod(KeyCode::Char('q'), KeyModifiers::CONTROL)));
     }
 
     #[test]
     fn shift_q_not_quit() {
-        assert!(!is_quit(&make_key(
-            KeyCode::Char('Q'),
-            KeyModifiers::SHIFT
-        )));
+        assert!(!is_quit(&key_mod(KeyCode::Char('Q'), KeyModifiers::SHIFT)));
     }
 
     #[test]
     fn random_key_not_quit() {
-        assert!(!is_quit(&make_key(KeyCode::Char('x'), KeyModifiers::NONE)));
+        assert!(!is_quit(&key_mod(KeyCode::Char('x'), KeyModifiers::NONE)));
     }
 
     #[test]
     fn esc_not_quit() {
-        assert!(!is_quit(&make_key(KeyCode::Esc, KeyModifiers::NONE)));
+        assert!(!is_quit(&key_mod(KeyCode::Esc, KeyModifiers::NONE)));
     }
 
     // -- is_run_query --
 
     #[test]
     fn ctrl_s_is_run_query() {
-        assert!(is_run_query(&make_key(
+        assert!(is_run_query(&key_mod(
             KeyCode::Char('s'),
             KeyModifiers::CONTROL
         )));
@@ -154,17 +135,17 @@ mod tests {
 
     #[test]
     fn f5_is_run_query() {
-        assert!(is_run_query(&make_key(KeyCode::F(5), KeyModifiers::NONE)));
+        assert!(is_run_query(&key_mod(KeyCode::F(5), KeyModifiers::NONE)));
     }
 
     #[test]
     fn enter_not_run_query() {
-        assert!(!is_run_query(&make_key(KeyCode::Enter, KeyModifiers::NONE)));
+        assert!(!is_run_query(&key_mod(KeyCode::Enter, KeyModifiers::NONE)));
     }
 
     #[test]
     fn s_without_ctrl_not_run_query() {
-        assert!(!is_run_query(&make_key(
+        assert!(!is_run_query(&key_mod(
             KeyCode::Char('s'),
             KeyModifiers::NONE
         )));
@@ -174,7 +155,7 @@ mod tests {
 
     #[test]
     fn ctrl_w_is_commit() {
-        assert!(is_commit(&make_key(
+        assert!(is_commit(&key_mod(
             KeyCode::Char('w'),
             KeyModifiers::CONTROL
         )));
@@ -182,15 +163,12 @@ mod tests {
 
     #[test]
     fn w_without_ctrl_not_commit() {
-        assert!(!is_commit(&make_key(
-            KeyCode::Char('w'),
-            KeyModifiers::NONE
-        )));
+        assert!(!is_commit(&key_mod(KeyCode::Char('w'), KeyModifiers::NONE)));
     }
 
     #[test]
     fn ctrl_s_not_commit() {
-        assert!(!is_commit(&make_key(
+        assert!(!is_commit(&key_mod(
             KeyCode::Char('s'),
             KeyModifiers::CONTROL
         )));

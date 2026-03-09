@@ -2,8 +2,7 @@ use tokio::sync::mpsc;
 use tui_textarea::{CursorMove, Input};
 
 use crate::app::{
-    AppState, ConnectionForm, DiagramGlyphMode, EditorMode, FocusedPanel,
-    NavMode, PendingEdit,
+    AppState, ConnectionForm, DiagramGlyphMode, EditorMode, FocusedPanel, NavMode, PendingEdit,
 };
 use crate::completion;
 use sbql_core::CoreCommand;
@@ -229,9 +228,8 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
         Action::MarkRowForDeletion => {
             let row_idx = state.results.selected_row;
             let sql = state.editor.sql();
-            let (schema, table) =
-                crate::handlers::results::extract_schema_table_from_sql(&sql)
-                    .unwrap_or_else(|| ("public".into(), "unknown".into()));
+            let (schema, table) = crate::handlers::results::extract_schema_table_from_sql(&sql)
+                .unwrap_or_else(|| ("public".into(), "unknown".into()));
             state.mutation.pending_delete_row = Some(row_idx);
             let _ = cmd_tx.send(CoreCommand::GetPrimaryKeys { schema, table });
         }
@@ -423,7 +421,11 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
         }
         Action::OpenSelectedTable => {
             if let Some(t) = state.tables.tables.get(state.tables.selected) {
-                let sql = sbql_core::query_builder::table_select_sql(&t.schema, &t.name, state.conn.active_backend);
+                let sql = sbql_core::query_builder::table_select_sql(
+                    &t.schema,
+                    &t.name,
+                    state.conn.active_backend,
+                );
                 tracing::info!(
                     "open_selected_table: schema={:?} table={:?} sql={:?}",
                     t.schema,
@@ -462,13 +464,11 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
             apply_refresh_filter_suggestions(state, cmd_tx);
         }
         Action::FilterSuggestionUp => {
-            state.filter.selected_suggestion =
-                state.filter.selected_suggestion.saturating_sub(1);
+            state.filter.selected_suggestion = state.filter.selected_suggestion.saturating_sub(1);
         }
         Action::FilterSuggestionDown => {
             let max = state.filter.suggestions.len().saturating_sub(1);
-            state.filter.selected_suggestion =
-                (state.filter.selected_suggestion + 1).min(max);
+            state.filter.selected_suggestion = (state.filter.selected_suggestion + 1).min(max);
         }
         Action::FilterApplySuggestion => {
             if apply_selected_filter_suggestion(state) {
@@ -739,7 +739,6 @@ fn apply_stage_cell_edit(state: &mut AppState) {
                 (ce.row_idx, ce.col_idx),
                 PendingEdit {
                     new_val,
-                    original: ce.original,
                     schema: ce.schema,
                     table: ce.table,
                     pk_col: ce.pk_col,
@@ -747,8 +746,7 @@ fn apply_stage_cell_edit(state: &mut AppState) {
                     col_name: ce.col_name,
                 },
             );
-            let total =
-                state.mutation.pending_edits.len() + state.mutation.pending_deletes.len();
+            let total = state.mutation.pending_edits.len() + state.mutation.pending_deletes.len();
             state.status_msg = Some(format!(
                 "Staged edit on '{}'. Total staged: {}. Press Ctrl+W to commit.",
                 col_name, total
@@ -879,11 +877,8 @@ fn apply_form_submit(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCo
                 }
             };
 
-            let mut config = sbql_core::ConnectionConfig::new_redis(
-                form.name.trim(),
-                form.host.trim(),
-                port,
-            );
+            let mut config =
+                sbql_core::ConnectionConfig::new_redis(form.name.trim(), form.host.trim(), port);
             config.database = form.database.trim().to_string();
 
             if let Some(id) = form.editing_id {
@@ -1103,7 +1098,13 @@ pub(crate) fn parse_filter_input_test(input: &str) -> Option<(String, &str)> {
 
 /// Recompute autocomplete completions based on current editor state.
 fn recompute_completions(state: &mut AppState) {
-    let lines: Vec<String> = state.editor.textarea.lines().iter().map(|s| s.to_string()).collect();
+    let lines: Vec<String> = state
+        .editor
+        .textarea
+        .lines()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let (row, col) = state.editor.textarea.cursor();
     let prefix = completion::extract_prefix(&lines, row, col);
     if prefix.len() >= 2 {
@@ -1172,11 +1173,11 @@ pub fn apply_live_filter_if_due(
 mod tests {
     use super::*;
     use crate::app::{
-        AppState, DiagramGlyphMode, DiagramState, EditorMode, FocusedPanel, NavMode,
-        PendingDelete, PendingEdit,
+        AppState, DiagramGlyphMode, DiagramState, EditorMode, FocusedPanel, NavMode, PendingDelete,
+        PendingEdit,
     };
     use crate::test_helpers::{cmd_channel, make_state_with_results};
-    use sbql_core::{CoreCommand, DiagramData, QueryResult};
+    use sbql_core::{CoreCommand, DiagramData};
 
     // -----------------------------------------------------------------------
     // Navigation
@@ -1195,7 +1196,11 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.layout.sidebar_hidden = true;
         let (tx, _rx) = cmd_channel();
-        apply(Action::FocusPanel(FocusedPanel::Connections), &mut state, &tx);
+        apply(
+            Action::FocusPanel(FocusedPanel::Connections),
+            &mut state,
+            &tx,
+        );
         assert_eq!(state.focused, FocusedPanel::Editor);
     }
 
@@ -1386,7 +1391,14 @@ mod tests {
     fn cancel_cell_edit() {
         let mut state = make_state_with_results();
         state.mutation.cell_edit = Some(crate::app::CellEditState::new(
-            0, 0, "id".into(), "1".into(), "public".into(), "users".into(), "id".into(), "1".into(),
+            0,
+            0,
+            "id".into(),
+            "1".into(),
+            "public".into(),
+            "users".into(),
+            "id".into(),
+            "1".into(),
         ));
         let (tx, _rx) = cmd_channel();
         apply(Action::CancelCellEdit, &mut state, &tx);
@@ -1397,7 +1409,14 @@ mod tests {
     fn stage_cell_edit_with_change() {
         let mut state = make_state_with_results();
         let mut ce = crate::app::CellEditState::new(
-            0, 0, "id".into(), "1".into(), "public".into(), "users".into(), "id".into(), "1".into(),
+            0,
+            0,
+            "id".into(),
+            "1".into(),
+            "public".into(),
+            "users".into(),
+            "id".into(),
+            "1".into(),
         );
         ce.textarea = tui_textarea::TextArea::default();
         ce.textarea.insert_str("999");
@@ -1412,13 +1431,23 @@ mod tests {
     fn stage_cell_edit_unchanged() {
         let mut state = make_state_with_results();
         let ce = crate::app::CellEditState::new(
-            0, 0, "id".into(), "1".into(), "public".into(), "users".into(), "id".into(), "1".into(),
+            0,
+            0,
+            "id".into(),
+            "1".into(),
+            "public".into(),
+            "users".into(),
+            "id".into(),
+            "1".into(),
         );
         state.mutation.cell_edit = Some(ce);
         let (tx, _rx) = cmd_channel();
         apply(Action::StageCellEdit, &mut state, &tx);
         assert!(state.mutation.pending_edits.is_empty());
-        assert_eq!(state.status_msg, Some("No changes to stage (value unchanged).".into()));
+        assert_eq!(
+            state.status_msg,
+            Some("No changes to stage (value unchanged).".into())
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1440,7 +1469,6 @@ mod tests {
             (0, 1),
             PendingEdit {
                 new_val: "new".into(),
-                original: "old".into(),
                 schema: "public".into(),
                 table: "users".into(),
                 pk_col: "id".into(),
@@ -1480,7 +1508,6 @@ mod tests {
             (0, 0),
             PendingEdit {
                 new_val: "x".into(),
-                original: "y".into(),
                 schema: "p".into(),
                 table: "t".into(),
                 pk_col: "id".into(),
@@ -1545,9 +1572,9 @@ mod tests {
 
     #[test]
     fn select_connection_clamped() {
-        let mut state = AppState::new(vec![
-            sbql_core::ConnectionConfig::new("a", "h", 5432, "u", "d"),
-        ]);
+        let mut state = AppState::new(vec![sbql_core::ConnectionConfig::new(
+            "a", "h", 5432, "u", "d",
+        )]);
         let (tx, _rx) = cmd_channel();
         apply(Action::SelectConnection(10), &mut state, &tx);
         assert_eq!(state.conn.selected, 0);
@@ -1574,9 +1601,13 @@ mod tests {
 
     #[test]
     fn open_edit_form() {
-        let mut state = AppState::new(vec![
-            sbql_core::ConnectionConfig::new("a", "localhost", 5432, "u", "d"),
-        ]);
+        let mut state = AppState::new(vec![sbql_core::ConnectionConfig::new(
+            "a",
+            "localhost",
+            5432,
+            "u",
+            "d",
+        )]);
         let (tx, _rx) = cmd_channel();
         apply(Action::OpenEditConnForm, &mut state, &tx);
         assert!(state.conn.form.visible);
@@ -1585,9 +1616,9 @@ mod tests {
 
     #[test]
     fn init_delete_connection() {
-        let mut state = AppState::new(vec![
-            sbql_core::ConnectionConfig::new("myconn", "h", 5432, "u", "d"),
-        ]);
+        let mut state = AppState::new(vec![sbql_core::ConnectionConfig::new(
+            "myconn", "h", 5432, "u", "d",
+        )]);
         let (tx, _rx) = cmd_channel();
         apply(Action::InitDeleteConnection, &mut state, &tx);
         assert!(state.conn.pending_delete.is_some());
@@ -2003,10 +2034,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
         apply(
-            Action::Batch(vec![
-                Action::SetPendingG,
-                Action::SetPendingD,
-            ]),
+            Action::Batch(vec![Action::SetPendingG, Action::SetPendingD]),
             &mut state,
             &tx,
         );

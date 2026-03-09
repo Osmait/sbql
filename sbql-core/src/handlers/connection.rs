@@ -2,16 +2,20 @@ use uuid::Uuid;
 
 use crate::{save_connections, ConnectionConfig, Core, CoreEvent, SbqlError};
 
-pub(crate) async fn save(core: &mut Core, config: ConnectionConfig, password: Option<String>) -> Vec<CoreEvent> {
+pub(crate) async fn save(
+    core: &mut Core,
+    config: ConnectionConfig,
+    password: Option<String>,
+) -> Vec<CoreEvent> {
     if let Some(ref pw) = password {
         if let Err(e) = config.save_password(pw) {
             tracing::warn!("Keyring save failed (will use in-memory cache): {e}");
         }
         core.password_cache.insert(config.id, pw.clone());
     } else {
-        if !core.password_cache.contains_key(&config.id) {
+        if let std::collections::hash_map::Entry::Vacant(e) = core.password_cache.entry(config.id) {
             if let Ok(pw) = config.load_password() {
-                core.password_cache.insert(config.id, pw);
+                e.insert(pw);
             }
         }
     }
@@ -50,15 +54,14 @@ pub(crate) async fn connect(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
         Ok(pw)
     } else {
         cfg.load_password()
-            .map(|pw| {
+            .inspect(|pw| {
                 core.password_cache.insert(id, pw.clone());
-                pw
             })
-            .or_else(|_| {
-                Err(SbqlError::Keyring(format!(
+            .map_err(|_| {
+                SbqlError::Keyring(format!(
                     "No password found for '{}'. Try re-entering it (e to edit).",
                     cfg.name
-                )))
+                ))
             })
     };
 
@@ -148,11 +151,8 @@ mod tests {
         core.connections.push(config);
 
         let events = core.handle(CoreCommand::DeleteConnection(id)).await;
-        match &events[0] {
-            CoreEvent::ConnectionList(list) => {
-                assert!(!list.iter().any(|c| c.id == id));
-            }
-            _ => {}
+        if let CoreEvent::ConnectionList(list) = &events[0] {
+            assert!(!list.iter().any(|c| c.id == id));
         }
     }
 

@@ -21,13 +21,6 @@ impl ConnectionManager {
         Self::default()
     }
 
-    /// Open (or reuse) a connection pool, loading the password from keyring.
-    #[allow(dead_code)]
-    pub async fn connect(&self, config: &ConnectionConfig) -> Result<()> {
-        let password = config.load_password()?;
-        self.connect_with_password(config, &password).await
-    }
-
     /// Open (or reuse) a connection pool with an explicit password.
     pub async fn connect_with_password(
         &self,
@@ -72,7 +65,7 @@ impl ConnectionManager {
             DbBackend::Redis => {
                 let client = redis::Client::open(url.as_str())?;
                 let cm = redis::aio::ConnectionManager::new(client).await?;
-                DbPool::Redis(cm)
+                DbPool::Redis(Box::new(cm))
             }
         };
 
@@ -95,9 +88,8 @@ impl ConnectionManager {
                 sqlx::query("SELECT 1").execute(sq).await?;
             }
             DbPool::Redis(cm) => {
-                let _: String = redis::cmd("PING")
-                    .query_async(&mut cm.clone())
-                    .await?;
+                let mut conn = cm.as_ref().clone();
+                let _: String = redis::cmd("PING").query_async(&mut conn).await?;
             }
         }
         Ok(())

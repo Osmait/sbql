@@ -127,6 +127,7 @@ pub(crate) async fn suggest_filter_values(
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use crate::{ConnectionConfig, Core, CoreCommand, CoreEvent, SortDirection};
 
@@ -194,7 +195,9 @@ mod tests {
             .await;
 
         // Should get a QueryResult back
-        assert!(events.iter().any(|e| matches!(e, CoreEvent::QueryResult(_))));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, CoreEvent::QueryResult(_))));
         // sort_state should be updated
         assert_eq!(
             core.sort_state.get("name"),
@@ -216,7 +219,9 @@ mod tests {
 
         // Clear order
         let events = core.handle(CoreCommand::ClearOrder).await;
-        assert!(events.iter().any(|e| matches!(e, CoreEvent::QueryResult(_))));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, CoreEvent::QueryResult(_))));
         assert!(core.sort_state.is_empty());
     }
 
@@ -229,7 +234,9 @@ mod tests {
                 query: "name:Alice".into(),
             })
             .await;
-        assert!(events.iter().any(|e| matches!(e, CoreEvent::QueryResult(_))));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, CoreEvent::QueryResult(_))));
         assert_eq!(core.active_filter, Some("name:Alice".to_string()));
     }
 
@@ -252,10 +259,7 @@ mod tests {
         // Clear filter - sort should be preserved
         core.handle(CoreCommand::ClearFilter).await;
         assert!(core.active_filter.is_none());
-        assert_eq!(
-            core.sort_state.get("name"),
-            Some(&SortDirection::Ascending)
-        );
+        assert_eq!(core.sort_state.get("name"), Some(&SortDirection::Ascending));
     }
 
     #[tokio::test]

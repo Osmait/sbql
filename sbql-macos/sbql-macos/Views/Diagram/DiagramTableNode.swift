@@ -86,7 +86,7 @@ struct DiagramTableNode: View {
             LinearGradient(
                 colors: [
                     SbqlTheme.Colors.accent.opacity(0.18),
-                    SbqlTheme.Colors.accent.opacity(0.06)
+                    SbqlTheme.Colors.accent.opacity(0.06),
                 ],
                 startPoint: .leading,
                 endPoint: .trailing

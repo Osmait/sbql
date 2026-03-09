@@ -28,7 +28,9 @@ final class ResultsViewModel {
     var pendingDeletions: Set<Int> = []
 
     /// Whether there are pending edits awaiting commit.
-    var hasPendingEdits: Bool { !dirtyCells.isEmpty || !pendingDeletions.isEmpty }
+    var hasPendingEdits: Bool {
+        !dirtyCells.isEmpty || !pendingDeletions.isEmpty
+    }
 
     // MARK: - Tabs
 
@@ -166,7 +168,8 @@ final class ResultsViewModel {
         pendingDeletions.removeAll()
         // Keep the active tab in sync
         if let activeId = activeTabId,
-           let index = tabs.firstIndex(where: { $0.id == activeId }) {
+           let index = tabs.firstIndex(where: { $0.id == activeId })
+        {
             tabs[index].result = result
             tabs[index].dirtyCells = [:]
             tabs[index].pendingDeletions = []

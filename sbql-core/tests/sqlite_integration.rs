@@ -124,9 +124,17 @@ async fn test_sqlite_diagram() {
 #[tokio::test]
 async fn test_sqlite_cell_update() {
     let (sq, pool) = setup_sqlite().await;
-    execute_cell_update(&pool, "main", "users", "id", "1", "username", "alice_updated")
-        .await
-        .expect("cell update failed");
+    execute_cell_update(
+        &pool,
+        "main",
+        "users",
+        "id",
+        "1",
+        "username",
+        "alice_updated",
+    )
+    .await
+    .expect("cell update failed");
 
     let updated: String = sqlx::query("SELECT username FROM users WHERE id = 1")
         .fetch_one(&sq)

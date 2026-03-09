@@ -15,7 +15,6 @@ path = "src/main.rs"
 [dependencies]
 sbql-core.workspace = true
 tokio.workspace = true
-serde.workspace = true
 uuid.workspace = true
 anyhow.workspace = true
 tracing.workspace = true

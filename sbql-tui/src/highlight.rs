@@ -44,9 +44,7 @@ fn style_for_highlight(idx: usize) -> Style {
         Some(&"boolean") => theme::PEACH,
         Some(&"comment") => theme::OVERLAY1,
         Some(&"operator") => theme::RED,
-        Some(&"punctuation" | &"punctuation.bracket" | &"punctuation.delimiter") => {
-            theme::SURFACE2
-        }
+        Some(&"punctuation" | &"punctuation.bracket" | &"punctuation.delimiter") => theme::SURFACE2,
         Some(&"variable") => theme::FLAMINGO,
         Some(&"field" | &"parameter") => theme::SAPPHIRE,
         Some(&"conditional") => theme::LAVENDER,
@@ -93,12 +91,10 @@ impl SqlHighlighter {
 
         let default_style = Style::default().fg(theme::TEXT);
 
-        let events = match self.highlighter.highlight(
-            &self.config,
-            source.as_bytes(),
-            None,
-            |_| None,
-        ) {
+        let events = match self
+            .highlighter
+            .highlight(&self.config, source.as_bytes(), None, |_| None)
+        {
             Ok(iter) => iter,
             Err(_) => {
                 // Fallback: return unstyled lines.

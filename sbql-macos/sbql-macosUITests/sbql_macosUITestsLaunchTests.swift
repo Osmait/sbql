@@ -1,5 +1,5 @@
 //
-//  sbql_macosUITestsLaunchTests.swift
+//  SbqlMacosUITestsLaunchTests.swift
 //  sbql-macosUITests
 //
 //  Created by Jose Saul Burgos on 3/7/26.
@@ -7,8 +7,7 @@
 
 import XCTest
 
-final class sbql_macosUITestsLaunchTests: XCTestCase {
-
+final class SbqlMacosUITestsLaunchTests: XCTestCase {
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true
     }
@@ -21,9 +20,6 @@ final class sbql_macosUITestsLaunchTests: XCTestCase {
     func testLaunch() throws {
         let app = XCUIApplication()
         app.launch()
-
-        // Insert steps here to perform after app launch but before taking a screenshot,
-        // such as logging into a test account or navigating somewhere in the app
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Launch Screen"

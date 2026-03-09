@@ -28,7 +28,6 @@ use crate::ui::theme;
 /// Fixed width of each table box (inner content width = BOX_WIDTH - 2 borders).
 const BOX_WIDTH: u16 = 36;
 
-
 #[derive(Clone, Copy)]
 struct GlyphSet {
     h: char,
@@ -79,10 +78,7 @@ fn glyphs_for(mode: DiagramGlyphMode) -> GlyphSet {
 fn data_type_color(data_type: &str) -> ratatui::style::Color {
     let dt = data_type.to_ascii_lowercase();
     // Check temporal first (before numeric, since "timestamp"/"interval" contain "int")
-    if dt.contains("date")
-        || dt.contains("time")
-        || dt.contains("interval")
-    {
+    if dt.contains("date") || dt.contains("time") || dt.contains("interval") {
         theme::SKY
     // Structured types (before numeric, since "_int4" array types contain "int")
     } else if dt.contains("json")
@@ -262,10 +258,7 @@ fn draw_sidebar(frame: &mut Frame, state: &DiagramState, area: Rect) {
         let search_text = format!("/{}_", state.search_query);
         let search_line = Line::from(vec![
             Span::styled("/", Style::default().fg(theme::BLUE)),
-            Span::styled(
-                state.search_query.clone(),
-                Style::default().fg(theme::TEXT),
-            ),
+            Span::styled(state.search_query.clone(), Style::default().fg(theme::TEXT)),
             Span::styled("_", Style::default().fg(theme::OVERLAY0)),
         ]);
         let _ = search_text; // suppress unused
@@ -547,11 +540,7 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> CanvasBuild {
             }
         }
 
-        let max_layer = component_nodes
-            .iter()
-            .map(|&n| layer[n])
-            .max()
-            .unwrap_or(0);
+        let max_layer = component_nodes.iter().map(|&n| layer[n]).max().unwrap_or(0);
         let mut layers: Vec<Vec<usize>> = vec![Vec::new(); max_layer + 1];
         for &n in &component_nodes {
             layers[layer[n]].push(n);
@@ -644,7 +633,15 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> CanvasBuild {
         let empty_set = HashSet::new();
         let from_cols = fk_from.get(&t.qualified()).unwrap_or(&empty_set);
         let to_cols = fk_to.get(&t.qualified()).unwrap_or(&empty_set);
-        let box_lines = render_table_box(t, is_selected, is_related, from_cols, to_cols, glyphs, state.glyph_mode);
+        let box_lines = render_table_box(
+            t,
+            is_selected,
+            is_related,
+            from_cols,
+            to_cols,
+            glyphs,
+            state.glyph_mode,
+        );
         let (x, y) = positions[vidx];
 
         canvas_w = canvas_w.max(x + BOX_WIDTH as usize + 3);
@@ -714,9 +711,7 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> CanvasBuild {
         };
         let base_color = CONNECTOR_COLORS[pair_hash % CONNECTOR_COLORS.len()];
         let style = if highlighted {
-            Style::default()
-                .fg(base_color)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(base_color).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(base_color)
         };
@@ -776,8 +771,7 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> CanvasBuild {
         let raw_mid = group.iter().map(|e| (e.sx + e.tx) / 2).sum::<usize>() / group.len();
         let bucket = raw_mid / LANE_BUCKET_WIDTH;
         let slot = lane_bucket_counts.entry(bucket).or_insert(0usize);
-        let candidate_x =
-            (bucket * LANE_BUCKET_WIDTH + 2 + (*slot % LANE_BUCKET_SLOTS)).min(max_x);
+        let candidate_x = (bucket * LANE_BUCKET_WIDTH + 2 + (*slot % LANE_BUCKET_SLOTS)).min(max_x);
         *slot = slot.saturating_add(1);
 
         let y_min = group.iter().map(|e| e.sy.min(e.ty)).min().unwrap_or(0);
@@ -1039,7 +1033,12 @@ fn build_top_border(
     title_style: Style,
     glyphs: GlyphSet,
 ) -> StyledLine {
-    let title = format!(" {}.{} ({}) ", table.schema, table.name, table.columns.len());
+    let title = format!(
+        " {}.{} ({}) ",
+        table.schema,
+        table.name,
+        table.columns.len()
+    );
     let title_len = title.chars().count();
     let right_dashes = inner_width.saturating_sub(title_len);
 
@@ -1107,9 +1106,9 @@ fn find_free_lane(
 ) -> usize {
     let mut x = lane_x;
     for _ in 0..20 {
-        let overlaps = rects.iter().any(|r| {
-            x >= r.x && x < r.x + r.w && y_max >= r.y && y_min < r.y + r.h
-        });
+        let overlaps = rects
+            .iter()
+            .any(|r| x >= r.x && x < r.x + r.w && y_max >= r.y && y_min < r.y + r.h);
         if !overlaps {
             return x;
         }
@@ -1149,12 +1148,11 @@ fn draw_hline(
         return;
     }
     let (start, end) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
-    let row_len = canvas[y].len();
-    for x in start..=end {
-        if x >= row_len {
-            break;
+    let upper = end.min(canvas[y].len().saturating_sub(1));
+    if start <= upper {
+        for cell in &mut canvas[y][start..=upper] {
+            place_line_char(cell, glyphs.h, style, glyphs);
         }
-        place_line_char(&mut canvas[y][x], glyphs.h, style, glyphs);
     }
 }
 
@@ -1279,11 +1277,7 @@ fn draw_help_bar(frame: &mut Frame, full_area: Rect, focus_mode: bool) {
         Span::styled("f", Style::default().fg(theme::BLUE)),
         Span::raw(format!(
             ": {}  ",
-            if focus_mode {
-                "show all"
-            } else {
-                "focus"
-            }
+            if focus_mode { "show all" } else { "focus" }
         )),
         Span::styled("u", Style::default().fg(theme::BLUE)),
         Span::raw(": glyph  "),

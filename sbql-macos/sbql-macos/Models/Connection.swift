@@ -29,10 +29,10 @@ struct Connection: Identifiable, Hashable {
 
         var displayName: String {
             switch self {
-            case .prefer:     "Prefer"
-            case .disable:    "Disable"
-            case .require:    "Require"
-            case .verifyCa:   "Verify CA"
+            case .prefer: "Prefer"
+            case .disable: "Disable"
+            case .require: "Require"
+            case .verifyCa: "Verify CA"
             case .verifyFull: "Verify Full"
             }
         }
@@ -76,45 +76,33 @@ struct Connection: Identifiable, Hashable {
         )
     }
 
-    static func newRedis() -> Connection {
-        Connection(
-            id: UUID().uuidString.lowercased(),
-            name: "",
-            backend: .redis,
-            host: "localhost",
-            port: 6379,
-            user: "",
-            database: "0",
-            sslMode: .prefer
-        )
-    }
 }
 
 // MARK: - FFI Conversions
 
 extension Connection {
     init(ffi: FfiConnectionConfig) {
-        self.id       = ffi.id
-        self.name     = ffi.name
-        self.backend  = Backend(ffi: ffi.backend)
-        self.host     = ffi.host
-        self.port     = ffi.port
-        self.user     = ffi.user
-        self.database = ffi.database
-        self.sslMode  = SSLMode(ffi: ffi.sslMode)
-        self.filePath = ffi.filePath
+        id = ffi.id
+        name = ffi.name
+        backend = Backend(ffi: ffi.backend)
+        host = ffi.host
+        port = ffi.port
+        user = ffi.user
+        database = ffi.database
+        sslMode = SSLMode(ffi: ffi.sslMode)
+        filePath = ffi.filePath
     }
 
     var ffi: FfiConnectionConfig {
         FfiConnectionConfig(
-            id:       id,
-            name:     name,
-            backend:  backend.ffi,
-            host:     host,
-            port:     port,
-            user:     user,
+            id: id,
+            name: name,
+            backend: backend.ffi,
+            host: host,
+            port: port,
+            user: user,
             database: database,
-            sslMode:  sslMode.ffi,
+            sslMode: sslMode.ffi,
             filePath: filePath
         )
     }
@@ -124,16 +112,16 @@ extension Connection.Backend {
     init(ffi: FfiDbBackend) {
         switch ffi {
         case .postgres: self = .postgres
-        case .sqlite:   self = .sqlite
-        case .redis:    self = .redis
+        case .sqlite: self = .sqlite
+        case .redis: self = .redis
         }
     }
 
     var ffi: FfiDbBackend {
         switch self {
         case .postgres: .postgres
-        case .sqlite:   .sqlite
-        case .redis:    .redis
+        case .sqlite: .sqlite
+        case .redis: .redis
         }
     }
 }
@@ -141,20 +129,20 @@ extension Connection.Backend {
 extension Connection.SSLMode {
     init(ffi: FfiSslMode) {
         switch ffi {
-        case .prefer:     self = .prefer
-        case .disable:    self = .disable
-        case .require:    self = .require
-        case .verifyCa:   self = .verifyCa
+        case .prefer: self = .prefer
+        case .disable: self = .disable
+        case .require: self = .require
+        case .verifyCa: self = .verifyCa
         case .verifyFull: self = .verifyFull
         }
     }
 
     var ffi: FfiSslMode {
         switch self {
-        case .prefer:     .prefer
-        case .disable:    .disable
-        case .require:    .require
-        case .verifyCa:   .verifyCa
+        case .prefer: .prefer
+        case .disable: .disable
+        case .require: .require
+        case .verifyCa: .verifyCa
         case .verifyFull: .verifyFull
         }
     }

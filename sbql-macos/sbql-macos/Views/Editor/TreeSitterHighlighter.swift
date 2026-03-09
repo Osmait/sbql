@@ -1,7 +1,7 @@
 import AppKit
-import SwiftUI
 import Neon
 import SwiftTreeSitter
+import SwiftUI
 import TreeSitterSql
 
 /// Tree-sitter based syntax highlighter using Neon's TextViewHighlighter.
@@ -23,19 +23,19 @@ final class TreeSitterHighlighter {
         )
 
         // Catppuccin Mocha palette for syntax highlighting
-        let mauve     = NSColor(Color(hex: 0xCBA6F7))  // keywords
-        let red       = NSColor(Color(hex: 0xF38BA8))  // operators, delimiters
-        let peach     = NSColor(Color(hex: 0xFAB387))  // numbers, booleans
-        let green     = NSColor(Color(hex: 0xA6E3A1))  // strings
-        let yellow    = NSColor(Color(hex: 0xF9E2AF))  // types, builtins
-        let blue      = NSColor(Color(hex: 0x89B4FA))  // functions
-        let sapphire  = NSColor(Color(hex: 0x74C7EC))  // fields, parameters
-        let teal      = NSColor(Color(hex: 0x94E2D5))  // attributes, storage
-        let lavender  = NSColor(Color(hex: 0xB4BEFE))  // conditionals
-        let flamingo  = NSColor(Color(hex: 0xF2CDCD))  // variables
-        let overlay1  = NSColor(Color(hex: 0x7F849C))  // comments
-        let surface2  = NSColor(Color(hex: 0x585B70))  // punctuation
-        let text      = NSColor(Color(hex: 0xCDD6F4))  // default
+        let mauve = NSColor(Color(hex: 0xCBA6F7)) // keywords
+        let red = NSColor(Color(hex: 0xF38BA8)) // operators, delimiters
+        let peach = NSColor(Color(hex: 0xFAB387)) // numbers, booleans
+        let green = NSColor(Color(hex: 0xA6E3A1)) // strings
+        let yellow = NSColor(Color(hex: 0xF9E2AF)) // types, builtins
+        let blue = NSColor(Color(hex: 0x89B4FA)) // functions
+        let sapphire = NSColor(Color(hex: 0x74C7EC)) // fields, parameters
+        let teal = NSColor(Color(hex: 0x94E2D5)) // attributes, storage
+        let lavender = NSColor(Color(hex: 0xB4BEFE)) // conditionals
+        let flamingo = NSColor(Color(hex: 0xF2CDCD)) // variables
+        let overlay1 = NSColor(Color(hex: 0x7F849C)) // comments
+        let surface2 = NSColor(Color(hex: 0x585B70)) // punctuation
+        let text = NSColor(Color(hex: 0xCDD6F4)) // default
 
         let provider: TokenAttributeProvider = { token in
             let color: NSColor = switch token.name {

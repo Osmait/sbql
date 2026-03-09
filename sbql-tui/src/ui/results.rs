@@ -26,6 +26,7 @@ pub struct DrawOutput {
     pub viewport_cols: usize,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     frame: &mut Frame,
     results: &ResultsState,
@@ -157,6 +158,7 @@ pub fn draw(
     let col_scroll = results.col_scroll.min(total_cols.saturating_sub(1));
     let mut visible_end = col_scroll;
     let mut used_width = 0usize;
+    #[allow(clippy::needless_range_loop)]
     for ci in col_scroll..total_cols {
         let w = all_col_widths[ci] as usize + COL_SPACING as usize;
         if used_width + w > inner_width && visible_end > col_scroll {
@@ -221,10 +223,8 @@ pub fn draw(
                 .skip(col_scroll)
                 .take(visible_col_count)
                 .map(|(col_idx, val)| {
-                    let is_selected_cell =
-                        is_selected && col_idx == results.selected_col;
-                    let is_pending_edit =
-                        mutation.pending_edits.contains_key(&(row_idx, col_idx));
+                    let is_selected_cell = is_selected && col_idx == results.selected_col;
+                    let is_pending_edit = mutation.pending_edits.contains_key(&(row_idx, col_idx));
 
                     let display_val = mutation
                         .pending_edits

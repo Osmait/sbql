@@ -36,7 +36,6 @@ struct MainWindow: View {
         .onAppear { appVM.onAppear() }
     }
 
-    @ViewBuilder
     private var mainContent: some View {
         VStack(spacing: 0) {
             unifiedHeader
@@ -102,7 +101,7 @@ struct MainWindow: View {
                 }
 
                 // Divider + table tabs
-                if appVM.activeTab == .query && !appVM.results.tabs.isEmpty {
+                if appVM.activeTab == .query, !appVM.results.tabs.isEmpty {
                     SbqlTheme.Colors.border
                         .frame(width: 1, height: 16)
                         .padding(.horizontal, SbqlTheme.Spacing.xxs)

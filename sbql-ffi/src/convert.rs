@@ -26,8 +26,9 @@ impl TryFrom<FfiConnectionConfig> for sbql_core::ConnectionConfig {
     type Error = SbqlFfiError;
 
     fn try_from(c: FfiConnectionConfig) -> Result<Self, SbqlFfiError> {
-        let id = uuid::Uuid::parse_str(&c.id)
-            .map_err(|e| SbqlFfiError::InvalidArgument { msg: format!("Invalid UUID: {e}") })?;
+        let id = uuid::Uuid::parse_str(&c.id).map_err(|e| SbqlFfiError::InvalidArgument {
+            msg: format!("Invalid UUID: {e}"),
+        })?;
         Ok(sbql_core::ConnectionConfig {
             id,
             name: c.name,

@@ -3,7 +3,6 @@ import SwiftUI
 
 /// Applies SQL syntax highlighting to an NSTextStorage via its delegate callback.
 final class SQLSyntaxHighlighter: NSObject, NSTextStorageDelegate {
-
     private let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
     private let defaultColor = NSColor(SbqlTheme.Colors.textPrimary)
     private let keywordColor = NSColor(SbqlTheme.Colors.accent)
@@ -55,13 +54,14 @@ final class SQLSyntaxHighlighter: NSObject, NSTextStorageDelegate {
     override init() {
         // Order matters: comments and strings must match before identifiers.
         let patterns = [
-            "--[^\n]*",                        // single-line comment
-            "/\\*[\\s\\S]*?\\*/",              // multi-line comment
-            "'(?:''|[^'])*'",                  // single-quoted string
-            "\"(?:\"\"|[^\"])*\"",             // double-quoted identifier
-            "\\b\\d+(?:\\.\\d+)?\\b",          // number
-            "\\b[A-Za-z_][A-Za-z0-9_]*\\b",   // identifier / keyword
+            "--[^\n]*", // single-line comment
+            "/\\*[\\s\\S]*?\\*/", // multi-line comment
+            "'(?:''|[^'])*'", // single-quoted string
+            "\"(?:\"\"|[^\"])*\"", // double-quoted identifier
+            "\\b\\d+(?:\\.\\d+)?\\b", // number
+            "\\b[A-Za-z_][A-Za-z0-9_]*\\b", // identifier / keyword
         ]
+        // swiftlint:disable:next force_try
         tokenPattern = try! NSRegularExpression(
             pattern: patterns.joined(separator: "|"),
             options: []
@@ -74,8 +74,8 @@ final class SQLSyntaxHighlighter: NSObject, NSTextStorageDelegate {
     func textStorage(
         _ textStorage: NSTextStorage,
         didProcessEditing editedMask: NSTextStorageEditActions,
-        range editedRange: NSRange,
-        changeInLength delta: Int
+        range _: NSRange,
+        changeInLength _: Int
     ) {
         guard editedMask.contains(.editedCharacters) else { return }
         highlightAll(textStorage)

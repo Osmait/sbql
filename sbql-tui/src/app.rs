@@ -228,6 +228,7 @@ pub struct CellEditState {
 }
 
 impl CellEditState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         row_idx: usize,
         col_idx: usize,
@@ -262,7 +263,7 @@ impl CellEditState {
 // Filter bar state
 // ---------------------------------------------------------------------------
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct FilterBar {
     pub visible: bool,
     pub textarea: TextArea<'static>,
@@ -275,22 +276,6 @@ pub struct FilterBar {
     pub last_applied_query: Option<String>,
 }
 
-impl Default for FilterBar {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            textarea: TextArea::default(),
-            suggestions: Vec::new(),
-            selected_suggestion: 0,
-            show_suggestions: false,
-            suggestion_token: 0,
-            loading_suggestions: false,
-            pending_live_apply_at: None,
-            last_applied_query: None,
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Pending (staged) edit model
 // ---------------------------------------------------------------------------
@@ -299,9 +284,6 @@ impl Default for FilterBar {
 #[derive(Debug, Clone)]
 pub struct PendingEdit {
     pub new_val: String,
-    /// The original value before editing (kept for potential diff display).
-    #[allow(dead_code)]
-    pub original: String,
     pub schema: String,
     pub table: String,
     pub pk_col: String,
@@ -449,10 +431,8 @@ impl ResultsState {
             self.selected_row += 1;
             self.clamp_scroll();
             false
-        } else if self.data.has_next_page {
-            true
         } else {
-            false
+            self.data.has_next_page
         }
     }
 
@@ -559,10 +539,7 @@ impl ResultsState {
 
     /// Return the column name under the current cursor.
     pub fn selected_column_name(&self) -> Option<&str> {
-        self.data
-            .columns
-            .get(self.selected_col)
-            .map(String::as_str)
+        self.data.columns.get(self.selected_col).map(String::as_str)
     }
 
     /// Toggle the sort direction for a column. Cycles None → Asc → Desc → None.
@@ -855,18 +832,17 @@ impl AppState {
                             Some("Cannot mark for delete: primary key not found.".into());
                     } else {
                         // Toggle: if already marked, unmark
-                        if self.mutation.pending_deletes.contains_key(&row_idx) {
-                            self.mutation.pending_deletes.remove(&row_idx);
+                        if let std::collections::hash_map::Entry::Vacant(e) =
+                            self.mutation.pending_deletes.entry(row_idx)
+                        {
+                            e.insert(PendingDelete {
+                                schema,
+                                table,
+                                pk_col,
+                                pk_val,
+                            });
                         } else {
-                            self.mutation.pending_deletes.insert(
-                                row_idx,
-                                PendingDelete {
-                                    schema,
-                                    table,
-                                    pk_col,
-                                    pk_val,
-                                },
-                            );
+                            self.mutation.pending_deletes.remove(&row_idx);
                         }
                     }
                     return;
@@ -958,6 +934,7 @@ impl AppState {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 
@@ -1055,9 +1032,9 @@ mod tests {
         ]);
         state.conn.selected = 1;
         // Now replace with just 1 connection
-        state.apply_core_event(CoreEvent::ConnectionList(vec![
-            ConnectionConfig::new("a", "h", 5432, "u", "d"),
-        ]));
+        state.apply_core_event(CoreEvent::ConnectionList(vec![ConnectionConfig::new(
+            "a", "h", 5432, "u", "d",
+        )]));
         assert_eq!(state.conn.selected, 0);
     }
 
@@ -1096,8 +1073,14 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.tables.selected = 5;
         let tables = vec![
-            TableEntry { schema: "public".into(), name: "users".into() },
-            TableEntry { schema: "public".into(), name: "posts".into() },
+            TableEntry {
+                schema: "public".into(),
+                name: "users".into(),
+            },
+            TableEntry {
+                schema: "public".into(),
+                name: "posts".into(),
+            },
         ];
         state.apply_core_event(CoreEvent::TableList(tables));
         assert_eq!(state.tables.tables.len(), 2);
@@ -1150,14 +1133,24 @@ mod tests {
             has_next_page: false,
         };
         state.apply_core_event(CoreEvent::QueryResult(result));
-        assert_eq!(state.results.data.columns, vec!["id".to_string(), "name".to_string()]);
+        assert_eq!(
+            state.results.data.columns,
+            vec!["id".to_string(), "name".to_string()]
+        );
     }
 
     #[test]
     fn core_event_cell_updated() {
         let mut state = AppState::new(vec![]);
         state.mutation.cell_edit = Some(CellEditState::new(
-            0, 0, "id".into(), "1".into(), "public".into(), "t".into(), "id".into(), "1".into(),
+            0,
+            0,
+            "id".into(),
+            "1".into(),
+            "public".into(),
+            "t".into(),
+            "id".into(),
+            "1".into(),
         ));
         state.apply_core_event(CoreEvent::CellUpdated);
         assert!(state.mutation.cell_edit.is_none());
@@ -1446,15 +1439,17 @@ mod tests {
             pending_delete_row: Some(3),
             pending_d: true,
         };
-        ms.pending_edits.insert((0, 0), PendingEdit {
-            new_val: "x".into(),
-            original: "y".into(),
-            schema: "p".into(),
-            table: "t".into(),
-            pk_col: "id".into(),
-            pk_val: "1".into(),
-            col_name: "c".into(),
-        });
+        ms.pending_edits.insert(
+            (0, 0),
+            PendingEdit {
+                new_val: "x".into(),
+                schema: "p".into(),
+                table: "t".into(),
+                pk_col: "id".into(),
+                pk_val: "1".into(),
+                col_name: "c".into(),
+            },
+        );
         ms.discard_pending();
         assert!(ms.pending_edits.is_empty());
         assert!(ms.pending_deletes.is_empty());

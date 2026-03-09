@@ -8,7 +8,7 @@ final class DiagramViewModel {
     var scale: CGFloat = 1.0
     var offset: CGSize = .zero
 
-    // Per-table positions (enables drag)
+    /// Per-table positions (enables drag)
     var tablePositions: [String: CGPoint] = [:]
 
     // Selection / hover state
@@ -29,11 +29,13 @@ final class DiagramViewModel {
 
         // Build adjacency list
         var adjacency: [String: Set<String>] = [:]
-        for t in tables { adjacency[t.id] = [] }
+        for t in tables {
+            adjacency[t.id] = []
+        }
         for fk in fks {
             let fromId = "\(fk.fromSchema).\(fk.fromTable)"
             let toId = "\(fk.toSchema).\(fk.toTable)"
-            if tableById[fromId] != nil && tableById[toId] != nil {
+            if tableById[fromId] != nil, tableById[toId] != nil {
                 adjacency[fromId, default: []].insert(toId)
                 adjacency[toId, default: []].insert(fromId)
             }
@@ -60,11 +62,9 @@ final class DiagramViewModel {
                 let current = queue.removeFirst()
                 orderedConnected.append(current)
                 let neighbors = (adjacency[current] ?? []).sorted()
-                for neighbor in neighbors {
-                    if !visited.contains(neighbor) {
-                        visited.insert(neighbor)
-                        queue.append(neighbor)
-                    }
+                for neighbor in neighbors where !visited.contains(neighbor) {
+                    visited.insert(neighbor)
+                    queue.append(neighbor)
                 }
             }
         }
@@ -81,8 +81,6 @@ final class DiagramViewModel {
         for (idx, tableId) in orderedConnected.enumerated() {
             let col = idx % cols
             let row = idx / cols
-            let nodeHeight = nodeHeight(for: tableId)
-            _ = nodeHeight  // used for future variable-height spacing
             positions[tableId] = CGPoint(
                 x: startX + CGFloat(col) * spacingX,
                 y: startY + CGFloat(row) * spacingY

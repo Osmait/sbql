@@ -11,7 +11,7 @@
 //!   4. Re-serialize back to a SQL string.
 //!   5. On parse failure fall back to a safe subquery wrapper.
 
-use sqlparser::ast::{Expr, Ident, OrderByExpr, Query, SetExpr, Statement};
+use sqlparser::ast::{Expr, Ident, OrderByExpr, Query, Statement};
 use sqlparser::dialect::{PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
 
@@ -31,9 +31,16 @@ pub enum SortDirection {
 
 /// Inject (or replace) an `ORDER BY <column> ASC/DESC` clause into `sql`.
 /// If the SQL cannot be parsed, wraps it in a subquery.
-pub fn apply_order(sql: &str, column: &str, direction: SortDirection, backend: DbBackend) -> Result<String> {
+pub fn apply_order(
+    sql: &str,
+    column: &str,
+    direction: SortDirection,
+    backend: DbBackend,
+) -> Result<String> {
     if backend == DbBackend::Redis {
-        return Err(SbqlError::SqlParse("ORDER BY not supported for Redis".into()));
+        return Err(SbqlError::SqlParse(
+            "ORDER BY not supported for Redis".into(),
+        ));
     }
     match parse_single_select(sql, backend) {
         Ok(mut query) => {
@@ -83,9 +90,16 @@ pub fn clear_order(sql: &str, backend: DbBackend) -> Result<String> {
 /// `filter_query` format:
 /// - `"col:value"` → `WHERE col ILIKE '%value%'` (PG) / `LIKE ... COLLATE NOCASE` (SQLite)
 /// - `"plain text"` → adds an `OR` ILIKE/LIKE for every provided column.
-pub fn apply_filter(sql: &str, filter_query: &str, columns: Option<&[String]>, backend: DbBackend) -> Result<String> {
+pub fn apply_filter(
+    sql: &str,
+    filter_query: &str,
+    columns: Option<&[String]>,
+    backend: DbBackend,
+) -> Result<String> {
     if backend == DbBackend::Redis {
-        return Err(SbqlError::SqlParse("Filtering not supported for Redis".into()));
+        return Err(SbqlError::SqlParse(
+            "Filtering not supported for Redis".into(),
+        ));
     }
     let (col_opt, value) = parse_filter_query(filter_query);
 
@@ -128,23 +142,6 @@ pub fn apply_filter(sql: &str, filter_query: &str, columns: Option<&[String]>, b
     }
 }
 
-/// Remove any injected WHERE filter, leaving the base query intact.
-#[allow(dead_code)]
-pub fn clear_filter(sql: &str, backend: DbBackend) -> Result<String> {
-    if backend == DbBackend::Redis {
-        return Ok(sql.to_owned());
-    }
-    match parse_single_select(sql, backend) {
-        Ok(mut query) => {
-            if let SetExpr::Select(ref mut sel) = *query.body {
-                sel.selection = None;
-            }
-            Ok(query.to_string())
-        }
-        Err(_) => Ok(sql.to_owned()),
-    }
-}
-
 /// Build a minimal `SELECT * FROM <table>` query.
 /// For PG: `SELECT * FROM "schema"."table"`
 /// For SQLite: `SELECT * FROM "table"` (no schema prefix)
@@ -173,7 +170,9 @@ fn parse_single_select(sql: &str, backend: DbBackend) -> Result<Box<Query>> {
             Parser::parse_sql(&dialect, trimmed).map_err(|e| SbqlError::SqlParse(e.to_string()))?
         }
         DbBackend::Redis => {
-            return Err(SbqlError::SqlParse("SQL parsing not supported for Redis".into()));
+            return Err(SbqlError::SqlParse(
+                "SQL parsing not supported for Redis".into(),
+            ));
         }
     };
 
@@ -218,7 +217,8 @@ mod tests {
     #[test]
     fn test_apply_order_asc() {
         let sql = "SELECT * FROM users";
-        let result = apply_order(sql, "name", SortDirection::Ascending, DbBackend::Postgres).unwrap();
+        let result =
+            apply_order(sql, "name", SortDirection::Ascending, DbBackend::Postgres).unwrap();
         let upper = result.to_uppercase();
         assert!(upper.contains("ORDER BY"), "missing ORDER BY: {result}");
         assert!(upper.contains("NAME"), "missing column: {result}");
@@ -228,7 +228,13 @@ mod tests {
     #[test]
     fn test_apply_order_desc() {
         let sql = "SELECT id, name FROM users WHERE active = true";
-        let result = apply_order(sql, "created_at", SortDirection::Descending, DbBackend::Postgres).unwrap();
+        let result = apply_order(
+            sql,
+            "created_at",
+            SortDirection::Descending,
+            DbBackend::Postgres,
+        )
+        .unwrap();
         let upper = result.to_uppercase();
         assert!(upper.contains("ORDER BY"));
         assert!(upper.contains("CREATED_AT"));
@@ -277,7 +283,8 @@ mod tests {
     #[test]
     fn test_apply_order_replaces_existing() {
         let sql = "SELECT * FROM users ORDER BY id ASC";
-        let result = apply_order(sql, "email", SortDirection::Descending, DbBackend::Postgres).unwrap();
+        let result =
+            apply_order(sql, "email", SortDirection::Descending, DbBackend::Postgres).unwrap();
         let upper = result.to_uppercase();
         assert!(upper.contains("EMAIL"));
         assert!(!upper.contains("ORDER BY ID"));
@@ -286,20 +293,12 @@ mod tests {
     #[test]
     fn test_apply_order_fallback() {
         let sql = "INVALID SQL STATEMENT";
-        let result = apply_order(sql, "col", SortDirection::Ascending, DbBackend::Postgres).unwrap();
+        let result =
+            apply_order(sql, "col", SortDirection::Ascending, DbBackend::Postgres).unwrap();
         assert_eq!(
             result,
             "SELECT * FROM (INVALID SQL STATEMENT) AS _sbql_order ORDER BY col ASC"
         );
-    }
-
-    #[test]
-    fn test_clear_filter() {
-        let sql = "SELECT * FROM users WHERE status = 'active'";
-        let result = clear_filter(sql, DbBackend::Postgres).unwrap();
-        let upper = result.to_uppercase();
-        assert!(!upper.contains("WHERE"));
-        assert!(upper.contains("SELECT * FROM USERS"));
     }
 
     #[test]
@@ -352,7 +351,10 @@ mod tests {
         let sql = "SELECT * FROM users";
         let result = apply_filter(sql, "name:O'Brien", None, DbBackend::Postgres).unwrap();
         // Single quotes must be escaped as ''
-        assert!(result.contains("O''Brien"), "missing escaped quote: {result}");
+        assert!(
+            result.contains("O''Brien"),
+            "missing escaped quote: {result}"
+        );
     }
 
     #[test]

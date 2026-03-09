@@ -49,7 +49,9 @@ mod tests {
     async fn test_list_tables_no_connection() {
         let mut core = Core::default();
         let events = core.handle(CoreCommand::ListTables).await;
-        assert!(matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection")));
+        assert!(
+            matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection"))
+        );
     }
 
     #[tokio::test]
@@ -61,13 +63,17 @@ mod tests {
                 table: "users".into(),
             })
             .await;
-        assert!(matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection")));
+        assert!(
+            matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection"))
+        );
     }
 
     #[tokio::test]
     async fn test_load_diagram_no_connection() {
         let mut core = Core::default();
         let events = core.handle(CoreCommand::LoadDiagram).await;
-        assert!(matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection")));
+        assert!(
+            matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection"))
+        );
     }
 }

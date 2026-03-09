@@ -11,9 +11,7 @@ pub fn handle(_state: &AppState, key: KeyEvent) -> Action {
         (KeyCode::Char('s'), KeyModifiers::CONTROL) | (KeyCode::Enter, KeyModifiers::NONE) => {
             Action::StageCellEdit
         }
-        _ if is_commit(&key) => {
-            Action::Batch(vec![Action::StageCellEdit, Action::CommitPending])
-        }
+        _ if is_commit(&key) => Action::Batch(vec![Action::StageCellEdit, Action::CommitPending]),
         _ => Action::CellEditInput(Input::from(key)),
     }
 }

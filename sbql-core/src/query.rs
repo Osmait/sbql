@@ -66,7 +66,7 @@ async fn execute_page_pg(pool: &PgPool, sql: &str, page: usize) -> Result<QueryR
         .map(|r| r.columns().iter().map(|c| c.name().to_owned()).collect())
         .unwrap_or_default();
 
-    let result_rows: Vec<Vec<String>> = rows_to_show.iter().map(|r| pg_row_to_strings(r)).collect();
+    let result_rows: Vec<Vec<String>> = rows_to_show.iter().map(pg_row_to_strings).collect();
 
     Ok(QueryResult {
         columns,
@@ -124,10 +124,7 @@ async fn execute_page_sqlite(pool: &SqlitePool, sql: &str, page: usize) -> Resul
         .map(|r| r.columns().iter().map(|c| c.name().to_owned()).collect())
         .unwrap_or_default();
 
-    let result_rows: Vec<Vec<String>> = rows_to_show
-        .iter()
-        .map(|r| sqlite_row_to_strings(r))
-        .collect();
+    let result_rows: Vec<Vec<String>> = rows_to_show.iter().map(sqlite_row_to_strings).collect();
 
     Ok(QueryResult {
         columns,
@@ -235,131 +232,88 @@ fn tokenize_redis_command(input: &str) -> Vec<String> {
     tokens
 }
 
+/// Build a single-value `QueryResult` (one column "value", one row).
+fn single_value_result(val: String) -> QueryResult {
+    QueryResult {
+        columns: vec!["value".into()],
+        rows: vec![vec![val]],
+        page: 0,
+        has_next_page: false,
+    }
+}
+
+/// Build a key-value `QueryResult` from pre-built rows.
+fn kv_result(col_a: &str, col_b: &str, rows: Vec<Vec<String>>) -> QueryResult {
+    QueryResult {
+        columns: vec![col_a.into(), col_b.into()],
+        rows,
+        page: 0,
+        has_next_page: false,
+    }
+}
+
 /// Convert a `redis::Value` into a `QueryResult` for display.
 fn redis_value_to_query_result(value: &redis::Value) -> QueryResult {
     match value {
-        redis::Value::Nil => QueryResult {
-            columns: vec!["value".into()],
-            rows: vec![vec!["(nil)".into()]],
-            page: 0,
-            has_next_page: false,
-        },
-        redis::Value::Int(i) => QueryResult {
-            columns: vec!["value".into()],
-            rows: vec![vec![i.to_string()]],
-            page: 0,
-            has_next_page: false,
-        },
-        redis::Value::BulkString(b) => QueryResult {
-            columns: vec!["value".into()],
-            rows: vec![vec![String::from_utf8_lossy(b).into_owned()]],
-            page: 0,
-            has_next_page: false,
-        },
-        redis::Value::SimpleString(s) => QueryResult {
-            columns: vec!["value".into()],
-            rows: vec![vec![s.clone()]],
-            page: 0,
-            has_next_page: false,
-        },
-        redis::Value::Okay => QueryResult {
-            columns: vec!["value".into()],
-            rows: vec![vec!["OK".into()]],
-            page: 0,
-            has_next_page: false,
-        },
+        redis::Value::Nil => single_value_result("(nil)".into()),
+        redis::Value::Int(i) => single_value_result(i.to_string()),
+        redis::Value::BulkString(b) => single_value_result(String::from_utf8_lossy(b).into_owned()),
+        redis::Value::SimpleString(s) => single_value_result(s.clone()),
+        redis::Value::Okay => single_value_result("OK".into()),
         redis::Value::Array(arr) => {
             // Check if this looks like HGETALL output (even-length, key-value pairs)
-            if arr.len() >= 2 && arr.len() % 2 == 0 && arr.iter().all(|v| is_string_like(v)) {
-                let mut rows = Vec::with_capacity(arr.len() / 2);
-                for pair in arr.chunks(2) {
-                    rows.push(vec![
-                        redis_value_to_string(&pair[0]),
-                        redis_value_to_string(&pair[1]),
-                    ]);
-                }
-                QueryResult {
-                    columns: vec!["field".into(), "value".into()],
-                    rows,
-                    page: 0,
-                    has_next_page: false,
-                }
+            if arr.len() >= 2 && arr.len() % 2 == 0 && arr.iter().all(is_string_like) {
+                let rows = arr
+                    .chunks(2)
+                    .map(|pair| {
+                        vec![
+                            redis_value_to_string(&pair[0]),
+                            redis_value_to_string(&pair[1]),
+                        ]
+                    })
+                    .collect();
+                kv_result("field", "value", rows)
             } else {
-                let rows: Vec<Vec<String>> = arr
+                let rows = arr
                     .iter()
                     .enumerate()
                     .map(|(i, v)| vec![i.to_string(), redis_value_to_string(v)])
                     .collect();
-                QueryResult {
-                    columns: vec!["index".into(), "value".into()],
-                    rows,
-                    page: 0,
-                    has_next_page: false,
-                }
+                kv_result("index", "value", rows)
             }
         }
-        redis::Value::Double(f) => QueryResult {
-            columns: vec!["value".into()],
-            rows: vec![vec![f.to_string()]],
-            page: 0,
-            has_next_page: false,
-        },
-        redis::Value::Boolean(b) => QueryResult {
-            columns: vec!["value".into()],
-            rows: vec![vec![b.to_string()]],
-            page: 0,
-            has_next_page: false,
-        },
+        redis::Value::Double(f) => single_value_result(f.to_string()),
+        redis::Value::Boolean(b) => single_value_result(b.to_string()),
         redis::Value::VerbatimString { text, .. } => QueryResult {
             columns: vec!["value".into()],
             rows: text.lines().map(|l| vec![l.to_string()]).collect(),
             page: 0,
             has_next_page: false,
         },
-        redis::Value::BigNumber(n) => QueryResult {
-            columns: vec!["value".into()],
-            rows: vec![vec![n.to_string()]],
-            page: 0,
-            has_next_page: false,
-        },
+        redis::Value::BigNumber(n) => single_value_result(n.to_string()),
         redis::Value::Map(pairs) => {
-            let rows: Vec<Vec<String>> = pairs
+            let rows = pairs
                 .iter()
                 .map(|(k, v)| vec![redis_value_to_string(k), redis_value_to_string(v)])
                 .collect();
-            QueryResult {
-                columns: vec!["field".into(), "value".into()],
-                rows,
-                page: 0,
-                has_next_page: false,
-            }
+            kv_result("field", "value", rows)
         }
         redis::Value::Set(items) => {
-            let rows: Vec<Vec<String>> = items
+            let rows = items
                 .iter()
                 .enumerate()
                 .map(|(i, v)| vec![i.to_string(), redis_value_to_string(v)])
                 .collect();
-            QueryResult {
-                columns: vec!["index".into(), "value".into()],
-                rows,
-                page: 0,
-                has_next_page: false,
-            }
+            kv_result("index", "value", rows)
         }
         redis::Value::Attribute { data, .. } => redis_value_to_query_result(data),
         redis::Value::Push { data, .. } => {
-            let rows: Vec<Vec<String>> = data
+            let rows = data
                 .iter()
                 .enumerate()
                 .map(|(i, v)| vec![i.to_string(), redis_value_to_string(v)])
                 .collect();
-            QueryResult {
-                columns: vec!["index".into(), "value".into()],
-                rows,
-                page: 0,
-                has_next_page: false,
-            }
+            kv_result("index", "value", rows)
         }
         redis::Value::ServerError(e) => QueryResult {
             columns: vec!["error".into()],
@@ -383,7 +337,7 @@ fn redis_value_to_string(value: &redis::Value) -> String {
         redis::Value::Array(arr) => format!(
             "[{}]",
             arr.iter()
-                .map(|v| redis_value_to_string(v))
+                .map(redis_value_to_string)
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
@@ -400,7 +354,7 @@ fn redis_value_to_string(value: &redis::Value) -> String {
             "{{{}}}",
             items
                 .iter()
-                .map(|v| redis_value_to_string(v))
+                .map(redis_value_to_string)
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
@@ -409,7 +363,7 @@ fn redis_value_to_string(value: &redis::Value) -> String {
         redis::Value::Push { data, .. } => format!(
             "[{}]",
             data.iter()
-                .map(|v| redis_value_to_string(v))
+                .map(redis_value_to_string)
                 .collect::<Vec<_>>()
                 .join(", ")
         ),

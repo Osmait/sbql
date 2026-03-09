@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 // MARK: - Data types
 
@@ -8,17 +8,17 @@ enum CompletionKind {
 
     var icon: String {
         switch self {
-        case .table:   return "tablecells"
-        case .column:  return "character.textbox"
-        case .keyword: return "textformat"
+        case .table: "tablecells"
+        case .column: "character.textbox"
+        case .keyword: "textformat"
         }
     }
 
     var color: Color {
         switch self {
-        case .table:   return SbqlTheme.Colors.accent
-        case .column:  return SbqlTheme.Colors.warning
-        case .keyword: return SbqlTheme.Colors.textTertiary
+        case .table: SbqlTheme.Colors.accent
+        case .column: SbqlTheme.Colors.warning
+        case .keyword: SbqlTheme.Colors.textTertiary
         }
     }
 }
@@ -47,7 +47,7 @@ enum SQLCompletionProvider {
         "MAX", "CAST", "COALESCE", "PRIMARY", "KEY", "FOREIGN", "REFERENCES",
         "CONSTRAINT", "DEFAULT", "CHECK", "UNIQUE", "TRUNCATE", "BEGIN",
         "COMMIT", "ROLLBACK", "GRANT", "REVOKE", "WITH", "RECURSIVE", "EXPLAIN",
-        "ANALYZE", "VACUUM", "PRAGMA"
+        "ANALYZE", "VACUUM", "PRAGMA",
     ]
 
     static func completions(prefix: String, tables: [DiagramTable]) -> [CompletionItem] {
@@ -143,7 +143,9 @@ final class CompletionPanel {
     private(set) var selectedIndex: Int = 0
     var onAccept: ((CompletionItem) -> Void)?
 
-    var isVisible: Bool { panel.isVisible }
+    var isVisible: Bool {
+        panel.isVisible
+    }
 
     init() {
         panel = NSPanel(
@@ -166,7 +168,7 @@ final class CompletionPanel {
     func show(items: [CompletionItem], at screenPoint: NSPoint) {
         guard !items.isEmpty else { dismiss(); return }
         self.items = items
-        self.selectedIndex = 0
+        selectedIndex = 0
         rebuildView()
 
         // Size the panel to fit content

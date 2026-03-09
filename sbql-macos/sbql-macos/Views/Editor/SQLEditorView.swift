@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 /// NSTextView wrapper for SQL editing with monospace font and Cmd+Enter support.
 struct SQLEditorView: NSViewRepresentable {
@@ -91,7 +91,7 @@ struct SQLEditorView: NSViewRepresentable {
             }
         }
 
-        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        func textView(_: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if completionPanel.isVisible {
                 if commandSelector == #selector(NSResponder.moveUp(_:)) {
                     completionPanel.moveUp()
@@ -181,7 +181,7 @@ struct SQLEditorView: NSViewRepresentable {
         }
 
         func insertCompletion(_ item: CompletionItem) {
-            guard let textView = textView, let range = completionRange else { return }
+            guard let textView, let range = completionRange else { return }
             suppressCompletions = true
             textView.insertText(item.text, replacementRange: range)
             suppressCompletions = false

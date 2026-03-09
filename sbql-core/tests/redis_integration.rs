@@ -6,10 +6,7 @@ use sbql_core::{
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::redis::Redis;
 
-async fn setup_redis() -> (
-    DbPool,
-    testcontainers::ContainerAsync<Redis>,
-) {
+async fn setup_redis() -> (DbPool, testcontainers::ContainerAsync<Redis>) {
     let container = Redis::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(6379).await.unwrap();
@@ -19,7 +16,7 @@ async fn setup_redis() -> (
     let cm = redis::aio::ConnectionManager::new(client)
         .await
         .expect("Failed to create ConnectionManager");
-    let pool = DbPool::Redis(cm);
+    let pool = DbPool::Redis(Box::new(cm));
 
     (pool, container)
 }
@@ -84,8 +81,12 @@ async fn test_redis_hash_commands() {
     let (pool, _container) = setup_redis().await;
 
     // HSET hash field value
-    execute_page(&pool, "HSET myhash field1 value1", 0).await.unwrap();
-    execute_page(&pool, "HSET myhash field2 value2", 0).await.unwrap();
+    execute_page(&pool, "HSET myhash field1 value1", 0)
+        .await
+        .unwrap();
+    execute_page(&pool, "HSET myhash field2 value2", 0)
+        .await
+        .unwrap();
 
     // HGETALL
     let result = execute_page(&pool, "HGETALL myhash", 0).await.unwrap();
@@ -93,8 +94,14 @@ async fn test_redis_hash_commands() {
     assert_eq!(result.rows.len(), 2);
 
     // Verify field/value pairs exist (order may vary)
-    let has_field1 = result.rows.iter().any(|r| r[0] == "field1" && r[1] == "value1");
-    let has_field2 = result.rows.iter().any(|r| r[0] == "field2" && r[1] == "value2");
+    let has_field1 = result
+        .rows
+        .iter()
+        .any(|r| r[0] == "field1" && r[1] == "value1");
+    let has_field2 = result
+        .rows
+        .iter()
+        .any(|r| r[0] == "field2" && r[1] == "value2");
     assert!(has_field1);
     assert!(has_field2);
 }

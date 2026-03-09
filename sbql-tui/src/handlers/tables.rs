@@ -13,12 +13,10 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
                 Action::ClearPendingG
             }
         }
-        KeyCode::Up | KeyCode::Char('k') => {
-            Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::SelectTable(state.tables.selected.saturating_sub(1)),
-            ])
-        }
+        KeyCode::Up | KeyCode::Char('k') => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::SelectTable(state.tables.selected.saturating_sub(1)),
+        ]),
         KeyCode::Char('G') => {
             if !state.tables.tables.is_empty() {
                 Action::Batch(vec![
@@ -36,15 +34,11 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
                 Action::SetPendingG
             }
         }
-        KeyCode::Enter => {
-            Action::Batch(vec![Action::ClearPendingG, Action::OpenSelectedTable])
-        }
-        KeyCode::Esc => {
-            Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::FocusPanel(FocusedPanel::Editor),
-            ])
-        }
+        KeyCode::Enter => Action::Batch(vec![Action::ClearPendingG, Action::OpenSelectedTable]),
+        KeyCode::Esc => Action::Batch(vec![
+            Action::ClearPendingG,
+            Action::FocusPanel(FocusedPanel::Editor),
+        ]),
         _ => Action::ClearPendingG,
     }
 }

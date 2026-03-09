@@ -135,6 +135,12 @@ pub struct SbqlEngine {
     runtime: Arc<tokio::runtime::Runtime>,
 }
 
+impl Default for SbqlEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[uniffi::export]
 impl SbqlEngine {
     /// Create a new engine, loading saved connections from disk.
@@ -293,10 +299,7 @@ impl SbqlEngine {
 
     /// Execute a SQL query, returning page 0.
     #[uniffi::method(async_runtime = "tokio")]
-    pub async fn execute_query(
-        &self,
-        sql: String,
-    ) -> Result<FfiQueryResult, SbqlFfiError> {
+    pub async fn execute_query(&self, sql: String) -> Result<FfiQueryResult, SbqlFfiError> {
         let mut core = self.core.lock().await;
         let events = core
             .handle(sbql_core::CoreCommand::ExecuteQuery { sql })
@@ -347,10 +350,7 @@ impl SbqlEngine {
 
     /// Apply WHERE filter and re-execute.
     #[uniffi::method(async_runtime = "tokio")]
-    pub async fn apply_filter(
-        &self,
-        query: String,
-    ) -> Result<FfiQueryResult, SbqlFfiError> {
+    pub async fn apply_filter(&self, query: String) -> Result<FfiQueryResult, SbqlFfiError> {
         let mut core = self.core.lock().await;
         let events = core
             .handle(sbql_core::CoreCommand::ApplyFilter { query })
@@ -456,8 +456,9 @@ impl SbqlEngine {
 // ---------------------------------------------------------------------------
 
 fn parse_uuid(id: &str) -> Result<uuid::Uuid, SbqlFfiError> {
-    uuid::Uuid::parse_str(id)
-        .map_err(|e| SbqlFfiError::InvalidArgument { msg: format!("Invalid UUID '{id}': {e}") })
+    uuid::Uuid::parse_str(id).map_err(|e| SbqlFfiError::InvalidArgument {
+        msg: format!("Invalid UUID '{id}': {e}"),
+    })
 }
 
 fn extract_connection_list(
@@ -476,9 +477,7 @@ fn extract_connection_list(
     Ok(vec![])
 }
 
-fn extract_query_result(
-    events: Vec<sbql_core::CoreEvent>,
-) -> Result<FfiQueryResult, SbqlFfiError> {
+fn extract_query_result(events: Vec<sbql_core::CoreEvent>) -> Result<FfiQueryResult, SbqlFfiError> {
     for ev in &events {
         if let sbql_core::CoreEvent::Error(msg) = ev {
             return Err(SbqlFfiError::core(msg));
@@ -633,9 +632,13 @@ mod tests {
     #[tokio::test]
     async fn engine_connect_nonexistent_id() {
         let engine = SbqlEngine::new();
-        let result = engine.connect("550e8400-e29b-41d4-a716-446655440000".into()).await;
+        let result = engine
+            .connect("550e8400-e29b-41d4-a716-446655440000".into())
+            .await;
         assert!(result.is_err());
-        tokio::task::spawn_blocking(move || drop(engine)).await.unwrap();
+        tokio::task::spawn_blocking(move || drop(engine))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -654,7 +657,9 @@ mod tests {
         };
         let result = engine.save_connection(config, None).await;
         assert!(result.is_err());
-        tokio::task::spawn_blocking(move || drop(engine)).await.unwrap();
+        tokio::task::spawn_blocking(move || drop(engine))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -697,6 +702,8 @@ mod tests {
 
         // Clean up: delete the connection
         let _ = engine.delete_connection(id).await;
-        tokio::task::spawn_blocking(move || drop(engine)).await.unwrap();
+        tokio::task::spawn_blocking(move || drop(engine))
+            .await
+            .unwrap();
     }
 }

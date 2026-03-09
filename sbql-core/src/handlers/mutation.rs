@@ -13,7 +13,17 @@ pub(crate) async fn update_cell(
         Ok(p) => p,
         Err(e) => return vec![CoreEvent::Error(e.to_string())],
     };
-    match schema::execute_cell_update(&pool, &schema_name, &table, &pk_col, &pk_val, &target_col, &new_val).await {
+    match schema::execute_cell_update(
+        &pool,
+        &schema_name,
+        &table,
+        &pk_col,
+        &pk_val,
+        &target_col,
+        &new_val,
+    )
+    .await
+    {
         Ok(()) => vec![CoreEvent::CellUpdated],
         Err(e) => vec![CoreEvent::Error(e.to_string())],
     }
@@ -80,7 +90,9 @@ mod tests {
                 new_val: "Bob".into(),
             })
             .await;
-        assert!(matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection")));
+        assert!(
+            matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection"))
+        );
     }
 
     #[tokio::test]
@@ -94,7 +106,9 @@ mod tests {
                 pk_val: "1".into(),
             })
             .await;
-        assert!(matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection")));
+        assert!(
+            matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection"))
+        );
     }
 
     #[tokio::test]

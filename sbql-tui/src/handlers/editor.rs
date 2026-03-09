@@ -8,9 +8,7 @@ use crate::events::is_run_query;
 pub fn handle(state: &AppState, key: KeyEvent) -> Action {
     match state.editor.mode {
         EditorMode::Normal => match (key.code, key.modifiers) {
-            (KeyCode::Char('i'), KeyModifiers::NONE) => {
-                Action::SetEditorMode(EditorMode::Insert)
-            }
+            (KeyCode::Char('i'), KeyModifiers::NONE) => Action::SetEditorMode(EditorMode::Insert),
             (KeyCode::Char('h') | KeyCode::Left, KeyModifiers::NONE) => {
                 Action::EditorCursorMove(CursorMove::Back)
             }
@@ -29,15 +27,9 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
             (KeyCode::Char('b'), KeyModifiers::NONE) => {
                 Action::EditorCursorMove(CursorMove::WordBack)
             }
-            (KeyCode::Char('0'), KeyModifiers::NONE) => {
-                Action::EditorCursorMove(CursorMove::Head)
-            }
-            (KeyCode::Char('$'), KeyModifiers::NONE) => {
-                Action::EditorCursorMove(CursorMove::End)
-            }
-            (KeyCode::Char('g'), KeyModifiers::NONE) => {
-                Action::EditorCursorMove(CursorMove::Top)
-            }
+            (KeyCode::Char('0'), KeyModifiers::NONE) => Action::EditorCursorMove(CursorMove::Head),
+            (KeyCode::Char('$'), KeyModifiers::NONE) => Action::EditorCursorMove(CursorMove::End),
+            (KeyCode::Char('g'), KeyModifiers::NONE) => Action::EditorCursorMove(CursorMove::Top),
             (KeyCode::Char('G'), _) => Action::EditorCursorMove(CursorMove::Bottom),
             _ if is_run_query(&key) => Action::RunQuery,
             (KeyCode::Esc, _) => Action::Noop,
@@ -127,14 +119,20 @@ mod tests {
     fn normal_w_word_forward() {
         let state = normal_state();
         let act = handle(&state, key(KeyCode::Char('w')));
-        assert!(matches!(act, Action::EditorCursorMove(CursorMove::WordForward)));
+        assert!(matches!(
+            act,
+            Action::EditorCursorMove(CursorMove::WordForward)
+        ));
     }
 
     #[test]
     fn normal_b_word_back() {
         let state = normal_state();
         let act = handle(&state, key(KeyCode::Char('b')));
-        assert!(matches!(act, Action::EditorCursorMove(CursorMove::WordBack)));
+        assert!(matches!(
+            act,
+            Action::EditorCursorMove(CursorMove::WordBack)
+        ));
     }
 
     #[test]

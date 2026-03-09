@@ -89,11 +89,7 @@ impl ConnectionConfig {
     }
 
     /// Create a new Redis connection config.
-    pub fn new_redis(
-        name: impl Into<String>,
-        host: impl Into<String>,
-        port: u16,
-    ) -> Self {
+    pub fn new_redis(name: impl Into<String>, host: impl Into<String>, port: u16) -> Self {
         Self {
             id: Uuid::new_v4(),
             name: name.into(),
@@ -139,12 +135,7 @@ impl ConnectionConfig {
                         self.database,
                     )
                 } else {
-                    format!(
-                        "{scheme}://{}:{}/{}",
-                        self.host,
-                        self.port,
-                        self.database,
-                    )
+                    format!("{scheme}://{}:{}/{}", self.host, self.port, self.database,)
                 }
             }
         }
@@ -157,7 +148,9 @@ impl ConnectionConfig {
 
     /// Store the password in the OS keyring. No-op for SQLite.
     pub fn save_password(&self, password: &str) -> Result<()> {
-        if self.backend == DbBackend::Sqlite || (self.backend == DbBackend::Redis && password.is_empty()) {
+        if self.backend == DbBackend::Sqlite
+            || (self.backend == DbBackend::Redis && password.is_empty())
+        {
             return Ok(());
         }
         let entry = Entry::new(KEYRING_SERVICE, &self.keyring_user())

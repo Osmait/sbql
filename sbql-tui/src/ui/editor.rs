@@ -145,7 +145,12 @@ pub fn draw(
 
     // --- Build visible lines ---
     let mut visible_lines: Vec<Line> = Vec::with_capacity(vp_h);
-    let text_lines: Vec<String> = editor.textarea.lines().iter().map(|s| s.to_string()).collect();
+    let text_lines: Vec<String> = editor
+        .textarea
+        .lines()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
 
     for view_row in 0..vp_h {
         let line_idx = editor.scroll_row + view_row;
@@ -219,7 +224,11 @@ pub fn draw(
         }
 
         // If the cursor is at the end of the line (past last char), show cursor block
-        if is_cursor_line && cursor_col >= total_cols && cursor_col >= col_start && cursor_col < col_start + vp_w {
+        if is_cursor_line
+            && cursor_col >= total_cols
+            && cursor_col >= col_start
+            && cursor_col < col_start + vp_w
+        {
             // Pad with spaces to reach cursor
             let rendered_cols = col_end.saturating_sub(col_start);
             let cursor_vp_col = cursor_col - col_start;
@@ -263,7 +272,8 @@ fn draw_completion_popup(
     let cursor_vp_row = cursor_row.saturating_sub(editor.scroll_row) as u16;
     let cursor_vp_col = cursor_col.saturating_sub(editor.scroll_col) as u16;
 
-    let popup_x = editor_inner.x + cursor_vp_col.min(editor_inner.width.saturating_sub(popup_width));
+    let popup_x =
+        editor_inner.x + cursor_vp_col.min(editor_inner.width.saturating_sub(popup_width));
 
     // Try below cursor first, then above
     let below_y = editor_inner.y + cursor_vp_row + 1;

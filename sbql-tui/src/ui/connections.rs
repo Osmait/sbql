@@ -251,8 +251,7 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
             },
         };
 
-        let is_password =
-            (form.backend == sbql_core::DbBackend::Postgres && i == 6)
+        let is_password = (form.backend == sbql_core::DbBackend::Postgres && i == 6)
             || (form.backend == sbql_core::DbBackend::Redis && i == 4);
         let display = if is_password {
             if value.is_empty() && form.editing_id.is_some() {

@@ -13,7 +13,7 @@ struct CellEditor: View {
         self.column = column
         self.currentValue = currentValue
         self.onSave = onSave
-        self._editedValue = State(initialValue: currentValue)
+        _editedValue = State(initialValue: currentValue)
     }
 
     var body: some View {
