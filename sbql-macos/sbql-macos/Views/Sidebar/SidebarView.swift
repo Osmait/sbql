@@ -73,11 +73,7 @@ struct SidebarView: View {
                 }
             }
         }
-        .background(.ultraThinMaterial)
-        .background(SbqlTheme.Colors.surface.opacity(0.5))
-        .overlay(alignment: .trailing) {
-            SbqlTheme.Colors.border.frame(width: 1)
-        }
+        // Background and clipping handled by the island container in MainWindow
         .sheet(isPresented: Binding(
             get: { appVM.connections.isShowingConnectionForm },
             set: { appVM.connections.isShowingConnectionForm = $0 }

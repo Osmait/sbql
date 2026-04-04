@@ -79,26 +79,31 @@ struct ResultsToolbar: View {
                 .buttonStyle(.plain)
             }
 
-            // Editor toggle
+            // SQL Editor toggle
             Button {
                 withAnimation(SbqlTheme.Animations.quick) {
                     appVM.editor.isVisible.toggle()
                 }
             } label: {
                 HStack(spacing: SbqlTheme.Spacing.xs) {
-                    Image(systemName: "chevron.left.forwardslash.chevron.right")
-                        .font(.system(size: 11))
-                    Text("Editor")
-                        .font(SbqlTheme.Typography.captionBold)
+                    Text("SQL")
+                        .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                    Image(systemName: appVM.editor.isVisible ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
                 }
                 .foregroundStyle(
                     appVM.editor.isVisible
                         ? SbqlTheme.Colors.accent
-                        : SbqlTheme.Colors.accent.opacity(0.4)
+                        : SbqlTheme.Colors.accent.opacity(0.5)
                 )
+                .padding(.horizontal, SbqlTheme.Spacing.sm)
+                .padding(.vertical, SbqlTheme.Spacing.xs)
+                .background(SbqlTheme.Colors.accent.opacity(appVM.editor.isVisible ? 0.15 : 0.06))
+                .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
             }
             .buttonStyle(.plain)
             .keyboardShortcut("e", modifiers: .command)
+            .help(appVM.editor.isVisible ? "Hide SQL editor" : "Show SQL editor")
 
             Spacer()
 

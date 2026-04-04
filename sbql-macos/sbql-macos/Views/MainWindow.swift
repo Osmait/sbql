@@ -1,33 +1,45 @@
 import SwiftUI
 
-/// Top-level layout: custom titlebar + sidebar + main content area.
+/// Island gap and radius constants.
+private enum Island {
+    static let gap: CGFloat = 8
+    static let radius: CGFloat = 10
+    static let outerPadding: CGFloat = 8
+}
+
+/// Top-level layout using IntelliJ-style "island" design.
+/// Each section is a rounded-corner panel floating on a darker background.
 struct MainWindow: View {
     @Environment(AppViewModel.self) private var appVM
     @Environment(ThemeManager.self) private var theme
 
     var body: some View {
-        // Access theme.activeThemeName so SwiftUI re-renders on theme change
         let _ = theme.activeThemeName
 
         ZStack {
+            // "Sea" background — darker than islands
             SbqlTheme.Colors.background.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // Full-width header (always at the top, spanning sidebar + content)
+            VStack(spacing: Island.gap) {
+                // Header island — flush with top, traffic lights sit inside
                 unifiedHeader
 
-                // Content area: optional sidebar + main
-                HStack(spacing: 0) {
+                // Content islands: sidebar + main
+                HStack(spacing: Island.gap) {
                     if appVM.isSidebarVisible {
                         SidebarView()
                             .frame(width: SbqlTheme.Size.sidebarWidth)
-                            .transition(.move(edge: .leading))
+                            .background(SbqlTheme.Colors.surface)
+                            .clipShape(RoundedRectangle(cornerRadius: Island.radius))
+                            .transition(.move(edge: .leading).combined(with: .opacity))
                     }
 
                     mainContent
                 }
                 .animation(SbqlTheme.Animations.quick, value: appVM.isSidebarVisible)
             }
+            .padding(.horizontal, Island.outerPadding)
+            .padding(.bottom, Island.outerPadding)
             .ignoresSafeArea()
 
             // Toast overlay
@@ -50,21 +62,26 @@ struct MainWindow: View {
         .onAppear { appVM.onAppear() }
     }
 
+    // MARK: - Main Content Island
+
     private var mainContent: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: Island.gap) {
             switch appVM.activeTab {
             case .query:
                 queryContent
             case .diagram:
                 DiagramView()
+                    .background(SbqlTheme.Colors.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: Island.radius))
             }
         }
-        .background(SbqlTheme.Colors.background)
     }
+
+    // MARK: - Header Island
 
     private var unifiedHeader: some View {
         HStack(spacing: SbqlTheme.Spacing.sm) {
-            // Space for macOS traffic lights (close/minimize/maximize)
+            // Space for macOS traffic lights
             Spacer().frame(width: 56)
 
             // Sidebar toggle
@@ -86,6 +103,7 @@ struct MainWindow: View {
 
             SbqlTheme.Colors.border
                 .frame(width: 1, height: 16)
+                .opacity(0.5)
 
             // Mode pills
             ForEach(AppViewModel.ActiveTab.allCases, id: \.self) { tab in
@@ -111,15 +129,16 @@ struct MainWindow: View {
                                 ? SbqlTheme.Colors.surfaceElevated
                                 : Color.clear
                         )
-                        .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
+                        .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
                 }
                 .buttonStyle(.plain)
             }
 
-            // Table tabs (query mode only)
+            // Table tabs
             if appVM.activeTab == .query, !appVM.results.tabs.isEmpty {
                 SbqlTheme.Colors.border
                     .frame(width: 1, height: 16)
+                    .opacity(0.5)
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: SbqlTheme.Spacing.xxs) {
@@ -129,7 +148,6 @@ struct MainWindow: View {
                     }
                 }
 
-                // Close all tabs button
                 Button {
                     appVM.results.closeAllTabs()
                     appVM.editor.sqlText = ""
@@ -144,20 +162,24 @@ struct MainWindow: View {
 
             Spacer()
 
-            // Connection info + actions (compact, right side)
             connectionInfo
-
             headerActions
         }
         .padding(.horizontal, SbqlTheme.Spacing.lg)
-        .padding(.top, 6) // small breathing room below traffic lights
+        .padding(.top, 4) // align content with macOS traffic lights
         .padding(.bottom, SbqlTheme.Spacing.sm)
-        .frame(height: 38) // fixed height matching macOS title bar
         .background(SbqlTheme.Colors.surface)
-        .overlay(alignment: .bottom) {
-            SbqlTheme.Colors.border.frame(height: 1)
-        }
+        .clipShape(
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: Island.radius,
+                bottomTrailingRadius: Island.radius,
+                topTrailingRadius: 0
+            )
+        )
     }
+
+    // MARK: - Header Actions
 
     private var headerActions: some View {
         HStack(spacing: SbqlTheme.Spacing.md) {
@@ -172,21 +194,22 @@ struct MainWindow: View {
         }
     }
 
+    // MARK: - Connection Info
+
     @ViewBuilder
     private var connectionInfo: some View {
         if let conn = appVM.connections.activeConnection {
             HStack(spacing: SbqlTheme.Spacing.sm) {
-                // Connection name
                 Text(conn.name)
                     .font(SbqlTheme.Typography.bodyMedium)
                     .foregroundStyle(SbqlTheme.Colors.textPrimary)
 
-                // Backend badge — colored by engine type
+                // Backend badge
                 Text(conn.backend == .postgres ? "PG" : "SQLite")
                     .font(SbqlTheme.Typography.captionBold)
                     .foregroundStyle(conn.backend == .postgres
-                        ? Color(hex: 0x336791) // PostgreSQL blue
-                        : Color(hex: 0x44A8D6) // SQLite cyan
+                        ? Color(hex: 0x336791)
+                        : Color(hex: 0x44A8D6)
                     )
                     .padding(.horizontal, SbqlTheme.Spacing.sm)
                     .padding(.vertical, 2)
@@ -198,7 +221,7 @@ struct MainWindow: View {
                     )
                     .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
 
-                // Database name — accent tinted
+                // Database name
                 HStack(spacing: 3) {
                     Image(systemName: "cylinder")
                         .font(.system(size: 9))
@@ -214,7 +237,7 @@ struct MainWindow: View {
                 .background(SbqlTheme.Colors.accent.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
 
-                // Query duration — green for fast, yellow for slow
+                // Query duration
                 if let d = appVM.editor.lastQueryDuration {
                     let ms = d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000
                     let durationColor = ms < 500
@@ -251,6 +274,8 @@ struct MainWindow: View {
         return String(format: "%.1fs", seconds)
     }
 
+    // MARK: - Query Tab
+
     private func queryTab(_ tab: QueryTab, isActive: Bool) -> some View {
         HStack(spacing: SbqlTheme.Spacing.xs) {
             Image(systemName: "tablecells")
@@ -280,7 +305,7 @@ struct MainWindow: View {
         .padding(.horizontal, SbqlTheme.Spacing.sm)
         .padding(.vertical, SbqlTheme.Spacing.xs)
         .background(isActive ? SbqlTheme.Colors.surfaceElevated : Color.clear)
-        .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
+        .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
         .overlay(alignment: .bottom) {
             if isActive {
                 SbqlTheme.Colors.accent
@@ -296,22 +321,32 @@ struct MainWindow: View {
         }
     }
 
+    // MARK: - Query Content
+
     private var queryContent: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: Island.gap) {
+            // Editor island
             if appVM.editor.isVisible {
                 VStack(spacing: 0) {
                     SQLEditorView()
                     EditorToolbar()
                 }
                 .frame(minHeight: SbqlTheme.Size.editorMinHeight, maxHeight: 300)
+                .background(SbqlTheme.Colors.surface)
+                .clipShape(RoundedRectangle(cornerRadius: Island.radius))
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            ResultsToolbar()
-            if appVM.results.isFilterBarVisible {
-                FilterBar()
+            // Results island
+            VStack(spacing: 0) {
+                ResultsToolbar()
+                if appVM.results.isFilterBarVisible {
+                    FilterBar()
+                }
+                ResultsView()
             }
-            ResultsView()
+            .background(SbqlTheme.Colors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: Island.radius))
         }
         .animation(SbqlTheme.Animations.quick, value: appVM.editor.isVisible)
     }
