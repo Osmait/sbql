@@ -8,11 +8,21 @@ struct MainWindow: View {
         ZStack {
             SbqlTheme.Colors.background.ignoresSafeArea()
 
-            HSplitView {
-                SidebarView()
-                    .frame(minWidth: 180, idealWidth: SbqlTheme.Size.sidebarWidth, maxWidth: 300)
+            VStack(spacing: 0) {
+                // Full-width header (always at the top, spanning sidebar + content)
+                unifiedHeader
 
-                mainContent
+                // Content area: optional sidebar + main
+                HStack(spacing: 0) {
+                    if appVM.isSidebarVisible {
+                        SidebarView()
+                            .frame(width: SbqlTheme.Size.sidebarWidth)
+                            .transition(.move(edge: .leading))
+                    }
+
+                    mainContent
+                }
+                .animation(SbqlTheme.Animations.quick, value: appVM.isSidebarVisible)
             }
             .ignoresSafeArea()
 
@@ -38,8 +48,6 @@ struct MainWindow: View {
 
     private var mainContent: some View {
         VStack(spacing: 0) {
-            unifiedHeader
-
             switch appVM.activeTab {
             case .query:
                 queryContent
@@ -51,75 +59,84 @@ struct MainWindow: View {
     }
 
     private var unifiedHeader: some View {
-        VStack(spacing: 0) {
-            // Row 1: Titlebar — connection info centered, actions on right
-            ZStack {
-                // Center: connection name + badges
-                connectionInfo
+        HStack(spacing: SbqlTheme.Spacing.sm) {
+            // Space for macOS traffic lights (close/minimize/maximize)
+            Spacer().frame(width: 56)
 
-                // Right: action buttons
-                HStack {
-                    Spacer()
-                    headerActions
+            // Sidebar toggle
+            Button {
+                withAnimation(SbqlTheme.Animations.quick) {
+                    appVM.isSidebarVisible.toggle()
+                }
+            } label: {
+                Image(systemName: "sidebar.leading")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(
+                        appVM.isSidebarVisible
+                            ? SbqlTheme.Colors.accent
+                            : SbqlTheme.Colors.textTertiary
+                    )
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("s", modifiers: [.command, .control])
+
+            SbqlTheme.Colors.border
+                .frame(width: 1, height: 16)
+
+            // Mode pills
+            ForEach(AppViewModel.ActiveTab.allCases, id: \.self) { tab in
+                Button {
+                    withAnimation(SbqlTheme.Animations.quick) {
+                        appVM.activeTab = tab
+                    }
+                    if tab == .diagram {
+                        Task { await appVM.loadDiagram() }
+                    }
+                } label: {
+                    Text(tab.rawValue)
+                        .font(SbqlTheme.Typography.captionBold)
+                        .foregroundStyle(
+                            appVM.activeTab == tab
+                                ? SbqlTheme.Colors.textPrimary
+                                : SbqlTheme.Colors.textTertiary
+                        )
+                        .padding(.horizontal, SbqlTheme.Spacing.md)
+                        .padding(.vertical, SbqlTheme.Spacing.xs)
+                        .background(
+                            appVM.activeTab == tab
+                                ? SbqlTheme.Colors.surfaceElevated
+                                : Color.clear
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Table tabs (query mode only)
+            if appVM.activeTab == .query, !appVM.results.tabs.isEmpty {
+                SbqlTheme.Colors.border
+                    .frame(width: 1, height: 16)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: SbqlTheme.Spacing.xxs) {
+                        ForEach(appVM.results.tabs) { tab in
+                            queryTab(tab, isActive: tab.id == appVM.results.activeTabId)
+                        }
+                    }
                 }
             }
-            .padding(.horizontal, SbqlTheme.Spacing.lg)
-            .padding(.top, SbqlTheme.Spacing.xs)
-            .padding(.bottom, SbqlTheme.Spacing.xs)
 
-            SbqlTheme.Colors.border.frame(height: 1).opacity(0.5)
+            Spacer()
 
-            // Row 2: Tab bar — mode pills + table tabs
-            HStack(spacing: SbqlTheme.Spacing.xs) {
-                // Mode pills
-                ForEach(AppViewModel.ActiveTab.allCases, id: \.self) { tab in
-                    Button {
-                        withAnimation(SbqlTheme.Animations.quick) {
-                            appVM.activeTab = tab
-                        }
-                        if tab == .diagram {
-                            Task { await appVM.loadDiagram() }
-                        }
-                    } label: {
-                        Text(tab.rawValue)
-                            .font(SbqlTheme.Typography.captionBold)
-                            .foregroundStyle(
-                                appVM.activeTab == tab
-                                    ? SbqlTheme.Colors.textPrimary
-                                    : SbqlTheme.Colors.textTertiary
-                            )
-                            .padding(.horizontal, SbqlTheme.Spacing.md)
-                            .padding(.vertical, SbqlTheme.Spacing.xs)
-                            .background(
-                                appVM.activeTab == tab
-                                    ? SbqlTheme.Colors.surfaceElevated
-                                    : Color.clear
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
-                    }
-                    .buttonStyle(.plain)
-                }
+            // Connection info + actions (compact, right side)
+            connectionInfo
 
-                // Divider + table tabs
-                if appVM.activeTab == .query, !appVM.results.tabs.isEmpty {
-                    SbqlTheme.Colors.border
-                        .frame(width: 1, height: 16)
-                        .padding(.horizontal, SbqlTheme.Spacing.xxs)
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: SbqlTheme.Spacing.xxs) {
-                            ForEach(appVM.results.tabs) { tab in
-                                queryTab(tab, isActive: tab.id == appVM.results.activeTabId)
-                            }
-                        }
-                    }
-                }
-
-                Spacer()
-            }
-            .padding(.horizontal, SbqlTheme.Spacing.lg)
-            .padding(.vertical, SbqlTheme.Spacing.xs)
+            headerActions
         }
+        .padding(.horizontal, SbqlTheme.Spacing.lg)
+        .padding(.top, 6) // small breathing room below traffic lights
+        .padding(.bottom, SbqlTheme.Spacing.sm)
+        .frame(height: 38) // fixed height matching macOS title bar
         .background(SbqlTheme.Colors.surface)
         .overlay(alignment: .bottom) {
             SbqlTheme.Colors.border.frame(height: 1)

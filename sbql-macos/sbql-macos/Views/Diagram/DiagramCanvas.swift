@@ -93,33 +93,37 @@ struct DiagramCanvas: View {
     private func drawEdges(context: inout GraphicsContext, edges: [DiagramEdge]) {
         let anyEdgeHovered = edges.contains(where: { $0.isHovered })
         let hoveredTable = diagram.hoveredTableId
-        let anyHighlight = anyEdgeHovered || hoveredTable != nil
         let palette = SbqlTheme.Colors.fkLinePalette
 
         for edge in edges {
-            let path = DiagramEdgeGeometry.bezierPath(for: edge)
+            let path = DiagramEdgeGeometry.roundedOrthogonalPath(for: edge)
             let baseColor = palette[edge.colorIndex]
             let color: Color
             let lineWidth: CGFloat
 
-            // Edge is directly hovered
             let isEdgeActive = edge.isHovered
-            // Edge connects to the hovered table
             let isTableActive = hoveredTable != nil &&
                 (edge.fromTableId == hoveredTable || edge.toTableId == hoveredTable)
 
             if isEdgeActive {
+                // Directly hovered edge: full brightness
                 color = baseColor
                 lineWidth = 2.5
+            } else if anyEdgeHovered {
+                // An edge is hovered but not this one: dim significantly
+                color = baseColor.opacity(0.15)
+                lineWidth = 1.0
             } else if isTableActive {
-                color = baseColor.opacity(0.85)
+                // Table hovered, this edge connects to it: bright
+                color = baseColor.opacity(0.90)
                 lineWidth = 2.0
-            } else if anyHighlight {
-                // Dim non-active lines when something is highlighted
-                color = baseColor.opacity(0.10)
+            } else if hoveredTable != nil {
+                // Table hovered but this edge doesn't connect: moderate dim
+                color = baseColor.opacity(0.20)
                 lineWidth = 1.0
             } else {
-                color = baseColor.opacity(0.55)
+                // Nothing hovered: normal state
+                color = baseColor.opacity(0.60)
                 lineWidth = 1.5
             }
 
@@ -138,7 +142,7 @@ struct DiagramCanvas: View {
     // MARK: - Hit Testing
 
     private func bezierHitArea(for edge: DiagramEdge) -> some View {
-        let path = DiagramEdgeGeometry.bezierPath(for: edge)
+        let path = DiagramEdgeGeometry.roundedOrthogonalPath(for: edge)
         return path
             .stroke(Color.clear, lineWidth: 12) // fat invisible stroke for hit testing
             .contentShape(path.strokedPath(StrokeStyle(lineWidth: 12)))

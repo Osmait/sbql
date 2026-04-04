@@ -14,8 +14,8 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Padding for traffic lights
-            Color.clear.frame(height: 38)
+            // Small top padding (header is above)
+            Color.clear.frame(height: SbqlTheme.Spacing.sm)
 
             // Connections section
             sectionHeader("CONNECTIONS") {

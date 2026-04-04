@@ -9,6 +9,7 @@ final class AppViewModel {
     let diagram = DiagramViewModel()
 
     var activeTab: ActiveTab = .query
+    var isSidebarVisible: Bool = true
     var toastMessage: String?
     var toastIsError: Bool = false
 
