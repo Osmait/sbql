@@ -22,70 +22,37 @@ final class TreeSitterHighlighter {
             name: "SQL"
         )
 
-        // Syntax colors derived from current theme palette
-        let mauve = NSColor(SbqlTheme.Colors.accent) // keywords
-        let red = NSColor(SbqlTheme.Colors.danger) // operators, delimiters
-        let peach = NSColor(SbqlTheme.Colors.warning) // numbers, booleans
-        let green = NSColor(SbqlTheme.Colors.success) // strings
-        let yellow = NSColor(SbqlTheme.Colors.warning) // types, builtins
-        let blue = NSColor(SbqlTheme.Colors.accentHover) // functions
-        let sapphire = NSColor(SbqlTheme.Colors.accentHover) // fields, parameters
-        let teal = NSColor(SbqlTheme.Colors.success) // attributes, storage
-        let lavender = NSColor(SbqlTheme.Colors.accentHover) // conditionals
-        let flamingo = NSColor(SbqlTheme.Colors.textPrimary) // variables
-        let overlay1 = NSColor(SbqlTheme.Colors.textTertiary) // comments
-        let surface2 = NSColor(SbqlTheme.Colors.textTertiary) // punctuation
-        let text = NSColor(SbqlTheme.Colors.textPrimary) // default
-
+        // Colors resolved dynamically inside the closure so they update with theme changes
         let provider: TokenAttributeProvider = { token in
             let color: NSColor = switch token.name {
-            // Keywords: SELECT, FROM, WHERE, JOIN, etc.
             case "keyword", "keyword.operator":
-                mauve
-            // Conditionals: CASE, WHEN, THEN, ELSE
+                NSColor(SbqlTheme.Colors.accent)
             case "conditional":
-                lavender
-            // Storage: TEMP, MATERIALIZED
+                NSColor(SbqlTheme.Colors.accentHover)
             case "storageclass":
-                teal
-            // Functions: COUNT, SUM, etc.
+                NSColor(SbqlTheme.Colors.success)
             case "function.call":
-                blue
-            // Types: INT, VARCHAR, JSON, etc.
+                NSColor(SbqlTheme.Colors.accentHover)
             case "type", "type.builtin", "type.qualifier":
-                yellow
-            // Strings
+                NSColor(SbqlTheme.Colors.warning)
             case "string":
-                green
-            // Numbers
-            case "number", "float":
-                peach
-            // Booleans: TRUE, FALSE
-            case "boolean":
-                peach
-            // Operators: =, <, >, +, -, etc.
+                NSColor(SbqlTheme.Colors.success)
+            case "number", "float", "boolean":
+                NSColor(SbqlTheme.Colors.warning)
             case "operator":
-                red
-            // Fields: column names
-            case "field":
-                sapphire
-            // Parameters
-            case "parameter":
-                sapphire
-            // Attributes: ASC, DESC, DEFAULT
+                NSColor(SbqlTheme.Colors.danger)
+            case "field", "parameter":
+                NSColor(SbqlTheme.Colors.accentHover)
             case "attribute":
-                teal
-            // Variables / aliases
+                NSColor(SbqlTheme.Colors.success)
             case "variable":
-                flamingo
-            // Comments
+                NSColor(SbqlTheme.Colors.textPrimary)
             case "comment", "spell":
-                overlay1
-            // Punctuation
+                NSColor(SbqlTheme.Colors.textTertiary)
             case "punctuation.bracket", "punctuation.delimiter":
-                surface2
+                NSColor(SbqlTheme.Colors.textTertiary)
             default:
-                text
+                NSColor(SbqlTheme.Colors.textPrimary)
             }
             return [.foregroundColor: color, .font: font]
         }

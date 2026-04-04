@@ -53,9 +53,17 @@ struct SQLEditorView: NSViewRepresentable {
         context.coordinator.appVM = appVM
 
         // Update theme colors
-        textView.backgroundColor = NSColor(SbqlTheme.Colors.surface)
+        let newBg = NSColor(SbqlTheme.Colors.surface)
+        let themeChanged = textView.backgroundColor != newBg
+        textView.backgroundColor = newBg
         textView.insertionPointColor = NSColor(SbqlTheme.Colors.accent)
-        scrollView.backgroundColor = NSColor(SbqlTheme.Colors.surface)
+        scrollView.backgroundColor = newBg
+
+        // Force re-highlight when theme changes
+        if themeChanged, let storage = textView.textStorage {
+            let range = NSRange(location: 0, length: storage.length)
+            storage.edited(.editedAttributes, range: range, changeInLength: 0)
+        }
 
         if textView.string != appVM.editor.sqlText {
             context.coordinator.suppressCompletions = true
