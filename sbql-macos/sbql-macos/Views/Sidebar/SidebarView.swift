@@ -69,6 +69,7 @@ struct SidebarView: View {
 
                 if !appVM.connections.tables.isEmpty {
                     Divider()
+                        .transition(.opacity)
                         .background(SbqlTheme.Colors.border)
                         .padding(.vertical, SbqlTheme.Spacing.sm)
 
@@ -103,11 +104,14 @@ struct SidebarView: View {
                     LazyVStack(spacing: 2) {
                         ForEach(appVM.connections.filteredTables) { table in
                             TableRow(table: table, showSchema: !allSameSchema)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
                     .padding(.horizontal, SbqlTheme.Spacing.sm)
+                    .animation(SbqlTheme.Animations.gentle, value: appVM.connections.filteredTables.count)
                 }
             }
+            .animation(SbqlTheme.Animations.smooth, value: appVM.connections.tables.count)
         }
         // Background and clipping handled by the island container in MainWindow
         .sheet(isPresented: Binding(

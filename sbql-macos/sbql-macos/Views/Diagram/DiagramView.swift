@@ -14,8 +14,10 @@ struct DiagramView: View {
 
                 if diagram.isLoading {
                     LoadingOverlay(message: "Loading diagram...")
+                        .transition(.opacity)
                 } else if diagram.diagramData.tables.isEmpty {
                     emptyState
+                        .transition(.opacity)
                 } else {
                     ZStack(alignment: .bottomTrailing) {
                         DiagramCanvas()
@@ -29,8 +31,11 @@ struct DiagramView: View {
                         )
                         .padding(SbqlTheme.Spacing.lg)
                     }
+                    .transition(.opacity)
                 }
             }
+            .animation(SbqlTheme.Animations.smooth, value: diagram.isLoading)
+            .animation(SbqlTheme.Animations.smooth, value: diagram.diagramData.tables.count)
             .onAppear { viewportSize = geo.size }
             .onChange(of: geo.size) { _, newSize in viewportSize = newSize }
         }

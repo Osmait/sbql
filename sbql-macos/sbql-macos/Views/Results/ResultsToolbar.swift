@@ -5,7 +5,7 @@ struct ResultsToolbar: View {
 
     var body: some View {
         HStack(spacing: SbqlTheme.Spacing.sm) {
-            // Commit / Discard pending edits
+            // Commit / Discard pending edits (animated)
             if appVM.results.hasPendingEdits {
                 Button {
                     Task { await appVM.commitEdits() }
@@ -169,5 +169,7 @@ struct ResultsToolbar: View {
         .overlay(alignment: .bottom) {
             SbqlTheme.Colors.border.frame(height: 1)
         }
+        .animation(SbqlTheme.Animations.gentle, value: appVM.results.hasPendingEdits)
+        .animation(SbqlTheme.Animations.quick, value: appVM.results.sortedColumn)
     }
 }

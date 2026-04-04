@@ -7,12 +7,17 @@ struct ResultsView: View {
     var body: some View {
         let result = appVM.results.currentResult
 
-        if result.isEmpty {
-            emptyState
-        } else {
-            ResultsTableView(activeTheme: theme.activeThemeName)
-                .id("\(result.columns)\(theme.activeThemeName)")
+        Group {
+            if result.isEmpty {
+                emptyState
+                    .transition(.opacity)
+            } else {
+                ResultsTableView(activeTheme: theme.activeThemeName)
+                    .id("\(result.columns)\(theme.activeThemeName)")
+                    .transition(.opacity)
+            }
         }
+        .animation(SbqlTheme.Animations.gentle, value: result.isEmpty)
     }
 
     private var emptyState: some View {

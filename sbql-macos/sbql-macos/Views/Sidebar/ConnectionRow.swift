@@ -13,6 +13,8 @@ struct ConnectionRow: View {
             Circle()
                 .fill(connection.isConnected ? SbqlTheme.Colors.success : SbqlTheme.Colors.danger.opacity(0.5))
                 .frame(width: 6, height: 6)
+                .scaleEffect(connection.isConnected ? 1.0 : 0.8)
+                .animation(SbqlTheme.Animations.spring, value: connection.isConnected)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(connection.name.isEmpty ? "Unnamed" : connection.name)
@@ -38,6 +40,8 @@ struct ConnectionRow: View {
                 : Color.clear
         )
         .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
+        .animation(SbqlTheme.Animations.quick, value: isSelected)
+        .animation(SbqlTheme.Animations.gentle, value: connection.isConnected)
         .contentShape(Rectangle())
         .onTapGesture {
             appVM.connections.selectedConnectionId = connection.id
