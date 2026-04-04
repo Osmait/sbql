@@ -39,17 +39,20 @@ struct ConnectionRow: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
+        .onTapGesture {
+            appVM.connections.selectedConnectionId = connection.id
             Task {
                 if connection.isConnected {
-                    await appVM.disconnect(id: connection.id)
+                    // Already connected — just select it
                 } else {
+                    // Disconnect current if any, then connect this one
+                    if let current = appVM.connections.activeConnection,
+                       current.id != connection.id {
+                        await appVM.disconnect(id: current.id)
+                    }
                     await appVM.connect(id: connection.id)
                 }
             }
-        }
-        .onTapGesture {
-            appVM.connections.selectedConnectionId = connection.id
         }
         .contextMenu {
             if connection.isConnected {
