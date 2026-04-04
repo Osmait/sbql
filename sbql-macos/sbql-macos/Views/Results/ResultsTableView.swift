@@ -80,7 +80,7 @@ struct ResultsTableView: NSViewRepresentable {
         Coordinator(appVM: appVM)
     }
 
-    class Coordinator: NSObject, NSTableViewDelegate, NSTableViewDataSource, NSMenuDelegate {
+    class Coordinator: NSObject, NSTableViewDelegate, NSTableViewDataSource, NSMenuDelegate, NSTextFieldDelegate {
         var appVM: AppViewModel
         weak var tableView: NSTableView?
         var previousColumns: [String] = []
@@ -212,7 +212,7 @@ struct ResultsTableView: NSViewRepresentable {
             SbqlTableRowView(rowIndex: row)
         }
 
-        // MARK: - Double-click editing
+        // MARK: - Double-click inline editing
 
         @objc func handleDoubleClick(_ sender: NSTableView) {
             let row = sender.clickedRow
@@ -238,36 +238,56 @@ struct ResultsTableView: NSViewRepresentable {
                 return
             }
 
-            let targetCol = result.columns[col]
             let currentVal: String = if let dirtyVal = appVM.results.dirtyCells[CellKey(row: row, col: col)] {
                 dirtyVal
             } else {
                 result.rows[row][col]
             }
 
-            // Get the cell rect for popover positioning
-            let cellRect = sender.frameOfCell(atColumn: col, row: row)
+            // Get the cell view and make it editable inline
+            guard let cellView = sender.view(atColumn: col, row: row, makeIfNecessary: false) as? NSTextField else { return }
 
-            // Create the popover
-            let popover = NSPopover()
-            popover.behavior = .transient
-            popover.contentSize = NSSize(width: 320, height: 160)
+            cellView.isEditable = true
+            cellView.isSelectable = true
+            cellView.isBordered = true
+            cellView.bezelStyle = .roundedBezel
+            cellView.drawsBackground = true
+            cellView.backgroundColor = NSColor(SbqlTheme.Colors.surfaceElevated)
+            cellView.textColor = NSColor(SbqlTheme.Colors.textPrimary)
+            cellView.currentEditor()?.selectedRange = NSRange(location: 0, length: currentVal.count)
+            cellView.delegate = self
+            cellView.tag = row * 10000 + col // encode row+col in tag
+            cellView.window?.makeFirstResponder(cellView)
+        }
 
-            let editorView = CellEditor(column: targetCol, currentValue: currentVal) { [weak self] newVal in
-                guard let self else { return }
-                popover.close()
-                let key = CellKey(row: row, col: col)
-                appVM.results.dirtyCells[key] = newVal
-                tableView?.reloadData(forRowIndexes: IndexSet(integer: row),
-                                      columnIndexes: IndexSet(integer: col))
+        // MARK: - NSTextFieldDelegate for inline editing
+
+        func controlTextDidEndEditing(_ obj: Notification) {
+            guard let textField = obj.object as? NSTextField else { return }
+            let row = textField.tag / 10000
+            let col = textField.tag % 10000
+
+            let newVal = textField.stringValue
+            let result = appVM.results.currentResult
+
+            // Check if value actually changed
+            let oldVal = appVM.results.dirtyCells[CellKey(row: row, col: col)]
+                ?? (row < result.rows.count && col < result.rows[row].count ? result.rows[row][col] : "")
+
+            if newVal != oldVal {
+                appVM.results.dirtyCells[CellKey(row: row, col: col)] = newVal
             }
 
-            let isDark = ThemeManager.shared.activeThemeName.isDark
-            let hostingController = NSHostingController(rootView:
-                editorView
-                    .environment(\.colorScheme, isDark ? .dark : .light))
-            popover.contentViewController = hostingController
-            popover.show(relativeTo: cellRect, of: sender, preferredEdge: .maxY)
+            // Reset cell to non-editable label style
+            textField.isEditable = false
+            textField.isSelectable = false
+            textField.isBordered = false
+            textField.bezelStyle = .squareBezel
+            textField.drawsBackground = false
+
+            // Reload the row to apply dirty styling
+            tableView?.reloadData(forRowIndexes: IndexSet(integer: row),
+                                  columnIndexes: IndexSet(integer: col))
         }
 
         // MARK: - Context menu (NSMenuDelegate)
