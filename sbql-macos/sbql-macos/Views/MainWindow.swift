@@ -60,19 +60,25 @@ struct MainWindow: View {
             window.styleMask.insert(.fullSizeContentView)
         })
         .onAppear { appVM.onAppear() }
-        .sheet(isPresented: Binding(
-            get: { appVM.isShowingHistory },
-            set: { appVM.isShowingHistory = $0 }
-        )) {
-            QueryHistoryModal()
-                .environment(appVM)
-        }
-        .sheet(isPresented: Binding(
-            get: { appVM.isShowingSavedQueries },
-            set: { appVM.isShowingSavedQueries = $0 }
-        )) {
-            SavedQueriesModal()
-                .environment(appVM)
+        .overlay {
+            // History modal overlay — dismisses on background tap
+            if appVM.isShowingHistory {
+                modalOverlay {
+                    appVM.isShowingHistory = false
+                } content: {
+                    QueryHistoryModal()
+                        .environment(appVM)
+                }
+            }
+            // Saved queries modal overlay
+            if appVM.isShowingSavedQueries {
+                modalOverlay {
+                    appVM.isShowingSavedQueries = false
+                } content: {
+                    SavedQueriesModal()
+                        .environment(appVM)
+                }
+            }
         }
         .sheet(isPresented: Binding(
             get: { appVM.savedQueries.isShowingSaveSheet },
@@ -408,5 +414,25 @@ struct MainWindow: View {
             .clipShape(RoundedRectangle(cornerRadius: Island.radius))
         }
         .animation(SbqlTheme.Animations.quick, value: appVM.editor.isVisible)
+    }
+
+    // MARK: - Modal Overlay
+
+    /// A dimmed overlay that dismisses on background tap and centers the content.
+    private func modalOverlay<Content: View>(
+        onDismiss: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ZStack {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+                .onTapGesture { withAnimation(SbqlTheme.Animations.quick) { onDismiss() } }
+
+            content()
+                .clipShape(RoundedRectangle(cornerRadius: Island.radius))
+                .shadow(color: .black.opacity(0.4), radius: 20, y: 8)
+        }
+        .transition(.opacity)
+        .animation(SbqlTheme.Animations.gentle, value: true)
     }
 }

@@ -3,7 +3,6 @@ import SwiftUI
 /// Modal showing saved queries with search, click to load, CRUD.
 struct SavedQueriesModal: View {
     @Environment(AppViewModel.self) private var appVM
-    @Environment(\.dismiss) private var dismiss
     @State private var editingId: UUID?
     @State private var editingName: String = ""
 
@@ -37,7 +36,7 @@ struct SavedQueriesModal: View {
                 .buttonStyle(.plain)
                 .disabled(appVM.editor.sqlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                Button { dismiss() } label: {
+                Button { appVM.isShowingSavedQueries = false } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 16))
                         .foregroundStyle(SbqlTheme.Colors.textTertiary)
@@ -97,7 +96,7 @@ struct SavedQueriesModal: View {
         Button {
             appVM.editor.sqlText = query.sql
             appVM.editor.isVisible = true
-            dismiss()
+            appVM.isShowingSavedQueries = false
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 if editingId == query.id {

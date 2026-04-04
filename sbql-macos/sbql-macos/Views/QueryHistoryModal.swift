@@ -3,7 +3,6 @@ import SwiftUI
 /// Modal showing query history with search, click to load.
 struct QueryHistoryModal: View {
     @Environment(AppViewModel.self) private var appVM
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,7 +23,7 @@ struct QueryHistoryModal: View {
                     .foregroundStyle(SbqlTheme.Colors.danger)
                     .font(SbqlTheme.Typography.caption)
                 }
-                Button { dismiss() } label: {
+                Button { appVM.isShowingHistory = false } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 16))
                         .foregroundStyle(SbqlTheme.Colors.textTertiary)
@@ -84,7 +83,7 @@ struct QueryHistoryModal: View {
         Button {
             appVM.editor.sqlText = entry.sql
             appVM.editor.isVisible = true
-            dismiss()
+            appVM.isShowingHistory = false
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.sqlPreview)
