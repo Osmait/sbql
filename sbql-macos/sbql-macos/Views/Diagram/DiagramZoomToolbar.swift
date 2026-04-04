@@ -19,7 +19,7 @@ struct DiagramZoomToolbar: View {
             Button(action: onResetZoom) {
                 Text("\(zoomPercent)%")
                     .font(SbqlTheme.Typography.captionBold)
-                    .foregroundStyle(SbqlTheme.Colors.textSecondary)
+                    .foregroundStyle(SbqlTheme.Colors.accent)
                     .frame(width: 44)
             }
             .buttonStyle(.plain)
@@ -50,7 +50,7 @@ struct DiagramZoomToolbar: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(SbqlTheme.Colors.textSecondary)
+                .foregroundStyle(SbqlTheme.Colors.accent)
                 .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }

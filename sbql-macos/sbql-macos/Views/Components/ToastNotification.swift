@@ -11,7 +11,7 @@ struct ToastNotification: View {
             .padding(.horizontal, SbqlTheme.Spacing.lg)
             .padding(.vertical, SbqlTheme.Spacing.sm)
             .background(
-                (isError ? SbqlTheme.Colors.danger : SbqlTheme.Colors.surfaceElevated)
+                (isError ? SbqlTheme.Colors.danger : SbqlTheme.Colors.success)
                     .opacity(0.95)
             )
             .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.large))

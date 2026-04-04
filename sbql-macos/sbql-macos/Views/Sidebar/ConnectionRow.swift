@@ -11,7 +11,7 @@ struct ConnectionRow: View {
     var body: some View {
         HStack(spacing: SbqlTheme.Spacing.sm) {
             Circle()
-                .fill(connection.isConnected ? SbqlTheme.Colors.success : SbqlTheme.Colors.textTertiary)
+                .fill(connection.isConnected ? SbqlTheme.Colors.success : SbqlTheme.Colors.danger.opacity(0.5))
                 .frame(width: 6, height: 6)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -78,12 +78,15 @@ struct ConnectionRow: View {
     }
 
     private var backendBadge: some View {
-        Text(connection.backend == .postgres ? "PG" : "SQ")
+        let color = connection.backend == .postgres
+            ? Color(hex: 0x336791) // PostgreSQL blue
+            : Color(hex: 0x44A8D6) // SQLite cyan
+        return Text(connection.backend == .postgres ? "PG" : "SQ")
             .font(.system(size: 9, weight: .bold, design: .monospaced))
-            .foregroundStyle(SbqlTheme.Colors.textTertiary)
+            .foregroundStyle(color)
             .padding(.horizontal, 4)
             .padding(.vertical, 2)
-            .background(SbqlTheme.Colors.surfaceElevated)
+            .background(color.opacity(0.15))
             .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
     }
 }

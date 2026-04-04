@@ -13,7 +13,7 @@ struct TableRow: View {
         HStack(spacing: SbqlTheme.Spacing.sm) {
             Image(systemName: "tablecells")
                 .font(.system(size: 11))
-                .foregroundStyle(SbqlTheme.Colors.textTertiary)
+                .foregroundStyle(isSelected ? SbqlTheme.Colors.accent : SbqlTheme.Colors.accent.opacity(0.5))
 
             Text(table.name)
                 .font(SbqlTheme.Typography.body)

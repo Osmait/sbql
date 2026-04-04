@@ -44,8 +44,14 @@ struct ResultsTableView: NSViewRepresentable {
         return scrollView
     }
 
-    func updateNSView(_: NSScrollView, context: Context) {
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.appVM = appVM
+
+        // Update theme colors
+        scrollView.backgroundColor = NSColor(SbqlTheme.Colors.background)
+        context.coordinator.tableView?.backgroundColor = NSColor(SbqlTheme.Colors.background)
+        context.coordinator.tableView?.gridColor = NSColor(SbqlTheme.Colors.borderSubtle)
+
         context.coordinator.rebuildColumns()
         context.coordinator.tableView?.reloadData()
     }
@@ -279,8 +285,13 @@ struct ResultsTableView: NSViewRepresentable {
 // MARK: - Custom Row View
 
 private class SbqlTableRowView: NSTableRowView {
-    private static let evenColor = NSColor(red: 0x11 / 255.0, green: 0x11 / 255.0, blue: 0x1B / 255.0, alpha: 1) // Crust
-    private static let oddColor = NSColor(red: 0x18 / 255.0, green: 0x18 / 255.0, blue: 0x25 / 255.0, alpha: 1) // Mantle
+    private static var evenColor: NSColor { NSColor(SbqlTheme.Colors.background) }
+    private static var oddColor: NSColor {
+        // Slightly lighter than background for alternating rows
+        let bg = NSColor(SbqlTheme.Colors.background)
+        let surface = NSColor(SbqlTheme.Colors.surface)
+        return bg.blended(withFraction: 0.35, of: surface) ?? surface
+    }
 
     private let rowIndex: Int
 

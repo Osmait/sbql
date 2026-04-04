@@ -1,39 +1,29 @@
 import SwiftUI
 
-/// Design tokens for the sbql macOS app — Catppuccin Mocha palette.
+/// Design tokens for the sbql macOS app.
+/// Colors are resolved dynamically from the active theme palette.
 enum SbqlTheme {
-    // MARK: - Colors (Catppuccin Mocha)
+    // MARK: - Colors (resolved from ThemeManager)
 
     enum Colors {
-        static let background = Color(hex: 0x11111B) // Crust
-        static let surface = Color(hex: 0x1E1E2E) // Base
-        static let surfaceElevated = Color(hex: 0x313244) // Surface0
-        static let surfaceHover = Color(hex: 0x45475A) // Surface1
-        static let accent = Color(hex: 0xCBA6F7) // Mauve
-        static let accentHover = Color(hex: 0xB4BEFE) // Lavender
-        static let danger = Color(hex: 0xF38BA8) // Red
-        static let success = Color(hex: 0xA6E3A1) // Green
-        static let warning = Color(hex: 0xF9E2AF) // Yellow
-        static let textPrimary = Color(hex: 0xCDD6F4) // Text
-        static let textSecondary = Color(hex: 0xA6ADC8) // Subtext0
-        static let textTertiary = Color(hex: 0x7F849C) // Overlay1
-        static let border = Color(hex: 0x45475A) // Surface1
-        static let borderSubtle = Color(hex: 0x313244) // Surface0
-        static let selection = Color(hex: 0xCBA6F7).opacity(0.15) // Mauve
+        private static var p: ThemePalette { ThemeManager.shared.palette }
 
-        /// Distinct colors for FK relationship lines in the ER diagram.
-        static let fkLinePalette: [Color] = [
-            Color(hex: 0xCBA6F7), // Mauve
-            Color(hex: 0x89B4FA), // Blue
-            Color(hex: 0xA6E3A1), // Green
-            Color(hex: 0xFAB387), // Peach
-            Color(hex: 0xF38BA8), // Red
-            Color(hex: 0x94E2D5), // Teal
-            Color(hex: 0xF9E2AF), // Yellow
-            Color(hex: 0xF5C2E7), // Pink
-            Color(hex: 0x74C7EC), // Sapphire
-            Color(hex: 0xB4BEFE), // Lavender
-        ]
+        static var background: Color { p.background }
+        static var surface: Color { p.surface }
+        static var surfaceElevated: Color { p.surfaceElevated }
+        static var surfaceHover: Color { p.surfaceHover }
+        static var accent: Color { p.accent }
+        static var accentHover: Color { p.accentHover }
+        static var danger: Color { p.danger }
+        static var success: Color { p.success }
+        static var warning: Color { p.warning }
+        static var textPrimary: Color { p.textPrimary }
+        static var textSecondary: Color { p.textSecondary }
+        static var textTertiary: Color { p.textTertiary }
+        static var border: Color { p.border }
+        static var borderSubtle: Color { p.borderSubtle }
+        static var selection: Color { p.selection }
+        static var fkLinePalette: [Color] { p.fkLinePalette }
     }
 
     // MARK: - Corner Radii

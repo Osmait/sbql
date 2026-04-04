@@ -92,7 +92,7 @@ struct SidebarView: View {
         HStack {
             Text(title)
                 .font(SbqlTheme.Typography.captionBold)
-                .foregroundStyle(SbqlTheme.Colors.textTertiary)
+                .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.7))
 
             Spacer()
 
@@ -100,7 +100,7 @@ struct SidebarView: View {
                 Button(action: action) {
                     Image(systemName: "plus")
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(SbqlTheme.Colors.textSecondary)
+                        .foregroundStyle(SbqlTheme.Colors.accent)
                 }
                 .buttonStyle(.plain)
             }

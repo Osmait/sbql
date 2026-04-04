@@ -57,7 +57,7 @@ struct ResultsToolbar: View {
                 .foregroundStyle(
                     appVM.results.isFilterBarVisible
                         ? SbqlTheme.Colors.accent
-                        : SbqlTheme.Colors.textSecondary
+                        : SbqlTheme.Colors.accent.opacity(0.4)
                 )
             }
             .buttonStyle(.plain)
@@ -74,7 +74,7 @@ struct ResultsToolbar: View {
                         Text("Clear sort")
                             .font(SbqlTheme.Typography.caption)
                     }
-                    .foregroundStyle(SbqlTheme.Colors.textSecondary)
+                    .foregroundStyle(SbqlTheme.Colors.warning)
                 }
                 .buttonStyle(.plain)
             }
@@ -94,7 +94,7 @@ struct ResultsToolbar: View {
                 .foregroundStyle(
                     appVM.editor.isVisible
                         ? SbqlTheme.Colors.accent
-                        : SbqlTheme.Colors.textSecondary
+                        : SbqlTheme.Colors.accent.opacity(0.4)
                 )
             }
             .buttonStyle(.plain)

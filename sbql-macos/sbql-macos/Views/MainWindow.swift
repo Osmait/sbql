@@ -3,8 +3,12 @@ import SwiftUI
 /// Top-level layout: custom titlebar + sidebar + main content area.
 struct MainWindow: View {
     @Environment(AppViewModel.self) private var appVM
+    @Environment(ThemeManager.self) private var theme
 
     var body: some View {
+        // Access theme.activeThemeName so SwiftUI re-renders on theme change
+        let _ = theme.activeThemeName
+
         ZStack {
             SbqlTheme.Colors.background.ignoresSafeArea()
 
@@ -150,7 +154,7 @@ struct MainWindow: View {
             } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(SbqlTheme.Colors.textSecondary)
+                    .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.6))
             }
             .buttonStyle(.plain)
         }
@@ -165,25 +169,59 @@ struct MainWindow: View {
                     .font(SbqlTheme.Typography.bodyMedium)
                     .foregroundStyle(SbqlTheme.Colors.textPrimary)
 
-                // Backend badge
+                // Backend badge — colored by engine type
                 Text(conn.backend == .postgres ? "PG" : "SQLite")
                     .font(SbqlTheme.Typography.captionBold)
-                    .foregroundStyle(SbqlTheme.Colors.textSecondary)
+                    .foregroundStyle(conn.backend == .postgres
+                        ? Color(hex: 0x336791) // PostgreSQL blue
+                        : Color(hex: 0x44A8D6) // SQLite cyan
+                    )
                     .padding(.horizontal, SbqlTheme.Spacing.sm)
                     .padding(.vertical, 2)
-                    .background(SbqlTheme.Colors.surfaceElevated)
+                    .background(
+                        (conn.backend == .postgres
+                            ? Color(hex: 0x336791)
+                            : Color(hex: 0x44A8D6)
+                        ).opacity(0.15)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
 
-                // Database name
-                badgePill(
-                    icon: "cylinder",
-                    text: conn.backend == .sqlite
+                // Database name — accent tinted
+                HStack(spacing: 3) {
+                    Image(systemName: "cylinder")
+                        .font(.system(size: 9))
+                    Text(conn.backend == .sqlite
                         ? (conn.filePath.flatMap { URL(fileURLWithPath: $0).lastPathComponent } ?? "memory")
                         : conn.database
-                )
+                    )
+                    .font(SbqlTheme.Typography.captionBold)
+                }
+                .foregroundStyle(SbqlTheme.Colors.accent)
+                .padding(.horizontal, SbqlTheme.Spacing.sm)
+                .padding(.vertical, 2)
+                .background(SbqlTheme.Colors.accent.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
 
-                // Query duration
+                // Query duration — green for fast, yellow for slow
                 if let d = appVM.editor.lastQueryDuration {
-                    badgePill(icon: nil, text: formatDuration(d))
+                    let ms = d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000
+                    let durationColor = ms < 500
+                        ? SbqlTheme.Colors.success
+                        : ms < 2000
+                            ? SbqlTheme.Colors.warning
+                            : SbqlTheme.Colors.danger
+
+                    HStack(spacing: 3) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 8))
+                        Text(formatDuration(d))
+                            .font(SbqlTheme.Typography.captionBold)
+                    }
+                    .foregroundStyle(durationColor)
+                    .padding(.horizontal, SbqlTheme.Spacing.sm)
+                    .padding(.vertical, 2)
+                    .background(durationColor.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
                 }
             }
         } else {
@@ -191,21 +229,6 @@ struct MainWindow: View {
                 .font(SbqlTheme.Typography.bodyMedium)
                 .foregroundStyle(SbqlTheme.Colors.textTertiary)
         }
-    }
-
-    private func badgePill(icon: String?, text: String) -> some View {
-        HStack(spacing: 3) {
-            if let icon {
-                Image(systemName: icon)
-                    .font(.system(size: 9))
-            }
-            Text(text)
-                .font(SbqlTheme.Typography.captionBold)
-        }
-        .foregroundStyle(SbqlTheme.Colors.textSecondary)
-        .padding(.horizontal, SbqlTheme.Spacing.sm)
-        .padding(.vertical, 2)
-        .background(SbqlTheme.Colors.surfaceElevated)
     }
 
     private func formatDuration(_ d: Duration) -> String {

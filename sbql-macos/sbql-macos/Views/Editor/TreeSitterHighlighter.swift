@@ -22,20 +22,20 @@ final class TreeSitterHighlighter {
             name: "SQL"
         )
 
-        // Catppuccin Mocha palette for syntax highlighting
-        let mauve = NSColor(Color(hex: 0xCBA6F7)) // keywords
-        let red = NSColor(Color(hex: 0xF38BA8)) // operators, delimiters
-        let peach = NSColor(Color(hex: 0xFAB387)) // numbers, booleans
-        let green = NSColor(Color(hex: 0xA6E3A1)) // strings
-        let yellow = NSColor(Color(hex: 0xF9E2AF)) // types, builtins
-        let blue = NSColor(Color(hex: 0x89B4FA)) // functions
-        let sapphire = NSColor(Color(hex: 0x74C7EC)) // fields, parameters
-        let teal = NSColor(Color(hex: 0x94E2D5)) // attributes, storage
-        let lavender = NSColor(Color(hex: 0xB4BEFE)) // conditionals
-        let flamingo = NSColor(Color(hex: 0xF2CDCD)) // variables
-        let overlay1 = NSColor(Color(hex: 0x7F849C)) // comments
-        let surface2 = NSColor(Color(hex: 0x585B70)) // punctuation
-        let text = NSColor(Color(hex: 0xCDD6F4)) // default
+        // Syntax colors derived from current theme palette
+        let mauve = NSColor(SbqlTheme.Colors.accent) // keywords
+        let red = NSColor(SbqlTheme.Colors.danger) // operators, delimiters
+        let peach = NSColor(SbqlTheme.Colors.warning) // numbers, booleans
+        let green = NSColor(SbqlTheme.Colors.success) // strings
+        let yellow = NSColor(SbqlTheme.Colors.warning) // types, builtins
+        let blue = NSColor(SbqlTheme.Colors.accentHover) // functions
+        let sapphire = NSColor(SbqlTheme.Colors.accentHover) // fields, parameters
+        let teal = NSColor(SbqlTheme.Colors.success) // attributes, storage
+        let lavender = NSColor(SbqlTheme.Colors.accentHover) // conditionals
+        let flamingo = NSColor(SbqlTheme.Colors.textPrimary) // variables
+        let overlay1 = NSColor(SbqlTheme.Colors.textTertiary) // comments
+        let surface2 = NSColor(SbqlTheme.Colors.textTertiary) // punctuation
+        let text = NSColor(SbqlTheme.Colors.textPrimary) // default
 
         let provider: TokenAttributeProvider = { token in
             let color: NSColor = switch token.name {

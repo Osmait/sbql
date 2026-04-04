@@ -4,12 +4,12 @@ import SwiftUI
 /// Applies SQL syntax highlighting to an NSTextStorage via its delegate callback.
 final class SQLSyntaxHighlighter: NSObject, NSTextStorageDelegate {
     private let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-    private let defaultColor = NSColor(SbqlTheme.Colors.textPrimary)
-    private let keywordColor = NSColor(SbqlTheme.Colors.accent)
-    private let stringColor = NSColor(SbqlTheme.Colors.success)
-    private let numberColor = NSColor(SbqlTheme.Colors.warning)
-    private let commentColor = NSColor(SbqlTheme.Colors.textTertiary)
-    private let functionColor = NSColor(SbqlTheme.Colors.accentHover)
+    private var defaultColor: NSColor { NSColor(SbqlTheme.Colors.textPrimary) }
+    private var keywordColor: NSColor { NSColor(SbqlTheme.Colors.accent) }
+    private var stringColor: NSColor { NSColor(SbqlTheme.Colors.success) }
+    private var numberColor: NSColor { NSColor(SbqlTheme.Colors.warning) }
+    private var commentColor: NSColor { NSColor(SbqlTheme.Colors.textTertiary) }
+    private var functionColor: NSColor { NSColor(SbqlTheme.Colors.accentHover) }
 
     // MARK: - Token sets
 

@@ -51,6 +51,12 @@ struct SQLEditorView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
         context.coordinator.appVM = appVM
+
+        // Update theme colors
+        textView.backgroundColor = NSColor(SbqlTheme.Colors.surface)
+        textView.insertionPointColor = NSColor(SbqlTheme.Colors.accent)
+        scrollView.backgroundColor = NSColor(SbqlTheme.Colors.surface)
+
         if textView.string != appVM.editor.sqlText {
             context.coordinator.suppressCompletions = true
             let selection = textView.selectedRanges
