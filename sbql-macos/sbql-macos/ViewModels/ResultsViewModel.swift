@@ -142,6 +142,13 @@ final class ResultsViewModel {
         return nil
     }
 
+    /// Closes all tabs and resets state.
+    func closeAllTabs() {
+        tabs.removeAll()
+        activeTabId = nil
+        clearState()
+    }
+
     // MARK: - Tab state persistence
 
     /// Saves the current view state back into the active tab.
@@ -181,13 +188,18 @@ final class ResultsViewModel {
         guard let activeId = activeTabId,
               let index = tabs.firstIndex(where: { $0.id == activeId }) else { return }
 
-        let pattern = #"(?i)\bFROM\s+(\w+)"#
+        // Match FROM schema.table or FROM table (handles qualified names)
+        let pattern = #"(?i)\bFROM\s+([\w]+(?:\.[\w]+)?)"#
         guard let range = sql.range(of: pattern, options: .regularExpression) else { return }
-        let matched = sql[range]
-        // Extract just the table name (after FROM + whitespace)
+        let matched = String(sql[range])
+        // Extract everything after FROM
         let parts = matched.split(separator: " ", maxSplits: 1)
         guard parts.count == 2 else { return }
-        let extractedName = String(parts[1]).trimmingCharacters(in: .whitespaces)
+        let qualified = String(parts[1]).trimmingCharacters(in: .whitespaces)
+        // Take just the table name (last component after dot)
+        let extractedName = qualified.contains(".")
+            ? String(qualified.split(separator: ".").last ?? Substring(qualified))
+            : qualified
 
         if extractedName.lowercased() != (tabs[index].tableName ?? "").lowercased() {
             tabs[index].displayNameOverride = extractedName

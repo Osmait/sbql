@@ -128,6 +128,18 @@ struct MainWindow: View {
                         }
                     }
                 }
+
+                // Close all tabs button
+                Button {
+                    appVM.results.closeAllTabs()
+                    appVM.editor.sqlText = ""
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(SbqlTheme.Colors.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Close all tabs")
             }
 
             Spacer()
