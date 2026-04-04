@@ -10,11 +10,32 @@ final class ConnectionsViewModel {
     var selectedTable: TableEntryModel?
     var isShowingConnectionForm = false
     var editingConnection: Connection?
+    var connectionFilter: String = ""
 
     private let service = SbqlService.shared
 
     var activeConnection: Connection? {
         connections.first { $0.isConnected }
+    }
+
+    /// Connections filtered by search query.
+    var filteredConnections: [Connection] {
+        guard !connectionFilter.isEmpty else { return connections }
+        return connections.filter {
+            $0.name.localizedCaseInsensitiveContains(connectionFilter) ||
+            $0.host.localizedCaseInsensitiveContains(connectionFilter) ||
+            $0.database.localizedCaseInsensitiveContains(connectionFilter)
+        }
+    }
+
+    /// Connections grouped by backend, filtered by search.
+    var groupedConnections: [(backend: Connection.Backend, connections: [Connection])] {
+        let filtered = filteredConnections
+        let order: [Connection.Backend] = [.postgres, .mysql, .sqlite, .redis, .dynamodb]
+        return order.compactMap { backend in
+            let group = filtered.filter { $0.backend == backend }
+            return group.isEmpty ? nil : (backend: backend, connections: group)
+        }
     }
 
     var activeConnectionName: String {

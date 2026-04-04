@@ -17,16 +17,52 @@ struct SidebarView: View {
             // Small top padding (header is above)
             Color.clear.frame(height: SbqlTheme.Spacing.sm)
 
-            // Connections section
+            // Connections section header + search
             sectionHeader("CONNECTIONS") {
                 appVM.connections.editingConnection = Connection.newPostgres()
                 appVM.connections.isShowingConnectionForm = true
             }
 
+            // Connection search (show when 4+ connections)
+            if appVM.connections.connections.count >= 4 {
+                HStack(spacing: SbqlTheme.Spacing.xs) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 10))
+                        .foregroundStyle(SbqlTheme.Colors.textTertiary)
+                    TextField("Search connections…", text: Binding(
+                        get: { appVM.connections.connectionFilter },
+                        set: { appVM.connections.connectionFilter = $0 }
+                    ))
+                    .textFieldStyle(.plain)
+                    .font(SbqlTheme.Typography.caption)
+                    .foregroundStyle(SbqlTheme.Colors.textPrimary)
+
+                    if !appVM.connections.connectionFilter.isEmpty {
+                        Button {
+                            appVM.connections.connectionFilter = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(SbqlTheme.Colors.textTertiary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, SbqlTheme.Spacing.sm)
+                .padding(.vertical, SbqlTheme.Spacing.xs)
+                .background(SbqlTheme.Colors.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
+                .padding(.horizontal, SbqlTheme.Spacing.sm)
+            }
+
             ScrollView {
+                // Group connections by backend
                 LazyVStack(spacing: 2) {
-                    ForEach(appVM.connections.connections) { conn in
-                        ConnectionRow(connection: conn)
+                    ForEach(appVM.connections.groupedConnections, id: \.backend) { group in
+                        backendGroupHeader(group.backend, count: group.connections.count)
+                        ForEach(group.connections) { conn in
+                            ConnectionRow(connection: conn)
+                        }
                     }
                 }
                 .padding(.horizontal, SbqlTheme.Spacing.sm)
@@ -82,6 +118,28 @@ struct SidebarView: View {
                 ConnectionFormSheet(connection: conn)
             }
         }
+    }
+
+    private func backendGroupHeader(_ backend: Connection.Backend, count: Int) -> some View {
+        let (label, color): (String, Color) = switch backend {
+        case .postgres: ("PostgreSQL", Color(hex: 0x336791))
+        case .mysql: ("MySQL", Color(hex: 0x00758F))
+        case .sqlite: ("SQLite", Color(hex: 0x44A8D6))
+        case .redis: ("Redis", Color(hex: 0xD82C20))
+        case .dynamodb: ("DynamoDB", Color(hex: 0x4053D6))
+        }
+        return HStack(spacing: SbqlTheme.Spacing.xs) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text("\(label) (\(count))")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(color)
+            Spacer()
+        }
+        .padding(.horizontal, SbqlTheme.Spacing.lg)
+        .padding(.top, SbqlTheme.Spacing.sm)
+        .padding(.bottom, SbqlTheme.Spacing.xxs)
     }
 
     private func sectionHeader(_ title: String, action: (() -> Void)?) -> some View {
