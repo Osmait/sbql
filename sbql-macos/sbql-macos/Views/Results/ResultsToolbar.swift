@@ -107,6 +107,57 @@ struct ResultsToolbar: View {
 
             Spacer()
 
+            // Export menu
+            if !appVM.results.currentResult.isEmpty {
+                Menu {
+                    Section("Current Page (\(appVM.results.currentResult.rowCount) rows)") {
+                        ForEach(ExportFormat.allCases, id: \.self) { format in
+                            Button {
+                                ResultsExporter.export(
+                                    format: format,
+                                    columns: appVM.results.currentResult.columns,
+                                    rows: appVM.results.currentResult.rows,
+                                    tableName: appVM.results.activeTable ?? "export"
+                                )
+                            } label: {
+                                Label(format.rawValue, systemImage: format.icon)
+                            }
+                        }
+                    }
+                    Section("All Results (streaming)") {
+                        ForEach(ExportFormat.allCases, id: \.self) { format in
+                            Button {
+                                Task {
+                                    await appVM.exportAll(
+                                        format: format,
+                                        tableName: appVM.results.activeTable ?? "export"
+                                    )
+                                }
+                            } label: {
+                                Label("\(format.rawValue) — all rows", systemImage: format.icon)
+                            }
+                            .disabled(appVM.isExporting)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: SbqlTheme.Spacing.xs) {
+                        if appVM.isExporting {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.7)
+                        }
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 10))
+                        Text(appVM.isExporting ? "Exporting…" : "Export")
+                            .font(SbqlTheme.Typography.captionBold)
+                    }
+                    .foregroundStyle(SbqlTheme.Colors.accent.opacity(appVM.isExporting ? 1.0 : 0.6))
+                    .animation(SbqlTheme.Animations.quick, value: appVM.isExporting)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+
             // Row count
             Text("\(appVM.results.currentResult.rowCount) rows")
                 .font(SbqlTheme.Typography.caption)
@@ -172,4 +223,5 @@ struct ResultsToolbar: View {
         .animation(SbqlTheme.Animations.gentle, value: appVM.results.hasPendingEdits)
         .animation(SbqlTheme.Animations.quick, value: appVM.results.sortedColumn)
     }
+
 }

@@ -38,6 +38,13 @@ pub enum FfiSortDirection {
     Descending,
 }
 
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum FfiExportFormat {
+    Csv,
+    Json,
+    SqlInsert,
+}
+
 // ---------------------------------------------------------------------------
 // FFI-safe records
 // ---------------------------------------------------------------------------
@@ -400,6 +407,29 @@ impl SbqlEngine {
             items: vec![],
             token: 0,
         })
+    }
+
+    // -------------------------------------------------------------------
+    // Export
+    // -------------------------------------------------------------------
+
+    /// Stream all rows of the current query to a file.
+    #[uniffi::method(async_runtime = "tokio")]
+    pub async fn export_all(
+        &self,
+        path: String,
+        format: FfiExportFormat,
+        table_name: String,
+    ) -> Result<u64, SbqlFfiError> {
+        let core = self.core.lock().await;
+        let fmt: sbql_core::ExportFormat = match format {
+            FfiExportFormat::Csv => sbql_core::ExportFormat::Csv,
+            FfiExportFormat::Json => sbql_core::ExportFormat::Json,
+            FfiExportFormat::SqlInsert => sbql_core::ExportFormat::SqlInsert,
+        };
+        core.export_all(&path, fmt, &table_name)
+            .await
+            .map_err(|e| SbqlFfiError::core(e.to_string()))
     }
 
     // -------------------------------------------------------------------

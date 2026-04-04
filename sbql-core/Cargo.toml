@@ -20,6 +20,7 @@ chrono.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 dirs = "5"
+futures = "0.3"
 indexmap.workspace = true
 redis.workspace = true
 aws-config.workspace = true

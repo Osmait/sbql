@@ -561,6 +561,11 @@ public protocol SbqlEngineProtocol: AnyObject, Sendable {
     func executeQuery(sql: String) async throws  -> FfiQueryResult
     
     /**
+     * Stream all rows of the current query to a file.
+     */
+    func exportAll(path: String, format: FfiExportFormat, tableName: String) async throws  -> UInt64
+    
+    /**
      * Fetch a specific page of the last executed query.
      */
     func fetchPage(page: UInt32) async throws  -> FfiQueryResult
@@ -839,6 +844,26 @@ open func executeQuery(sql: String)async throws  -> FfiQueryResult  {
             completeFunc: ffi_sbql_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_sbql_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeFfiQueryResult_lift,
+            errorHandler: FfiConverterTypeSbqlFfiError_lift
+        )
+}
+    
+    /**
+     * Stream all rows of the current query to a file.
+     */
+open func exportAll(path: String, format: FfiExportFormat, tableName: String)async throws  -> UInt64  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_sbql_ffi_fn_method_sbqlengine_export_all(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(path),FfiConverterTypeFfiExportFormat_lower(format),FfiConverterString.lower(tableName)
+                )
+            },
+            pollFunc: ffi_sbql_ffi_rust_future_poll_u64,
+            completeFunc: ffi_sbql_ffi_rust_future_complete_u64,
+            freeFunc: ffi_sbql_ffi_rust_future_free_u64,
+            liftFunc: FfiConverterUInt64.lift,
             errorHandler: FfiConverterTypeSbqlFfiError_lift
         )
 }
@@ -1838,6 +1863,83 @@ extension FfiDbBackend: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
+public enum FfiExportFormat {
+    
+    case csv
+    case json
+    case sqlInsert
+}
+
+
+#if compiler(>=6)
+extension FfiExportFormat: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiExportFormat: FfiConverterRustBuffer {
+    typealias SwiftType = FfiExportFormat
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiExportFormat {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .csv
+        
+        case 2: return .json
+        
+        case 3: return .sqlInsert
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FfiExportFormat, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .csv:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .json:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .sqlInsert:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiExportFormat_lift(_ buf: RustBuffer) throws -> FfiExportFormat {
+    return try FfiConverterTypeFfiExportFormat.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiExportFormat_lower(_ value: FfiExportFormat) -> RustBuffer {
+    return FfiConverterTypeFfiExportFormat.lower(value)
+}
+
+
+extension FfiExportFormat: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
 public enum FfiSortDirection {
     
     case ascending
@@ -2367,6 +2469,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sbql_ffi_checksum_method_sbqlengine_execute_query() != 34293) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sbql_ffi_checksum_method_sbqlengine_export_all() != 39759) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sbql_ffi_checksum_method_sbqlengine_fetch_page() != 47962) {

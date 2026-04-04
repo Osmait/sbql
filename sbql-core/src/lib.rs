@@ -26,7 +26,7 @@ pub use config::{
 };
 pub use error::{Result, SbqlError};
 pub use pool::{DbBackend, DbPool};
-pub use query::{QueryResult, PAGE_SIZE};
+pub use query::{ExportFormat, QueryResult, PAGE_SIZE};
 pub use query_builder::SortDirection;
 pub use schema::{ColumnInfo, DiagramData, ForeignKey, TableEntry, TableSchema};
 
@@ -234,6 +234,19 @@ impl Core {
     // -----------------------------------------------------------------------
     // Helpers used by handler modules
     // -----------------------------------------------------------------------
+
+    /// Stream all rows of the current effective SQL to a file.
+    pub async fn export_all(
+        &self,
+        path: &str,
+        format: ExportFormat,
+        table_name: &str,
+    ) -> Result<u64> {
+        let sql = self.effective_sql.as_ref()
+            .ok_or(SbqlError::Config("No active query".into()))?;
+        let pool = self.active_pool().await?;
+        query::export_all(&pool, sql, path, format, table_name).await
+    }
 
     pub(crate) async fn active_pool(&self) -> Result<DbPool> {
         let id = self

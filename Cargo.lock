@@ -3001,6 +3001,7 @@ dependencies = [
  "criterion",
  "dhat",
  "dirs",
+ "futures",
  "indexmap 2.13.0",
  "keyring",
  "redis",

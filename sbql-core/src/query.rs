@@ -1,3 +1,7 @@
+use std::fs::File;
+use std::io::{BufWriter, Write};
+
+use futures::StreamExt;
 use sqlx::mysql::MySqlRow;
 use sqlx::postgres::PgRow;
 use sqlx::sqlite::SqliteRow;
@@ -31,6 +35,33 @@ pub struct QueryResult {
     pub page: usize,
     /// Whether there might be more pages after this one.
     pub has_next_page: bool,
+}
+
+/// The output format for streaming database export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportFormat {
+    Csv,
+    Json,
+    SqlInsert,
+}
+
+/// Stream all rows of `sql` directly to a file in the given format,
+/// without buffering the full result set in memory.
+pub async fn export_all(
+    pool: &DbPool,
+    sql: &str,
+    path: &str,
+    format: ExportFormat,
+    table_name: &str,
+) -> Result<u64> {
+    match pool {
+        DbPool::Postgres(pg) => export_all_pg(pg, sql, path, format, table_name).await,
+        DbPool::Sqlite(sq) => export_all_sqlite(sq, sql, path, format, table_name).await,
+        DbPool::Mysql(my) => export_all_mysql(my, sql, path, format, table_name).await,
+        DbPool::Redis(_) | DbPool::DynamoDb(_) => {
+            Err(SbqlError::Schema("Export not supported for this backend".into()))
+        }
+    }
 }
 
 /// Execute a raw SQL string and return the first `PAGE_SIZE` rows of page
@@ -1071,6 +1102,166 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 fn quote_ident(ident: &str) -> String {
     format!("\"{}\"", ident.replace('"', "\"\""))
+}
+
+// ---------------------------------------------------------------------------
+// Streaming export implementations
+// ---------------------------------------------------------------------------
+
+async fn export_all_pg(
+    pool: &PgPool,
+    sql: &str,
+    path: &str,
+    format: ExportFormat,
+    table_name: &str,
+) -> Result<u64> {
+    let trimmed = sql.trim_end_matches(';').trim();
+    let mut stream = sqlx::query(trimmed).fetch(pool);
+    let mut writer = BufWriter::new(File::create(path)?);
+    let mut count: u64 = 0;
+    let mut columns: Option<Vec<String>> = None;
+
+    while let Some(row_result) = stream.next().await {
+        let row = row_result?;
+        if columns.is_none() {
+            let cols: Vec<String> = row.columns().iter().map(|c| c.name().to_owned()).collect();
+            write_header(&mut writer, &cols, format, table_name)?;
+            columns = Some(cols);
+        }
+        let values = pg_row_to_strings(&row);
+        write_row(&mut writer, columns.as_ref().unwrap(), &values, format, table_name, count)?;
+        count += 1;
+    }
+    write_footer(&mut writer, format)?;
+    writer.flush()?;
+    Ok(count)
+}
+
+async fn export_all_sqlite(
+    pool: &SqlitePool,
+    sql: &str,
+    path: &str,
+    format: ExportFormat,
+    table_name: &str,
+) -> Result<u64> {
+    let trimmed = sql.trim_end_matches(';').trim();
+    let mut stream = sqlx::query(trimmed).fetch(pool);
+    let mut writer = BufWriter::new(File::create(path)?);
+    let mut count: u64 = 0;
+    let mut columns: Option<Vec<String>> = None;
+
+    while let Some(row_result) = stream.next().await {
+        let row = row_result?;
+        if columns.is_none() {
+            let cols: Vec<String> = row.columns().iter().map(|c| c.name().to_owned()).collect();
+            write_header(&mut writer, &cols, format, table_name)?;
+            columns = Some(cols);
+        }
+        let values = sqlite_row_to_strings(&row);
+        write_row(&mut writer, columns.as_ref().unwrap(), &values, format, table_name, count)?;
+        count += 1;
+    }
+    write_footer(&mut writer, format)?;
+    writer.flush()?;
+    Ok(count)
+}
+
+async fn export_all_mysql(
+    pool: &MySqlPool,
+    sql: &str,
+    path: &str,
+    format: ExportFormat,
+    table_name: &str,
+) -> Result<u64> {
+    let trimmed = sql.trim_end_matches(';').trim();
+    let mut stream = sqlx::query(trimmed).fetch(pool);
+    let mut writer = BufWriter::new(File::create(path)?);
+    let mut count: u64 = 0;
+    let mut columns: Option<Vec<String>> = None;
+
+    while let Some(row_result) = stream.next().await {
+        let row = row_result?;
+        if columns.is_none() {
+            let cols: Vec<String> = row.columns().iter().map(|c| c.name().to_owned()).collect();
+            write_header(&mut writer, &cols, format, table_name)?;
+            columns = Some(cols);
+        }
+        let values = mysql_row_to_strings(&row);
+        write_row(&mut writer, columns.as_ref().unwrap(), &values, format, table_name, count)?;
+        count += 1;
+    }
+    write_footer(&mut writer, format)?;
+    writer.flush()?;
+    Ok(count)
+}
+
+// ---------------------------------------------------------------------------
+// Export formatting helpers
+// ---------------------------------------------------------------------------
+
+fn write_header(w: &mut impl Write, cols: &[String], fmt: ExportFormat, _table: &str) -> std::io::Result<()> {
+    match fmt {
+        ExportFormat::Csv => {
+            writeln!(w, "{}", cols.iter().map(|c| escape_csv_value(c)).collect::<Vec<_>>().join(","))
+        }
+        ExportFormat::Json => {
+            write!(w, "[\n")
+        }
+        ExportFormat::SqlInsert => Ok(()), // no header needed
+    }
+}
+
+fn write_row(
+    w: &mut impl Write,
+    cols: &[String],
+    values: &[String],
+    fmt: ExportFormat,
+    table: &str,
+    row_idx: u64,
+) -> std::io::Result<()> {
+    match fmt {
+        ExportFormat::Csv => {
+            writeln!(w, "{}", values.iter().map(|v| escape_csv_value(v)).collect::<Vec<_>>().join(","))
+        }
+        ExportFormat::Json => {
+            if row_idx > 0 { write!(w, ",\n")?; }
+            write!(w, "  {{")?;
+            for (i, (col, val)) in cols.iter().zip(values.iter()).enumerate() {
+                if i > 0 { write!(w, ", ")?; }
+                let escaped_col = col.replace('\\', "\\\\").replace('"', "\\\"");
+                let escaped_val = val.replace('\\', "\\\\").replace('"', "\\\"");
+                write!(w, "\"{}\": \"{}\"", escaped_col, escaped_val)?;
+            }
+            write!(w, "}}")
+        }
+        ExportFormat::SqlInsert => {
+            let col_list = cols.iter().map(|c| format!("\"{}\"", c)).collect::<Vec<_>>().join(", ");
+            let val_list = values.iter().map(|v| escape_sql_export_value(v)).collect::<Vec<_>>().join(", ");
+            writeln!(w, "INSERT INTO \"{}\" ({}) VALUES ({});", table, col_list, val_list)
+        }
+    }
+}
+
+fn write_footer(w: &mut impl Write, fmt: ExportFormat) -> std::io::Result<()> {
+    match fmt {
+        ExportFormat::Json => writeln!(w, "\n]"),
+        _ => Ok(()),
+    }
+}
+
+fn escape_csv_value(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_owned()
+    }
+}
+
+fn escape_sql_export_value(s: &str) -> String {
+    if s.is_empty() { return "NULL".to_owned(); }
+    if s.parse::<f64>().is_ok() { return s.to_owned(); }
+    if s == "true" || s == "false" { return s.to_uppercase(); }
+    format!("'{}'", s.replace('\'', "''"))
 }
 
 #[cfg(test)]

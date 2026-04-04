@@ -132,4 +132,10 @@ actor SbqlService {
             pkVal: pkVal
         )
     }
+
+    // MARK: - Export
+
+    func exportAll(path: String, format: FfiExportFormat, tableName: String) async throws -> UInt64 {
+        try await engine.exportAll(path: path, format: format, tableName: tableName)
+    }
 }

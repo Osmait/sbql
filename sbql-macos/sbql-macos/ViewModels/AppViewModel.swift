@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Root observable that owns all sub-ViewModels and coordinates app state.
 @Observable
@@ -10,6 +11,7 @@ final class AppViewModel {
 
     var activeTab: ActiveTab = .query
     var isSidebarVisible: Bool = true
+    var isExporting: Bool = false
     var toastMessage: String?
     var toastIsError: Bool = false
 
@@ -274,6 +276,34 @@ final class AppViewModel {
     }
 
     // MARK: - Toast
+
+    // MARK: - Export
+
+    func exportAll(format: ExportFormat, tableName: String) async {
+        let panel = NSSavePanel()
+        panel.title = "Export All Results"
+        panel.nameFieldStringValue = "\(tableName).\(format.fileExtension)"
+        panel.allowedContentTypes = [
+            UTType(filenameExtension: format.fileExtension) ?? .plainText,
+        ]
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        isExporting = true
+        do {
+            let count = try await service.exportAll(
+                path: url.path,
+                format: format.ffi,
+                tableName: tableName
+            )
+            isExporting = false
+            showToast("Exported \(count) rows to \(url.lastPathComponent)")
+        } catch {
+            isExporting = false
+            showError(error)
+        }
+    }
 
     func showToast(_ message: String) {
         toastIsError = false
