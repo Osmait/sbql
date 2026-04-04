@@ -259,6 +259,7 @@ struct MainWindow: View {
         case .sqlite: "SQLite"
         case .redis: "Redis"
         case .dynamodb: "DynamoDB"
+        case .mongodb: "MongoDB"
         }
         let color: Color = switch backend {
         case .postgres: Color(hex: 0x336791)
@@ -266,6 +267,7 @@ struct MainWindow: View {
         case .sqlite: Color(hex: 0x44A8D6)
         case .redis: Color(hex: 0xD82C20)
         case .dynamodb: Color(hex: 0x4053D6)
+        case .mongodb: Color(hex: 0x47A248)
         }
         return Text(label)
             .font(SbqlTheme.Typography.captionBold)

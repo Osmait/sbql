@@ -55,6 +55,7 @@ impl From<sbql_core::DbBackend> for FfiDbBackend {
             sbql_core::DbBackend::Sqlite => FfiDbBackend::Sqlite,
             sbql_core::DbBackend::Redis => FfiDbBackend::Redis,
             sbql_core::DbBackend::DynamoDb => FfiDbBackend::DynamoDb,
+            sbql_core::DbBackend::MongoDb => FfiDbBackend::MongoDb,
         }
     }
 }
@@ -67,6 +68,7 @@ impl From<FfiDbBackend> for sbql_core::DbBackend {
             FfiDbBackend::Sqlite => sbql_core::DbBackend::Sqlite,
             FfiDbBackend::Redis => sbql_core::DbBackend::Redis,
             FfiDbBackend::DynamoDb => sbql_core::DbBackend::DynamoDb,
+            FfiDbBackend::MongoDb => sbql_core::DbBackend::MongoDb,
         }
     }
 }
@@ -331,6 +333,7 @@ mod tests {
             rows: vec![vec!["1".into(), "Alice".into()]],
             page: 3,
             has_next_page: true,
+            total_count: None,
         };
         let ffi: FfiQueryResult = qr.into();
         assert_eq!(ffi.columns, vec!["id", "name"]);

@@ -133,6 +133,26 @@ impl ConnectionConfig {
         }
     }
 
+    /// Create a new MongoDB connection config.
+    pub fn new_mongodb(
+        name: impl Into<String>,
+        host: impl Into<String>,
+        port: u16,
+        database: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            backend: DbBackend::MongoDb,
+            host: host.into(),
+            port,
+            user: String::new(),
+            database: database.into(),
+            ssl_mode: SslMode::default(),
+            file_path: None,
+        }
+    }
+
     /// Create a new Redis connection config.
     pub fn new_redis(name: impl Into<String>, host: impl Into<String>, port: u16) -> Self {
         Self {
@@ -192,6 +212,23 @@ impl ConnectionConfig {
                 }
             }
             DbBackend::DynamoDb => format!("http://{}:{}", self.host, self.port),
+            DbBackend::MongoDb => {
+                if !self.user.is_empty() || !password.is_empty() {
+                    format!(
+                        "mongodb://{}:{}@{}:{}/{}",
+                        self.user,
+                        urlencoding_simple(password),
+                        self.host,
+                        self.port,
+                        self.database,
+                    )
+                } else {
+                    format!(
+                        "mongodb://{}:{}/{}",
+                        self.host, self.port, self.database,
+                    )
+                }
+            }
         }
     }
 
@@ -205,6 +242,7 @@ impl ConnectionConfig {
         if self.backend == DbBackend::Sqlite
             || (self.backend == DbBackend::Redis && password.is_empty())
             || (self.backend == DbBackend::DynamoDb && password.is_empty())
+            || (self.backend == DbBackend::MongoDb && password.is_empty())
         {
             return Ok(());
         }

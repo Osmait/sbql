@@ -110,6 +110,18 @@ struct SidebarView: View {
                     .padding(.horizontal, SbqlTheme.Spacing.sm)
                     .animation(SbqlTheme.Animations.gentle, value: appVM.connections.filteredTables.count)
                 }
+
+                // Saved queries section
+                Divider()
+                    .background(SbqlTheme.Colors.border)
+                    .padding(.vertical, SbqlTheme.Spacing.sm)
+                SavedQueriesSection()
+
+                // History section
+                Divider()
+                    .background(SbqlTheme.Colors.border)
+                    .padding(.vertical, SbqlTheme.Spacing.sm)
+                QueryHistorySection()
             }
             .animation(SbqlTheme.Animations.smooth, value: appVM.connections.tables.count)
         }
@@ -122,6 +134,12 @@ struct SidebarView: View {
                 ConnectionFormSheet(connection: conn)
             }
         }
+        .sheet(isPresented: Binding(
+            get: { appVM.savedQueries.isShowingSaveSheet },
+            set: { appVM.savedQueries.isShowingSaveSheet = $0 }
+        )) {
+            SaveQuerySheet()
+        }
     }
 
     private func backendGroupHeader(_ backend: Connection.Backend, count: Int) -> some View {
@@ -131,6 +149,7 @@ struct SidebarView: View {
         case .sqlite: ("SQLite", Color(hex: 0x44A8D6))
         case .redis: ("Redis", Color(hex: 0xD82C20))
         case .dynamodb: ("DynamoDB", Color(hex: 0x4053D6))
+        case .mongodb: ("MongoDB", Color(hex: 0x47A248))
         }
         return HStack(spacing: SbqlTheme.Spacing.xs) {
             Circle()

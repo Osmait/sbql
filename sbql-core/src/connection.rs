@@ -110,6 +110,15 @@ impl ConnectionManager {
                     aws_sdk_dynamodb::Client::from_conf(dynamo_config.build());
                 DbPool::DynamoDb(Box::new(client))
             }
+            DbBackend::MongoDb => {
+                let client_options = mongodb::options::ClientOptions::parse(&url)
+                    .await
+                    .map_err(|e| SbqlError::MongoDb(e.to_string()))?;
+                let client = mongodb::Client::with_options(client_options)
+                    .map_err(|e| SbqlError::MongoDb(e.to_string()))?;
+                let db = client.database(&config.database);
+                DbPool::MongoDb(Box::new(db))
+            }
         };
 
         self.pools.write().await.insert(config.id, pool);
@@ -144,6 +153,11 @@ impl ConnectionManager {
                     .send()
                     .await
                     .map_err(|e| SbqlError::DynamoDb(e.to_string()))?;
+            }
+            DbPool::MongoDb(db) => {
+                db.run_command(mongodb::bson::doc! { "ping": 1 })
+                    .await
+                    .map_err(|e| SbqlError::MongoDb(e.to_string()))?;
             }
         }
         Ok(())

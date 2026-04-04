@@ -20,6 +20,7 @@ pub fn pool_backend_name(pool: &DbPool) -> &'static str {
         DbPool::Mysql(_) => "mysql",
         DbPool::Redis(_) => "redis",
         DbPool::DynamoDb(_) => "dynamodb",
+        DbPool::MongoDb(_) => "mongodb",
     }
 }
 
@@ -60,7 +61,7 @@ pub async fn export_all(
         DbPool::Postgres(pg) => export_all_pg(pg, sql, path, format, table_name).await,
         DbPool::Sqlite(sq) => export_all_sqlite(sq, sql, path, format, table_name).await,
         DbPool::Mysql(my) => export_all_mysql(my, sql, path, format, table_name).await,
-        DbPool::Redis(_) | DbPool::DynamoDb(_) => {
+        DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_) => {
             Err(SbqlError::Schema("Export not supported for this backend".into()))
         }
     }
@@ -76,10 +77,11 @@ pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<Query
         DbPool::Mysql(my) => execute_page_mysql(my, sql, page).await,
         DbPool::Redis(cm) => execute_page_redis(cm, sql).await,
         DbPool::DynamoDb(client) => execute_page_dynamodb(client, sql).await,
+        DbPool::MongoDb(db) => execute_page_mongodb(db, sql).await,
     }?;
 
     // Fetch total count on page 0 for SQL backends (cheap enough for most queries)
-    if page == 0 && !matches!(pool, DbPool::Redis(_) | DbPool::DynamoDb(_)) {
+    if page == 0 && !matches!(pool, DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_)) {
         result.total_count = fetch_total_count(pool, sql).await.ok();
     }
 
@@ -122,6 +124,7 @@ pub async fn suggest_distinct_values(
         DbPool::Mysql(my) => suggest_distinct_values_mysql(my, sql, column, prefix, limit).await,
         DbPool::Redis(_) => Ok(vec![]),
         DbPool::DynamoDb(_) => Ok(vec![]),
+        DbPool::MongoDb(_) => Ok(vec![]),
     }
 }
 
@@ -763,6 +766,112 @@ fn dynamo_attr_to_string(attr: &aws_sdk_dynamodb::types::AttributeValue) -> Stri
             format!("{{{}}}", pairs.join(", "))
         }
         _ => "<unknown>".into(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MongoDB implementation
+// ---------------------------------------------------------------------------
+
+async fn execute_page_mongodb(
+    db: &mongodb::Database,
+    input: &str,
+) -> Result<QueryResult> {
+    use mongodb::bson::Document;
+
+    let trimmed = input.trim();
+
+    // Treat input as a collection name and do a find() with limit
+    let collection = db.collection::<Document>(trimmed);
+    let mut cursor = collection
+        .find(mongodb::bson::doc! {})
+        .limit((PAGE_SIZE + 1) as i64)
+        .await
+        .map_err(|e| SbqlError::MongoDb(e.to_string()))?;
+
+    let mut docs: Vec<Document> = Vec::new();
+    while cursor
+        .advance()
+        .await
+        .map_err(|e| SbqlError::MongoDb(e.to_string()))?
+    {
+        docs.push(
+            cursor
+                .deserialize_current()
+                .map_err(|e| SbqlError::MongoDb(e.to_string()))?,
+        );
+        if docs.len() > PAGE_SIZE {
+            break;
+        }
+    }
+
+    let has_next_page = docs.len() > PAGE_SIZE;
+    if has_next_page {
+        docs.pop();
+    }
+
+    if docs.is_empty() {
+        return Ok(QueryResult::default());
+    }
+
+    // Collect all unique keys from all documents (MongoDB is schemaless)
+    let mut col_set = indexmap::IndexSet::new();
+    for doc in &docs {
+        for key in doc.keys() {
+            col_set.insert(key.clone());
+        }
+    }
+    let columns: Vec<String> = col_set.into_iter().collect();
+
+    let rows: Vec<Vec<String>> = docs
+        .iter()
+        .map(|doc| {
+            columns
+                .iter()
+                .map(|col| doc.get(col).map(bson_to_string).unwrap_or_default())
+                .collect()
+        })
+        .collect();
+
+    Ok(QueryResult {
+        columns,
+        rows,
+        page: 0,
+        has_next_page,
+        total_count: None,
+    })
+}
+
+fn bson_to_string(val: &mongodb::bson::Bson) -> String {
+    use mongodb::bson::Bson;
+    match val {
+        Bson::String(s) => s.clone(),
+        Bson::Int32(n) => n.to_string(),
+        Bson::Int64(n) => n.to_string(),
+        Bson::Double(f) => f.to_string(),
+        Bson::Boolean(b) => b.to_string(),
+        Bson::Null => String::new(),
+        Bson::ObjectId(oid) => oid.to_hex(),
+        Bson::DateTime(dt) => {
+            // Format as ISO 8601 string using the bson DateTime's own formatting
+            let millis = dt.timestamp_millis();
+            let secs = millis / 1000;
+            let nsecs = ((millis % 1000) * 1_000_000) as u32;
+            match chrono::DateTime::from_timestamp(secs, nsecs) {
+                Some(chrono_dt) => chrono_dt.to_rfc3339(),
+                None => format!("{}", millis),
+            }
+        }
+        Bson::Array(arr) => {
+            let items: Vec<String> = arr.iter().map(bson_to_string).collect();
+            format!("[{}]", items.join(", "))
+        }
+        Bson::Document(doc) => {
+            serde_json::to_string(doc).unwrap_or_else(|_| format!("{:?}", doc))
+        }
+        Bson::Binary(b) => format!("\\x{}", hex_encode(b.bytes.as_slice())),
+        Bson::Decimal128(d) => d.to_string(),
+        _ => format!("{}", val),
     }
 }
 

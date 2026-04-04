@@ -312,6 +312,11 @@ uint64_t uniffi_sbql_ffi_fn_method_sbqlengine_disconnect(void*_Nonnull ptr, Rust
 uint64_t uniffi_sbql_ffi_fn_method_sbqlengine_execute_query(void*_Nonnull ptr, RustBuffer sql
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_FN_METHOD_SBQLENGINE_EXPORT_ALL
+#define UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_FN_METHOD_SBQLENGINE_EXPORT_ALL
+uint64_t uniffi_sbql_ffi_fn_method_sbqlengine_export_all(void*_Nonnull ptr, RustBuffer path, RustBuffer format, RustBuffer table_name
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_FN_METHOD_SBQLENGINE_FETCH_PAGE
 #define UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_FN_METHOD_SBQLENGINE_FETCH_PAGE
 uint64_t uniffi_sbql_ffi_fn_method_sbqlengine_fetch_page(void*_Nonnull ptr, uint32_t page
@@ -683,6 +688,12 @@ uint16_t uniffi_sbql_ffi_checksum_method_sbqlengine_disconnect(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_CHECKSUM_METHOD_SBQLENGINE_EXECUTE_QUERY
 #define UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_CHECKSUM_METHOD_SBQLENGINE_EXECUTE_QUERY
 uint16_t uniffi_sbql_ffi_checksum_method_sbqlengine_execute_query(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_CHECKSUM_METHOD_SBQLENGINE_EXPORT_ALL
+#define UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_CHECKSUM_METHOD_SBQLENGINE_EXPORT_ALL
+uint16_t uniffi_sbql_ffi_checksum_method_sbqlengine_export_all(void
     
 );
 #endif

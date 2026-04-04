@@ -85,6 +85,7 @@ pub async fn list_tables(pool: &DbPool) -> Result<Vec<TableEntry>> {
         DbPool::Mysql(my) => list_tables_mysql(my).await,
         DbPool::Redis(_) => Ok(vec![]),
         DbPool::DynamoDb(client) => list_tables_dynamodb(client).await,
+        DbPool::MongoDb(db) => list_tables_mongodb(db).await,
     }
 }
 
@@ -97,6 +98,7 @@ pub async fn get_primary_keys(pool: &DbPool, schema: &str, table: &str) -> Resul
         DbPool::Mysql(my) => get_primary_keys_mysql(my, table).await,
         DbPool::Redis(_) => Ok(vec![]),
         DbPool::DynamoDb(client) => get_primary_keys_dynamodb(client, table).await,
+        DbPool::MongoDb(_) => Ok(vec!["_id".to_string()]),
     }
 }
 
@@ -109,6 +111,7 @@ pub async fn load_diagram(pool: &DbPool) -> Result<DiagramData> {
         DbPool::Mysql(my) => load_diagram_mysql(my).await,
         DbPool::Redis(_) => Ok(DiagramData::default()),
         DbPool::DynamoDb(_) => Ok(DiagramData::default()),
+        DbPool::MongoDb(_) => Ok(DiagramData::default()),
     }
 }
 
@@ -138,6 +141,9 @@ pub async fn execute_cell_update(
         DbPool::DynamoDb(_) => Err(SbqlError::Schema(
             "Cell update not supported for DynamoDB".into(),
         )),
+        DbPool::MongoDb(_) => Err(SbqlError::Schema(
+            "Cell update not supported for MongoDB".into(),
+        )),
     }
 }
 
@@ -158,6 +164,9 @@ pub async fn execute_row_delete(
         )),
         DbPool::DynamoDb(_) => Err(SbqlError::Schema(
             "Row delete not supported for DynamoDB".into(),
+        )),
+        DbPool::MongoDb(_) => Err(SbqlError::Schema(
+            "Row delete not supported for MongoDB".into(),
         )),
     }
 }
@@ -828,6 +837,24 @@ async fn get_primary_keys_dynamodb(
         )));
     }
     Ok(pks)
+}
+
+// ---------------------------------------------------------------------------
+// MongoDB implementations
+// ---------------------------------------------------------------------------
+
+async fn list_tables_mongodb(db: &mongodb::Database) -> Result<Vec<TableEntry>> {
+    let names = db
+        .list_collection_names()
+        .await
+        .map_err(|e| SbqlError::MongoDb(e.to_string()))?;
+    Ok(names
+        .into_iter()
+        .map(|name| TableEntry {
+            schema: "mongodb".to_string(),
+            name,
+        })
+        .collect())
 }
 
 #[cfg(test)]

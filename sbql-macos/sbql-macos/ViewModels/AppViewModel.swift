@@ -8,6 +8,8 @@ final class AppViewModel {
     let editor = EditorViewModel()
     let results = ResultsViewModel()
     let diagram = DiagramViewModel()
+    let queryHistory = QueryHistoryViewModel()
+    let savedQueries = SavedQueriesViewModel()
 
     var activeTab: ActiveTab = .query
     var isSidebarVisible: Bool = true
@@ -28,6 +30,8 @@ final class AppViewModel {
 
     func onAppear() {
         connections.loadFromDisk()
+        queryHistory.load()
+        savedQueries.load()
 
         // Auto-connect to the last used connection
         if let lastId = UserDefaults.standard.string(forKey: Self.lastConnectionKey),
@@ -120,9 +124,23 @@ final class AppViewModel {
         let start = ContinuousClock.now
         do {
             let result = try await service.executeQuery(sql: sql)
-            editor.lastQueryDuration = ContinuousClock.now - start
+            let elapsed = ContinuousClock.now - start
+            editor.lastQueryDuration = elapsed
             results.applyResult(result)
             results.updateActiveTabName(forSQL: sql)
+
+            // Record in query history
+            if let conn = connections.activeConnection {
+                let ms = Int64(elapsed.components.seconds * 1_000)
+                    + Int64(elapsed.components.attoseconds / 1_000_000_000_000_000)
+                queryHistory.addEntry(
+                    sql: sql,
+                    connectionName: conn.name,
+                    connectionId: conn.id,
+                    durationMs: ms,
+                    rowCount: result.rows.count
+                )
+            }
         } catch {
             editor.lastQueryDuration = ContinuousClock.now - start
             showError(error)

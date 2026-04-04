@@ -38,7 +38,7 @@ pub fn apply_order(
     direction: SortDirection,
     backend: DbBackend,
 ) -> Result<String> {
-    if backend == DbBackend::Redis || backend == DbBackend::DynamoDb {
+    if backend == DbBackend::Redis || backend == DbBackend::DynamoDb || backend == DbBackend::MongoDb {
         return Err(SbqlError::SqlParse(
             "ORDER BY not supported for this backend".into(),
         ));
@@ -75,7 +75,7 @@ pub fn apply_order(
 /// Remove the `ORDER BY` clause from `sql`.
 #[tracing::instrument(skip_all, fields(backend = ?backend))]
 pub fn clear_order(sql: &str, backend: DbBackend) -> Result<String> {
-    if backend == DbBackend::Redis || backend == DbBackend::DynamoDb {
+    if backend == DbBackend::Redis || backend == DbBackend::DynamoDb || backend == DbBackend::MongoDb {
         return Ok(sql.to_owned());
     }
     match parse_single_select(sql, backend) {
@@ -99,7 +99,7 @@ pub fn apply_filter(
     columns: Option<&[String]>,
     backend: DbBackend,
 ) -> Result<String> {
-    if backend == DbBackend::Redis || backend == DbBackend::DynamoDb {
+    if backend == DbBackend::Redis || backend == DbBackend::DynamoDb || backend == DbBackend::MongoDb {
         return Err(SbqlError::SqlParse(
             "Filtering not supported for this backend".into(),
         ));
@@ -112,12 +112,12 @@ pub fn apply_filter(
     let like_op = match backend {
         DbBackend::Postgres => "ILIKE",
         DbBackend::Mysql => "LIKE",
-        DbBackend::Sqlite | DbBackend::Redis | DbBackend::DynamoDb => "LIKE",
+        DbBackend::Sqlite | DbBackend::Redis | DbBackend::DynamoDb | DbBackend::MongoDb => "LIKE",
     };
     let collate_suffix = match backend {
         DbBackend::Postgres => "",
         DbBackend::Mysql => "",
-        DbBackend::Sqlite | DbBackend::Redis | DbBackend::DynamoDb => " COLLATE NOCASE",
+        DbBackend::Sqlite | DbBackend::Redis | DbBackend::DynamoDb | DbBackend::MongoDb => " COLLATE NOCASE",
     };
 
     if let Some(col) = col_opt {
@@ -155,7 +155,7 @@ pub fn table_select_sql(schema: &str, table: &str, backend: DbBackend) -> String
         DbBackend::Postgres => format!("SELECT * FROM \"{schema}\".\"{table}\""),
         DbBackend::Sqlite => format!("SELECT * FROM \"{table}\""),
         DbBackend::Mysql => format!("SELECT * FROM `{schema}`.`{table}`"),
-        DbBackend::Redis | DbBackend::DynamoDb => String::new(),
+        DbBackend::Redis | DbBackend::DynamoDb | DbBackend::MongoDb => String::new(),
     }
 }
 
@@ -179,7 +179,7 @@ fn parse_single_select(sql: &str, backend: DbBackend) -> Result<Box<Query>> {
             let dialect = MySqlDialect {};
             Parser::parse_sql(&dialect, trimmed).map_err(|e| SbqlError::SqlParse(e.to_string()))?
         }
-        DbBackend::Redis | DbBackend::DynamoDb => {
+        DbBackend::Redis | DbBackend::DynamoDb | DbBackend::MongoDb => {
             return Err(SbqlError::SqlParse(
                 "SQL parsing not supported for this backend".into(),
             ));

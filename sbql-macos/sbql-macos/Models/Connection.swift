@@ -20,6 +20,7 @@ struct Connection: Identifiable, Hashable {
         case redis
         case mysql
         case dynamodb
+        case mongodb
     }
 
     enum SSLMode: String, CaseIterable, Hashable {
@@ -50,6 +51,8 @@ struct Connection: Identifiable, Hashable {
             "\(host):\(port)/\(database)"
         case .dynamodb:
             "\(host):\(port) (\(database))"
+        case .mongodb:
+            "\(host):\(port)/\(database)"
         }
     }
 
@@ -90,6 +93,19 @@ struct Connection: Identifiable, Hashable {
             database: "",
             sslMode: .prefer,
             filePath: ""
+        )
+    }
+
+    static func newMongodb() -> Connection {
+        Connection(
+            id: UUID().uuidString.lowercased(),
+            name: "",
+            backend: .mongodb,
+            host: "localhost",
+            port: 27017,
+            user: "",
+            database: "",
+            sslMode: .prefer
         )
     }
 
@@ -146,6 +162,7 @@ extension Connection.Backend {
         case .redis: self = .redis
         case .mysql: self = .mysql
         case .dynamoDb: self = .dynamodb
+        case .mongoDb: self = .mongodb
         }
     }
 
@@ -156,6 +173,7 @@ extension Connection.Backend {
         case .redis: .redis
         case .mysql: .mysql
         case .dynamodb: .dynamoDb
+        case .mongodb: .mongoDb
         }
     }
 }

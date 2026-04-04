@@ -39,6 +39,7 @@ struct ConnectionFormSheet: View {
                             Text("PostgreSQL").tag(Connection.Backend.postgres)
                             Text("MySQL").tag(Connection.Backend.mysql)
                             Text("SQLite").tag(Connection.Backend.sqlite)
+                            Text("MongoDB").tag(Connection.Backend.mongodb)
                             Text("DynamoDB").tag(Connection.Backend.dynamodb)
                         }
                         .pickerStyle(.segmented)
@@ -64,6 +65,12 @@ struct ConnectionFormSheet: View {
                                 }
                             }
                         }
+                    } else if connection.backend == .mongodb {
+                        formField("Host", text: $connection.host, prompt: "localhost")
+                        formField("Port", value: $connection.port)
+                        formField("User", text: $connection.user, prompt: "admin (optional)")
+                        formField("Database", text: $connection.database, prompt: "mydb")
+                        formField("Password", text: $password, prompt: "Enter password (optional)", isSecure: true)
                     } else if connection.backend == .dynamodb {
                         formField("Endpoint", text: $connection.host, prompt: "localhost")
                         formField("Port", value: $connection.port)

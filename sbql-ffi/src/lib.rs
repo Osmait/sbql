@@ -21,6 +21,7 @@ pub enum FfiDbBackend {
     Sqlite,
     Redis,
     DynamoDb,
+    MongoDb,
 }
 
 #[derive(Debug, Clone, uniffi::Enum)]
@@ -612,6 +613,7 @@ mod tests {
             rows: vec![vec!["1".into()]],
             page: 0,
             has_next_page: false,
+            total_count: None,
         };
         let events = vec![sbql_core::CoreEvent::QueryResult(qr)];
         let result = extract_query_result(events).unwrap();

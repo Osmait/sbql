@@ -29,6 +29,9 @@ pub enum SbqlError {
     #[error("DynamoDB error: {0}")]
     DynamoDb(String),
 
+    #[error("MongoDB error: {0}")]
+    MongoDb(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

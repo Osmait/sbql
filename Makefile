@@ -1,4 +1,4 @@
-.PHONY: help release-plz-install version-auto version-auto-dry release-dry-run release install-local reinstall-local uninstall-local build-release xcframework install-macos uninstall-macos
+.PHONY: help release-plz-install version-auto version-auto-dry release-dry-run release install-local reinstall-local uninstall-local build-release xcframework install-macos uninstall-macos bench bench-pg bench-redis bench-all bench-report profile-memory flamegraph flamegraph-install
 
 help:
 	@printf "\nSBQL Make targets:\n\n"
@@ -13,7 +13,16 @@ help:
 	@printf "  make uninstall-local      Remove local sbql binary\n"
 	@printf "  make xcframework          Build XCFramework + Swift bindings\n"
 	@printf "  make install-macos        Build and install macOS app to /Applications\n"
-	@printf "  make uninstall-macos      Remove macOS app from /Applications\n\n"
+	@printf "  make uninstall-macos      Remove macOS app from /Applications\n"
+	@printf "\nPerformance:\n\n"
+	@printf "  make bench                Run Criterion benchmarks (no Docker)\n"
+	@printf "  make bench-pg             Run PostgreSQL integration benchmarks (Docker)\n"
+	@printf "  make bench-redis          Run Redis integration benchmarks (Docker)\n"
+	@printf "  make bench-all            Run all benchmarks including Docker\n"
+	@printf "  make bench-report         Open Criterion HTML reports\n"
+	@printf "  make profile-memory       Run dhat heap profiling workload\n"
+	@printf "  make flamegraph           Generate CPU flamegraph from benchmarks\n"
+	@printf "  make flamegraph-install   Install cargo-flamegraph\n\n"
 
 release-plz-install:
 	cargo install release-plz --locked
@@ -64,3 +73,37 @@ install-macos: xcframework
 uninstall-macos:
 	rm -rf /Applications/sbql-macos.app
 	@echo "==> sbql-macos.app removed from /Applications/"
+
+# ---------------------------------------------------------------------------
+# Performance
+# ---------------------------------------------------------------------------
+
+bench:
+	cargo bench --package sbql-core --bench query_builder --bench query_execution
+
+bench-pg:
+	cargo bench --package sbql-core --bench postgres_integration
+
+bench-redis:
+	cargo bench --package sbql-core --bench redis_integration
+
+bench-all:
+	cargo bench --package sbql-core
+
+bench-report:
+	@if [ -f target/criterion/report/index.html ]; then \
+		open target/criterion/report/index.html; \
+	else \
+		echo "No report found. Run 'make bench' first."; \
+		exit 1; \
+	fi
+
+profile-memory:
+	cargo run --package sbql-core --example profile_memory --features dhat-heap
+
+flamegraph:
+	@command -v cargo-flamegraph >/dev/null || (echo "flamegraph not found. Run: make flamegraph-install" && exit 1)
+	cargo flamegraph --package sbql-core --bench query_execution -- --bench
+
+flamegraph-install:
+	cargo install flamegraph
