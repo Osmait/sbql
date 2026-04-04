@@ -1,104 +1,211 @@
 import SwiftUI
 
-/// Settings window with theme selector.
+/// Settings window with theme selector organized by category.
 struct SettingsView: View {
     private var theme: ThemeManager { ThemeManager.shared }
+    @State private var searchText: String = ""
+
+    private var darkThemes: [ThemeName] {
+        ThemeName.allCases.filter { $0.isDark && matchesSearch($0) }
+    }
+
+    private var lightThemes: [ThemeName] {
+        ThemeName.allCases.filter { !$0.isDark && matchesSearch($0) }
+    }
+
+    private func matchesSearch(_ name: ThemeName) -> Bool {
+        guard !searchText.isEmpty else { return true }
+        return name.rawValue.localizedCaseInsensitiveContains(searchText)
+            || name.description.localizedCaseInsensitiveContains(searchText)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Appearance")
-                .font(.system(size: 15, weight: .semibold))
-                .padding(.bottom, 12)
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Appearance")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                // Search
+                HStack(spacing: 4) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    TextField("Search themes…", text: $searchText)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .frame(width: 140)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.primary.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
 
-            VStack(spacing: 8) {
-                ForEach(ThemeName.allCases) { themeName in
-                    ThemeRowView(
+            Divider()
+
+            // Theme grid in scroll view
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    if !darkThemes.isEmpty {
+                        themeSection("Dark Themes", themes: darkThemes)
+                    }
+                    if !lightThemes.isEmpty {
+                        themeSection("Light Themes", themes: lightThemes)
+                    }
+                }
+                .padding(20)
+            }
+        }
+        .frame(width: 520, height: 560)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func themeSection(_ title: String, themes: [ThemeName]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 145), spacing: 10)],
+                spacing: 10
+            ) {
+                ForEach(themes) { themeName in
+                    ThemeCardView(
                         name: themeName,
                         isSelected: theme.activeThemeName == themeName,
-                        onSelect: { theme.activeThemeName = themeName }
+                        onSelect: {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                theme.activeThemeName = themeName
+                            }
+                        }
                     )
                 }
             }
         }
-        .padding(24)
-        .frame(width: 420)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
-/// A single theme row extracted to help the compiler.
-private struct ThemeRowView: View {
+/// Compact card preview for a single theme.
+private struct ThemeCardView: View {
     let name: ThemeName
     let isSelected: Bool
     let onSelect: () -> Void
 
+    @State private var isHovered = false
+
     var body: some View {
+        let palette = ThemeManager.palette(for: name)
+
         Button(action: onSelect) {
-            HStack(spacing: 12) {
-                swatches
-                labels
-                Spacer()
-                checkmark
+            VStack(spacing: 0) {
+                // Mini preview
+                miniPreview(palette)
+
+                // Label
+                HStack(spacing: 4) {
+                    Text(name.rawValue)
+                        .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                        .lineLimit(1)
+                    Spacer()
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
             }
-            .padding(10)
-            .background(rowBackground)
+            .background(Color.primary.opacity(isHovered ? 0.06 : 0.03))
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(rowBorder)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(
+                        isSelected ? Color.accentColor : Color.primary.opacity(isHovered ? 0.15 : 0.08),
+                        lineWidth: isSelected ? 2 : 1
+                    )
+            )
         }
         .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 
-    private var swatches: some View {
-        let palette = ThemeManager.palette(for: name)
-        return HStack(spacing: 3) {
-            swatch(palette.background)
-            swatch(palette.surface)
-            swatch(palette.accent)
-            swatch(palette.textPrimary)
+    /// A tiny mock-up of the editor look.
+    private func miniPreview(_ p: ThemePalette) -> some View {
+        VStack(spacing: 0) {
+            // Title bar mock
+            HStack(spacing: 3) {
+                Circle().fill(Color.red.opacity(0.7)).frame(width: 5, height: 5)
+                Circle().fill(Color.yellow.opacity(0.7)).frame(width: 5, height: 5)
+                Circle().fill(Color.green.opacity(0.7)).frame(width: 5, height: 5)
+                Spacer()
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(p.surfaceElevated)
+                    .frame(width: 30, height: 5)
+                Spacer()
+                Color.clear.frame(width: 20)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(p.surface)
+
+            // Content mock: sidebar + editor
+            HStack(spacing: 1) {
+                // Sidebar mock
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(0 ..< 4, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(p.textTertiary.opacity(0.5))
+                            .frame(width: .random(in: 20 ... 35), height: 3)
+                    }
+                }
+                .padding(4)
+                .frame(width: 42, alignment: .leading)
+                .background(p.surface)
+
+                // Editor mock
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 2) {
+                        RoundedRectangle(cornerRadius: 1).fill(p.accent).frame(width: 22, height: 3)
+                        RoundedRectangle(cornerRadius: 1).fill(p.textPrimary.opacity(0.5)).frame(width: 8, height: 3)
+                        RoundedRectangle(cornerRadius: 1).fill(p.success).frame(width: 18, height: 3)
+                    }
+                    HStack(spacing: 2) {
+                        RoundedRectangle(cornerRadius: 1).fill(p.accent).frame(width: 16, height: 3)
+                        RoundedRectangle(cornerRadius: 1).fill(p.warning).frame(width: 12, height: 3)
+                    }
+                    // Result rows mock
+                    ForEach(0 ..< 3, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(p.textPrimary.opacity(0.2))
+                            .frame(height: 3)
+                    }
+                }
+                .padding(4)
+                .background(p.background)
+            }
         }
-        .padding(4)
-        .background(palette.background)
+        .frame(height: 65)
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-        )
     }
+}
 
-    private func swatch(_ color: Color) -> some View {
-        RoundedRectangle(cornerRadius: 3)
-            .fill(color)
-            .frame(width: 18, height: 32)
-    }
+// MARK: - ThemeName helpers
 
-    private var labels: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(name.rawValue)
-                .font(.system(size: 13, weight: .medium))
-            Text(name.description)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+extension ThemeName {
+    var isDark: Bool {
+        switch self {
+        case .latte, .githubLight, .solarizedLight, .rosePineDawn,
+             .ayuLight, .gruvboxLight, .everforestLight, .tokyoNightDay, .nordLight:
+            return false
+        default:
+            return true
         }
-    }
-
-    @ViewBuilder
-    private var checkmark: some View {
-        if isSelected {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 16))
-                .foregroundStyle(Color.accentColor)
-        }
-    }
-
-    private var rowBackground: Color {
-        isSelected ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.03)
-    }
-
-    private var rowBorder: some View {
-        RoundedRectangle(cornerRadius: 8)
-            .stroke(
-                isSelected ? Color.accentColor.opacity(0.3) : Color.clear,
-                lineWidth: 1
-            )
     }
 }

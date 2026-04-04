@@ -59,10 +59,20 @@ struct SQLEditorView: NSViewRepresentable {
         textView.insertionPointColor = NSColor(SbqlTheme.Colors.accent)
         scrollView.backgroundColor = newBg
 
-        // Force re-highlight when theme changes
-        if themeChanged, let storage = textView.textStorage {
-            let range = NSRange(location: 0, length: storage.length)
-            storage.edited(.editedAttributes, range: range, changeInLength: 0)
+        // Recreate syntax highlighter when theme changes
+        if themeChanged {
+            textView.typingAttributes = [
+                .foregroundColor: NSColor(SbqlTheme.Colors.textPrimary),
+                .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular),
+            ]
+            if let tsHighlighter = try? TreeSitterHighlighter(textView: textView) {
+                context.coordinator.treeSitterHighlighter = tsHighlighter
+            } else if let storage = textView.textStorage {
+                // Regex fallback: re-delegate and force re-highlight
+                storage.delegate = context.coordinator.regexHighlighter
+                let range = NSRange(location: 0, length: storage.length)
+                storage.edited(.editedAttributes, range: range, changeInLength: 0)
+            }
         }
 
         if textView.string != appVM.editor.sqlText {
