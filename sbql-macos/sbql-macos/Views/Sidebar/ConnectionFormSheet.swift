@@ -37,16 +37,17 @@ struct ConnectionFormSheet: View {
 
                         Picker("", selection: $connection.backend) {
                             Text("PostgreSQL").tag(Connection.Backend.postgres)
+                            Text("MySQL").tag(Connection.Backend.mysql)
                             Text("SQLite").tag(Connection.Backend.sqlite)
                         }
                         .pickerStyle(.segmented)
                     }
 
-                    if connection.backend == .postgres {
+                    if connection.backend == .postgres || connection.backend == .mysql {
                         formField("Host", text: $connection.host, prompt: "localhost")
                         formField("Port", value: $connection.port)
-                        formField("User", text: $connection.user, prompt: "postgres")
-                        formField("Database", text: $connection.database, prompt: "postgres")
+                        formField("User", text: $connection.user, prompt: connection.backend == .mysql ? "root" : "postgres")
+                        formField("Database", text: $connection.database, prompt: connection.backend == .mysql ? "mydb" : "postgres")
                         formField("Password", text: $password, prompt: "Enter password", isSecure: true)
 
                         // SSL mode
@@ -62,7 +63,7 @@ struct ConnectionFormSheet: View {
                                 }
                             }
                         }
-                    } else {
+                    } else if connection.backend == .sqlite {
                         formField("File Path", text: Binding(
                             get: { connection.filePath ?? "" },
                             set: { connection.filePath = $0.isEmpty ? nil : $0 }

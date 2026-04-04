@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use sqlx::mysql::MySqlPoolOptions;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::SqlitePoolOptions;
 use tokio::sync::RwLock;
@@ -22,6 +23,7 @@ impl ConnectionManager {
     }
 
     /// Open (or reuse) a connection pool with an explicit password.
+    #[tracing::instrument(skip_all, fields(name = config.name, backend = ?config.backend))]
     pub async fn connect_with_password(
         &self,
         config: &ConnectionConfig,
@@ -62,6 +64,14 @@ impl ConnectionManager {
                     .await?;
                 DbPool::Sqlite(sq)
             }
+            DbBackend::Mysql => {
+                let my = MySqlPoolOptions::new()
+                    .max_connections(5)
+                    .acquire_timeout(std::time::Duration::from_secs(10))
+                    .connect(&url)
+                    .await?;
+                DbPool::Mysql(my)
+            }
             DbBackend::Redis => {
                 let client = redis::Client::open(url.as_str())?;
                 let cm = redis::aio::ConnectionManager::new(client).await?;
@@ -86,6 +96,9 @@ impl ConnectionManager {
             }
             DbPool::Sqlite(sq) => {
                 sqlx::query("SELECT 1").execute(sq).await?;
+            }
+            DbPool::Mysql(my) => {
+                sqlx::query("SELECT 1").execute(my).await?;
             }
             DbPool::Redis(cm) => {
                 let mut conn = cm.as_ref().clone();

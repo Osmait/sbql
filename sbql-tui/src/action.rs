@@ -849,6 +849,47 @@ fn apply_form_submit(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCo
             };
             (config, password)
         }
+        sbql_core::DbBackend::Mysql => {
+            if form.host.trim().is_empty() {
+                state.conn.form.error = Some("Host is required".into());
+                return;
+            }
+            let port: u16 = match form.port.trim().parse() {
+                Ok(p) => p,
+                Err(_) => {
+                    state.conn.form.error = Some("Port must be a number (1-65535)".into());
+                    return;
+                }
+            };
+            if form.user.trim().is_empty() {
+                state.conn.form.error = Some("User is required".into());
+                return;
+            }
+            if form.database.trim().is_empty() {
+                state.conn.form.error = Some("Database is required".into());
+                return;
+            }
+
+            let mut config = sbql_core::ConnectionConfig::new_mysql(
+                form.name.trim(),
+                form.host.trim(),
+                port,
+                form.user.trim(),
+                form.database.trim(),
+            );
+            config.ssl_mode = form.ssl_mode.clone();
+
+            if let Some(id) = form.editing_id {
+                config.id = id;
+            }
+
+            let password = if form.password.is_empty() && form.editing_id.is_some() {
+                None
+            } else {
+                Some(form.password.clone())
+            };
+            (config, password)
+        }
         sbql_core::DbBackend::Sqlite => {
             if form.file_path.trim().is_empty() {
                 state.conn.form.error = Some("File path is required".into());

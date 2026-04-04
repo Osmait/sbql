@@ -78,10 +78,13 @@ struct ConnectionRow: View {
     }
 
     private var backendBadge: some View {
-        let color = connection.backend == .postgres
-            ? Color(hex: 0x336791) // PostgreSQL blue
-            : Color(hex: 0x44A8D6) // SQLite cyan
-        return Text(connection.backend == .postgres ? "PG" : "SQ")
+        let (label, color): (String, Color) = switch connection.backend {
+        case .postgres: ("PG", Color(hex: 0x336791))
+        case .mysql: ("MY", Color(hex: 0x00758F))
+        case .sqlite: ("SQ", Color(hex: 0x44A8D6))
+        case .redis: ("RD", Color(hex: 0xD82C20))
+        }
+        return Text(label)
             .font(.system(size: 9, weight: .bold, design: .monospaced))
             .foregroundStyle(color)
             .padding(.horizontal, 4)

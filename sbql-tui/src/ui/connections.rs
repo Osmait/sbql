@@ -197,6 +197,7 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
         if i == 0 {
             let backend_display = match form.backend {
                 sbql_core::DbBackend::Postgres => "PostgreSQL",
+                sbql_core::DbBackend::Mysql => "MySQL",
                 sbql_core::DbBackend::Sqlite => "SQLite",
                 sbql_core::DbBackend::Redis => "Redis",
             };
@@ -212,7 +213,10 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
         }
 
         // SSL Mode field (only PG, last field)
-        if form.backend == sbql_core::DbBackend::Postgres && i == 7 {
+        if (form.backend == sbql_core::DbBackend::Postgres
+            || form.backend == sbql_core::DbBackend::Mysql)
+            && i == 7
+        {
             let ssl_display = form.ssl_mode.as_str().to_owned();
             let hint = if is_active { "  Space: cycle" } else { "" };
             let para = Paragraph::new(format!("{ssl_display}{hint}")).block(
@@ -227,7 +231,7 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
 
         // Text fields
         let value = match form.backend {
-            sbql_core::DbBackend::Postgres => match i {
+            sbql_core::DbBackend::Postgres | sbql_core::DbBackend::Mysql => match i {
                 1 => &form.name,
                 2 => &form.host,
                 3 => &form.port,
@@ -251,7 +255,9 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
             },
         };
 
-        let is_password = (form.backend == sbql_core::DbBackend::Postgres && i == 6)
+        let is_password = ((form.backend == sbql_core::DbBackend::Postgres
+            || form.backend == sbql_core::DbBackend::Mysql)
+            && i == 6)
             || (form.backend == sbql_core::DbBackend::Redis && i == 4);
         let display = if is_password {
             if value.is_empty() && form.editing_id.is_some() {

@@ -205,21 +205,7 @@ struct MainWindow: View {
                     .foregroundStyle(SbqlTheme.Colors.textPrimary)
 
                 // Backend badge
-                Text(conn.backend == .postgres ? "PG" : "SQLite")
-                    .font(SbqlTheme.Typography.captionBold)
-                    .foregroundStyle(conn.backend == .postgres
-                        ? Color(hex: 0x336791)
-                        : Color(hex: 0x44A8D6)
-                    )
-                    .padding(.horizontal, SbqlTheme.Spacing.sm)
-                    .padding(.vertical, 2)
-                    .background(
-                        (conn.backend == .postgres
-                            ? Color(hex: 0x336791)
-                            : Color(hex: 0x44A8D6)
-                        ).opacity(0.15)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
+                backendBadge(for: conn.backend)
 
                 // Database name
                 HStack(spacing: 3) {
@@ -264,6 +250,28 @@ struct MainWindow: View {
                 .font(SbqlTheme.Typography.bodyMedium)
                 .foregroundStyle(SbqlTheme.Colors.textTertiary)
         }
+    }
+
+    private func backendBadge(for backend: Connection.Backend) -> some View {
+        let label: String = switch backend {
+        case .postgres: "PG"
+        case .mysql: "MySQL"
+        case .sqlite: "SQLite"
+        case .redis: "Redis"
+        }
+        let color: Color = switch backend {
+        case .postgres: Color(hex: 0x336791)
+        case .mysql: Color(hex: 0x00758F)
+        case .sqlite: Color(hex: 0x44A8D6)
+        case .redis: Color(hex: 0xD82C20)
+        }
+        return Text(label)
+            .font(SbqlTheme.Typography.captionBold)
+            .foregroundStyle(color)
+            .padding(.horizontal, SbqlTheme.Spacing.sm)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.15))
+            .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
     }
 
     private func formatDuration(_ d: Duration) -> String {

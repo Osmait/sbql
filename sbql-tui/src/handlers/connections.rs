@@ -66,7 +66,9 @@ pub fn handle_form(state: &AppState, key: KeyEvent) -> Action {
         KeyCode::Enter => Action::FormSubmit,
         KeyCode::Char(' ') if form.field_index == 0 => Action::FormCycleBackend,
         KeyCode::Char(' ')
-            if form.backend == sbql_core::DbBackend::Postgres && form.field_index == 7 =>
+            if (form.backend == sbql_core::DbBackend::Postgres
+                || form.backend == sbql_core::DbBackend::Mysql)
+                && form.field_index == 7 =>
         {
             Action::FormCycleSsl
         }

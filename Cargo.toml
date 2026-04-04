@@ -20,7 +20,7 @@ sbql-core = { path = "sbql-core", version = "0.1.2" }
 tokio = { version = "1", features = ["full"] }
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "sqlite", "uuid", "chrono", "json", "bigdecimal"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "sqlite", "mysql", "uuid", "chrono", "json", "bigdecimal"] }
 redis = { version = "0.27", features = ["tokio-comp", "aio", "connection-manager"] }
 
 # SQL parsing
@@ -60,3 +60,7 @@ indexmap = "2"
 tree-sitter = "0.25"
 tree-sitter-highlight = "0.25"
 tree-sitter-sequel = "0.3"
+
+# Benchmarking & profiling
+criterion = { version = "0.5", features = ["async_tokio"] }
+dhat = "0.3"

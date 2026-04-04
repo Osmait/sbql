@@ -1,6 +1,6 @@
 //! Schema introspection via `information_schema` (PG) or `sqlite_master` + PRAGMAs (SQLite).
 
-use sqlx::{PgPool, Row, SqlitePool};
+use sqlx::{MySqlPool, PgPool, Row, SqlitePool};
 
 use crate::error::{Result, SbqlError};
 use crate::pool::DbPool;
@@ -77,28 +77,34 @@ pub struct DiagramData {
 // ---------------------------------------------------------------------------
 
 /// List all user-visible tables.
+#[tracing::instrument(skip_all)]
 pub async fn list_tables(pool: &DbPool) -> Result<Vec<TableEntry>> {
     match pool {
         DbPool::Postgres(pg) => list_tables_pg(pg).await,
         DbPool::Sqlite(sq) => list_tables_sqlite(sq).await,
+        DbPool::Mysql(my) => list_tables_mysql(my).await,
         DbPool::Redis(_) => Ok(vec![]),
     }
 }
 
 /// Return the primary key column name(s) for a given table.
+#[tracing::instrument(skip_all, fields(schema, table))]
 pub async fn get_primary_keys(pool: &DbPool, schema: &str, table: &str) -> Result<Vec<String>> {
     match pool {
         DbPool::Postgres(pg) => get_primary_keys_pg(pg, schema, table).await,
         DbPool::Sqlite(sq) => get_primary_keys_sqlite(sq, table).await,
+        DbPool::Mysql(my) => get_primary_keys_mysql(my, table).await,
         DbPool::Redis(_) => Ok(vec![]),
     }
 }
 
 /// Load all table schemas + FK relationships for the diagram view.
+#[tracing::instrument(skip_all)]
 pub async fn load_diagram(pool: &DbPool) -> Result<DiagramData> {
     match pool {
         DbPool::Postgres(pg) => load_diagram_pg(pg).await,
         DbPool::Sqlite(sq) => load_diagram_sqlite(sq).await,
+        DbPool::Mysql(my) => load_diagram_mysql(my).await,
         DbPool::Redis(_) => Ok(DiagramData::default()),
     }
 }
@@ -120,6 +126,9 @@ pub async fn execute_cell_update(
         DbPool::Sqlite(sq) => {
             execute_cell_update_sqlite(sq, table, pk_col, pk_val, target_col, new_val).await
         }
+        DbPool::Mysql(my) => {
+            execute_cell_update_mysql(my, schema, table, pk_col, pk_val, target_col, new_val).await
+        }
         DbPool::Redis(_) => Err(SbqlError::Schema(
             "Cell update not supported for Redis".into(),
         )),
@@ -137,6 +146,7 @@ pub async fn execute_row_delete(
     match pool {
         DbPool::Postgres(pg) => execute_row_delete_pg(pg, schema, table, pk_col, pk_val).await,
         DbPool::Sqlite(sq) => execute_row_delete_sqlite(sq, table, pk_col, pk_val).await,
+        DbPool::Mysql(my) => execute_row_delete_mysql(my, schema, table, pk_col, pk_val).await,
         DbPool::Redis(_) => Err(SbqlError::Schema(
             "Row delete not supported for Redis".into(),
         )),
@@ -561,6 +571,204 @@ async fn execute_row_delete_sqlite(
     let sql = format!(r#"DELETE FROM "{table}" WHERE "{pk_col}" = $1"#);
     sqlx::query(&sql).bind(pk_val).execute(pool).await?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// MySQL implementations
+// ---------------------------------------------------------------------------
+
+async fn list_tables_mysql(pool: &MySqlPool) -> Result<Vec<TableEntry>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT TABLE_SCHEMA, TABLE_NAME
+        FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')
+        ORDER BY TABLE_SCHEMA, TABLE_NAME
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| TableEntry {
+            schema: r
+                .try_get::<String, _>("TABLE_SCHEMA")
+                .unwrap_or_default(),
+            name: r.try_get::<String, _>("TABLE_NAME").unwrap_or_default(),
+        })
+        .collect())
+}
+
+async fn get_primary_keys_mysql(pool: &MySqlPool, table: &str) -> Result<Vec<String>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT COLUMN_NAME
+        FROM information_schema.KEY_COLUMN_USAGE
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = ?
+          AND CONSTRAINT_NAME = 'PRIMARY'
+        ORDER BY ORDINAL_POSITION
+        "#,
+    )
+    .bind(table)
+    .fetch_all(pool)
+    .await?;
+
+    let pks: Vec<String> = rows
+        .into_iter()
+        .filter_map(|r| r.try_get::<String, _>("COLUMN_NAME").ok())
+        .collect();
+
+    if pks.is_empty() {
+        return Err(SbqlError::Schema(format!(
+            "No primary key found for {table}"
+        )));
+    }
+
+    Ok(pks)
+}
+
+async fn load_diagram_mysql(pool: &MySqlPool) -> Result<DiagramData> {
+    // --- Columns with PK flag ---
+    let col_rows = sqlx::query(
+        r#"
+        SELECT
+            TABLE_SCHEMA,
+            TABLE_NAME,
+            COLUMN_NAME,
+            COLUMN_TYPE AS data_type,
+            IS_NULLABLE,
+            COLUMN_KEY
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND EXISTS (
+            SELECT 1 FROM information_schema.TABLES t
+            WHERE t.TABLE_SCHEMA = COLUMNS.TABLE_SCHEMA
+              AND t.TABLE_NAME   = COLUMNS.TABLE_NAME
+              AND t.TABLE_TYPE   = 'BASE TABLE'
+          )
+        ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut table_map: indexmap::IndexMap<(String, String), Vec<ColumnInfo>> =
+        indexmap::IndexMap::new();
+    for row in col_rows {
+        let ts: String = row.try_get("TABLE_SCHEMA").unwrap_or_default();
+        let tn: String = row.try_get("TABLE_NAME").unwrap_or_default();
+        let column_key: String = row.try_get("COLUMN_KEY").unwrap_or_default();
+        let col = ColumnInfo {
+            name: row.try_get("COLUMN_NAME").unwrap_or_default(),
+            data_type: row.try_get("data_type").unwrap_or_default(),
+            is_pk: column_key == "PRI",
+            is_nullable: row
+                .try_get::<String, _>("IS_NULLABLE")
+                .map(|s| s == "YES")
+                .unwrap_or(true),
+        };
+        table_map.entry((ts, tn)).or_default().push(col);
+    }
+
+    let tables: Vec<TableSchema> = table_map
+        .into_iter()
+        .map(|((schema, name), columns)| TableSchema {
+            schema,
+            name,
+            columns,
+        })
+        .collect();
+
+    // --- Foreign keys ---
+    let fk_rows = sqlx::query(
+        r#"
+        SELECT
+            tc.CONSTRAINT_NAME,
+            tc.TABLE_SCHEMA  AS from_schema,
+            tc.TABLE_NAME    AS from_table,
+            kcu.COLUMN_NAME  AS from_col,
+            kcu.REFERENCED_TABLE_SCHEMA AS to_schema,
+            kcu.REFERENCED_TABLE_NAME   AS to_table,
+            kcu.REFERENCED_COLUMN_NAME  AS to_col
+        FROM information_schema.TABLE_CONSTRAINTS tc
+        JOIN information_schema.KEY_COLUMN_USAGE kcu
+          ON kcu.CONSTRAINT_NAME  = tc.CONSTRAINT_NAME
+         AND kcu.TABLE_SCHEMA     = tc.TABLE_SCHEMA
+         AND kcu.TABLE_NAME       = tc.TABLE_NAME
+        WHERE tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
+          AND tc.TABLE_SCHEMA = DATABASE()
+        ORDER BY tc.TABLE_SCHEMA, tc.TABLE_NAME, tc.CONSTRAINT_NAME
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let foreign_keys: Vec<ForeignKey> = fk_rows
+        .into_iter()
+        .map(|row| ForeignKey {
+            constraint_name: row.try_get("CONSTRAINT_NAME").unwrap_or_default(),
+            from_schema: row.try_get("from_schema").unwrap_or_default(),
+            from_table: row.try_get("from_table").unwrap_or_default(),
+            from_col: row.try_get("from_col").unwrap_or_default(),
+            to_schema: row.try_get("to_schema").unwrap_or_default(),
+            to_table: row.try_get("to_table").unwrap_or_default(),
+            to_col: row.try_get("to_col").unwrap_or_default(),
+        })
+        .collect();
+
+    Ok(DiagramData {
+        tables,
+        foreign_keys,
+    })
+}
+
+async fn execute_cell_update_mysql(
+    pool: &MySqlPool,
+    schema: &str,
+    table: &str,
+    pk_col: &str,
+    pk_val: &str,
+    target_col: &str,
+    new_val: &str,
+) -> Result<()> {
+    let q_schema = quote_ident_mysql(schema);
+    let q_table = quote_ident_mysql(table);
+    let q_target = quote_ident_mysql(target_col);
+    let q_pk = quote_ident_mysql(pk_col);
+    let sql = format!(
+        "UPDATE {q_schema}.{q_table} SET {q_target} = ? WHERE CAST({q_pk} AS CHAR) = ?"
+    );
+    sqlx::query(&sql)
+        .bind(new_val)
+        .bind(pk_val)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+async fn execute_row_delete_mysql(
+    pool: &MySqlPool,
+    schema: &str,
+    table: &str,
+    pk_col: &str,
+    pk_val: &str,
+) -> Result<()> {
+    let q_schema = quote_ident_mysql(schema);
+    let q_table = quote_ident_mysql(table);
+    let q_pk = quote_ident_mysql(pk_col);
+    let sql = format!(
+        "DELETE FROM {q_schema}.{q_table} WHERE CAST({q_pk} AS CHAR) = ?"
+    );
+    sqlx::query(&sql).bind(pk_val).execute(pool).await?;
+    Ok(())
+}
+
+/// Quote an identifier for MySQL using backticks.
+fn quote_ident_mysql(ident: &str) -> String {
+    format!("`{}`", ident.replace('`', "``"))
 }
 
 #[cfg(test)]

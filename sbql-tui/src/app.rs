@@ -118,7 +118,7 @@ impl ConnectionForm {
     /// Returns the label for each field index, depending on backend.
     pub fn field_label(&self, idx: usize) -> &'static str {
         match self.backend {
-            DbBackend::Postgres => match idx {
+            DbBackend::Postgres | DbBackend::Mysql => match idx {
                 0 => "Backend",
                 1 => "Name",
                 2 => "Host",
@@ -150,7 +150,7 @@ impl ConnectionForm {
     /// Number of fields depends on the selected backend.
     pub fn field_count(&self) -> usize {
         match self.backend {
-            DbBackend::Postgres => 8, // backend, name, host, port, user, database, password, ssl_mode
+            DbBackend::Postgres | DbBackend::Mysql => 8, // backend, name, host, port, user, database, password, ssl_mode
             DbBackend::Sqlite => 3,   // backend, name, file_path
             DbBackend::Redis => 6,    // backend, name, host, port, password, database
         }
@@ -159,7 +159,8 @@ impl ConnectionForm {
     /// Toggle backend between Postgres, SQLite, and Redis, resetting field_index.
     pub fn cycle_backend(&mut self) {
         self.backend = match self.backend {
-            DbBackend::Postgres => DbBackend::Sqlite,
+            DbBackend::Postgres => DbBackend::Mysql,
+            DbBackend::Mysql => DbBackend::Sqlite,
             DbBackend::Sqlite => DbBackend::Redis,
             DbBackend::Redis => DbBackend::Postgres,
         };
@@ -179,7 +180,7 @@ impl ConnectionForm {
 
     pub fn active_value_mut(&mut self) -> Option<&mut String> {
         match self.backend {
-            DbBackend::Postgres => match self.field_index {
+            DbBackend::Postgres | DbBackend::Mysql => match self.field_index {
                 0 => None, // Backend is cycled
                 1 => Some(&mut self.name),
                 2 => Some(&mut self.host),

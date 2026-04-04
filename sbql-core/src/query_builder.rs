@@ -12,7 +12,7 @@
 //!   5. On parse failure fall back to a safe subquery wrapper.
 
 use sqlparser::ast::{Expr, Ident, OrderByExpr, Query, Statement};
-use sqlparser::dialect::{PostgreSqlDialect, SQLiteDialect};
+use sqlparser::dialect::{MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
 
 use crate::error::{Result, SbqlError};
@@ -31,6 +31,7 @@ pub enum SortDirection {
 
 /// Inject (or replace) an `ORDER BY <column> ASC/DESC` clause into `sql`.
 /// If the SQL cannot be parsed, wraps it in a subquery.
+#[tracing::instrument(skip_all, fields(column, direction = ?direction, backend = ?backend))]
 pub fn apply_order(
     sql: &str,
     column: &str,
@@ -72,6 +73,7 @@ pub fn apply_order(
 }
 
 /// Remove the `ORDER BY` clause from `sql`.
+#[tracing::instrument(skip_all, fields(backend = ?backend))]
 pub fn clear_order(sql: &str, backend: DbBackend) -> Result<String> {
     if backend == DbBackend::Redis {
         return Ok(sql.to_owned());
@@ -90,6 +92,7 @@ pub fn clear_order(sql: &str, backend: DbBackend) -> Result<String> {
 /// `filter_query` format:
 /// - `"col:value"` → `WHERE col ILIKE '%value%'` (PG) / `LIKE ... COLLATE NOCASE` (SQLite)
 /// - `"plain text"` → adds an `OR` ILIKE/LIKE for every provided column.
+#[tracing::instrument(skip_all, fields(backend = ?backend))]
 pub fn apply_filter(
     sql: &str,
     filter_query: &str,
@@ -108,10 +111,12 @@ pub fn apply_filter(
 
     let like_op = match backend {
         DbBackend::Postgres => "ILIKE",
+        DbBackend::Mysql => "LIKE",
         DbBackend::Sqlite | DbBackend::Redis => "LIKE",
     };
     let collate_suffix = match backend {
         DbBackend::Postgres => "",
+        DbBackend::Mysql => "",
         DbBackend::Sqlite | DbBackend::Redis => " COLLATE NOCASE",
     };
 
@@ -123,14 +128,14 @@ pub fn apply_filter(
     } else {
         match columns {
             Some(cols) if !cols.is_empty() => {
-                let ors = cols
-                    .iter()
-                    .map(|c| {
-                        let c = quote_ident(c);
-                        format!("CAST(_sbql_filter.{c} AS TEXT) {like_op} '%{escaped}%'{collate_suffix}")
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" OR ");
+                let mut ors = String::new();
+                for (i, c) in cols.iter().enumerate() {
+                    if i > 0 {
+                        ors.push_str(" OR ");
+                    }
+                    let c = quote_ident(c);
+                    ors.push_str(&format!("CAST(_sbql_filter.{c} AS TEXT) {like_op} '%{escaped}%'{collate_suffix}"));
+                }
                 Ok(format!(
                     "SELECT * FROM ({trimmed}) AS _sbql_filter WHERE {ors}"
                 ))
@@ -149,6 +154,7 @@ pub fn table_select_sql(schema: &str, table: &str, backend: DbBackend) -> String
     match backend {
         DbBackend::Postgres => format!("SELECT * FROM \"{schema}\".\"{table}\""),
         DbBackend::Sqlite => format!("SELECT * FROM \"{table}\""),
+        DbBackend::Mysql => format!("SELECT * FROM `{schema}`.`{table}`"),
         DbBackend::Redis => String::new(),
     }
 }
@@ -167,6 +173,10 @@ fn parse_single_select(sql: &str, backend: DbBackend) -> Result<Box<Query>> {
         }
         DbBackend::Sqlite => {
             let dialect = SQLiteDialect {};
+            Parser::parse_sql(&dialect, trimmed).map_err(|e| SbqlError::SqlParse(e.to_string()))?
+        }
+        DbBackend::Mysql => {
+            let dialect = MySqlDialect {};
             Parser::parse_sql(&dialect, trimmed).map_err(|e| SbqlError::SqlParse(e.to_string()))?
         }
         DbBackend::Redis => {

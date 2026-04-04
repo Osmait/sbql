@@ -17,6 +17,7 @@ uniffi::setup_scaffolding!();
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum FfiDbBackend {
     Postgres,
+    Mysql,
     Sqlite,
     Redis,
 }

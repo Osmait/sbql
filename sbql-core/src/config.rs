@@ -88,6 +88,27 @@ impl ConnectionConfig {
         }
     }
 
+    /// Create a new MySQL connection config.
+    pub fn new_mysql(
+        name: impl Into<String>,
+        host: impl Into<String>,
+        port: u16,
+        user: impl Into<String>,
+        database: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            backend: DbBackend::Mysql,
+            host: host.into(),
+            port,
+            user: user.into(),
+            database: database.into(),
+            ssl_mode: SslMode::default(),
+            file_path: None,
+        }
+    }
+
     /// Create a new Redis connection config.
     pub fn new_redis(name: impl Into<String>, host: impl Into<String>, port: u16) -> Self {
         Self {
@@ -119,6 +140,14 @@ impl ConnectionConfig {
                 let path = self.file_path.as_deref().unwrap_or(":memory:");
                 format!("sqlite:{path}")
             }
+            DbBackend::Mysql => format!(
+                "mysql://{}:{}@{}:{}/{}",
+                self.user,
+                urlencoding_simple(password),
+                self.host,
+                self.port,
+                self.database,
+            ),
             DbBackend::Redis => {
                 let scheme = if self.ssl_mode == SslMode::Require {
                     "rediss"

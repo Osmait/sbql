@@ -1,7 +1,7 @@
 //! Multi-backend database pool abstraction.
 
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, SqlitePool};
+use sqlx::{MySqlPool, PgPool, SqlitePool};
 
 /// Which database backend a connection targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -10,6 +10,7 @@ pub enum DbBackend {
     #[default]
     Postgres,
     Sqlite,
+    Mysql,
     Redis,
 }
 
@@ -18,6 +19,7 @@ pub enum DbBackend {
 pub enum DbPool {
     Postgres(PgPool),
     Sqlite(SqlitePool),
+    Mysql(MySqlPool),
     Redis(Box<redis::aio::ConnectionManager>),
 }
 
@@ -26,6 +28,7 @@ impl std::fmt::Debug for DbPool {
         match self {
             DbPool::Postgres(_) => f.debug_tuple("Postgres").field(&"PgPool(..)").finish(),
             DbPool::Sqlite(_) => f.debug_tuple("Sqlite").field(&"SqlitePool(..)").finish(),
+            DbPool::Mysql(_) => f.debug_tuple("Mysql").field(&"MySqlPool(..)").finish(),
             DbPool::Redis(_) => f
                 .debug_tuple("Redis")
                 .field(&"ConnectionManager(..)")
@@ -40,6 +43,7 @@ impl DbPool {
         match self {
             DbPool::Postgres(_) => DbBackend::Postgres,
             DbPool::Sqlite(_) => DbBackend::Sqlite,
+            DbPool::Mysql(_) => DbBackend::Mysql,
             DbPool::Redis(_) => DbBackend::Redis,
         }
     }
@@ -49,6 +53,7 @@ impl DbPool {
         match self {
             DbPool::Postgres(p) => p.close().await,
             DbPool::Sqlite(p) => p.close().await,
+            DbPool::Mysql(p) => p.close().await,
             DbPool::Redis(_) => { /* ConnectionManager manages its own lifecycle */ }
         }
     }

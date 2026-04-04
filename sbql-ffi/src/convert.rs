@@ -51,6 +51,7 @@ impl From<sbql_core::DbBackend> for FfiDbBackend {
     fn from(b: sbql_core::DbBackend) -> Self {
         match b {
             sbql_core::DbBackend::Postgres => FfiDbBackend::Postgres,
+            sbql_core::DbBackend::Mysql => FfiDbBackend::Mysql,
             sbql_core::DbBackend::Sqlite => FfiDbBackend::Sqlite,
             sbql_core::DbBackend::Redis => FfiDbBackend::Redis,
         }
@@ -61,6 +62,7 @@ impl From<FfiDbBackend> for sbql_core::DbBackend {
     fn from(b: FfiDbBackend) -> Self {
         match b {
             FfiDbBackend::Postgres => sbql_core::DbBackend::Postgres,
+            FfiDbBackend::Mysql => sbql_core::DbBackend::Mysql,
             FfiDbBackend::Sqlite => sbql_core::DbBackend::Sqlite,
             FfiDbBackend::Redis => sbql_core::DbBackend::Redis,
         }

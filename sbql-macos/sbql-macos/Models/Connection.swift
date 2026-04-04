@@ -18,6 +18,7 @@ struct Connection: Identifiable, Hashable {
         case postgres
         case sqlite
         case redis
+        case mysql
     }
 
     enum SSLMode: String, CaseIterable, Hashable {
@@ -40,7 +41,7 @@ struct Connection: Identifiable, Hashable {
 
     var displaySubtitle: String {
         switch backend {
-        case .postgres:
+        case .postgres, .mysql:
             "\(user)@\(host):\(port)/\(database)"
         case .sqlite:
             filePath ?? "In-memory"
@@ -58,6 +59,19 @@ struct Connection: Identifiable, Hashable {
             port: 5432,
             user: "postgres",
             database: "postgres",
+            sslMode: .prefer
+        )
+    }
+
+    static func newMysql() -> Connection {
+        Connection(
+            id: UUID().uuidString.lowercased(),
+            name: "",
+            backend: .mysql,
+            host: "localhost",
+            port: 3306,
+            user: "root",
+            database: "",
             sslMode: .prefer
         )
     }
@@ -114,6 +128,7 @@ extension Connection.Backend {
         case .postgres: self = .postgres
         case .sqlite: self = .sqlite
         case .redis: self = .redis
+        case .mysql: self = .mysql
         }
     }
 
@@ -122,6 +137,7 @@ extension Connection.Backend {
         case .postgres: .postgres
         case .sqlite: .sqlite
         case .redis: .redis
+        case .mysql: .mysql
         }
     }
 }
