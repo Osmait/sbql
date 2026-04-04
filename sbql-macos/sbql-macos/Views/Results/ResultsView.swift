@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ResultsView: View {
     @Environment(AppViewModel.self) private var appVM
+    @Environment(ThemeManager.self) private var theme
 
     var body: some View {
         let result = appVM.results.currentResult
@@ -9,8 +10,8 @@ struct ResultsView: View {
         if result.isEmpty {
             emptyState
         } else {
-            ResultsTableView()
-                .id(result.columns) // force rebuild when columns change
+            ResultsTableView(activeTheme: theme.activeThemeName)
+                .id("\(result.columns)\(theme.activeThemeName)")
         }
     }
 
@@ -33,6 +34,6 @@ struct ResultsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(SbqlTheme.Colors.background)
+        .background(SbqlTheme.Colors.surface)
     }
 }

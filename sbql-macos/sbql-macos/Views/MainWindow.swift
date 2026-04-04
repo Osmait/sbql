@@ -338,7 +338,8 @@ struct MainWindow: View {
             // Editor island
             if appVM.editor.isVisible {
                 VStack(spacing: 0) {
-                    SQLEditorView()
+                    SQLEditorView(activeTheme: theme.activeThemeName)
+                        .id(theme.activeThemeName)
                     EditorToolbar()
                 }
                 .frame(minHeight: SbqlTheme.Size.editorMinHeight, maxHeight: 300)

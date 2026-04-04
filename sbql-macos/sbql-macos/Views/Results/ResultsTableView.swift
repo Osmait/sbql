@@ -3,6 +3,8 @@ import SwiftUI
 
 /// High-performance NSTableView wrapper with virtualized rows and column sorting.
 struct ResultsTableView: NSViewRepresentable {
+    /// Passed in so SwiftUI diffs it and calls updateNSView on theme change.
+    var activeTheme: ThemeName
     @Environment(AppViewModel.self) private var appVM
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -10,11 +12,11 @@ struct ResultsTableView: NSViewRepresentable {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.borderType = .noBorder
-        scrollView.backgroundColor = NSColor(SbqlTheme.Colors.background)
+        scrollView.drawsBackground = false
 
         let tableView = NSTableView()
         tableView.style = .plain
-        tableView.backgroundColor = NSColor(SbqlTheme.Colors.background)
+        tableView.backgroundColor = NSColor(SbqlTheme.Colors.surface)
         tableView.rowHeight = SbqlTheme.Size.rowHeight
         tableView.intercellSpacing = NSSize(width: 16, height: 1)
         tableView.gridColor = NSColor(SbqlTheme.Colors.borderSubtle)
@@ -46,14 +48,20 @@ struct ResultsTableView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.appVM = appVM
+        let _ = activeTheme // SwiftUI triggers updateNSView when this changes
 
-        // Update theme colors
-        scrollView.backgroundColor = NSColor(SbqlTheme.Colors.background)
-        context.coordinator.tableView?.backgroundColor = NSColor(SbqlTheme.Colors.background)
-        context.coordinator.tableView?.gridColor = NSColor(SbqlTheme.Colors.borderSubtle)
+        // Update theme colors on all layers
+        let bg = NSColor(SbqlTheme.Colors.surface)
+        scrollView.drawsBackground = false // let SwiftUI island background show through
+        scrollView.contentView.drawsBackground = false
 
-        context.coordinator.rebuildColumns()
-        context.coordinator.tableView?.reloadData()
+        if let tableView = context.coordinator.tableView {
+            tableView.backgroundColor = bg
+            tableView.gridColor = NSColor(SbqlTheme.Colors.borderSubtle)
+            context.coordinator.rebuildColumns()
+            tableView.reloadData()
+            tableView.headerView?.needsDisplay = true
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -221,9 +229,10 @@ struct ResultsTableView: NSViewRepresentable {
                                       columnIndexes: IndexSet(integer: col))
             }
 
+            let isDark = ThemeManager.shared.activeThemeName.isDark
             let hostingController = NSHostingController(rootView:
                 editorView
-                    .environment(\.colorScheme, .dark))
+                    .environment(\.colorScheme, isDark ? .dark : .light))
             popover.contentViewController = hostingController
             popover.show(relativeTo: cellRect, of: sender, preferredEdge: .maxY)
         }
@@ -285,12 +294,12 @@ struct ResultsTableView: NSViewRepresentable {
 // MARK: - Custom Row View
 
 private class SbqlTableRowView: NSTableRowView {
-    private static var evenColor: NSColor { NSColor(SbqlTheme.Colors.background) }
+    private static var evenColor: NSColor { NSColor(SbqlTheme.Colors.surface) }
     private static var oddColor: NSColor {
-        // Slightly lighter than background for alternating rows
-        let bg = NSColor(SbqlTheme.Colors.background)
-        let surface = NSColor(SbqlTheme.Colors.surface)
-        return bg.blended(withFraction: 0.35, of: surface) ?? surface
+        // Slightly different from surface for alternating rows
+        let base = NSColor(SbqlTheme.Colors.surface)
+        let elevated = NSColor(SbqlTheme.Colors.surfaceElevated)
+        return base.blended(withFraction: 0.3, of: elevated) ?? elevated
     }
 
     private let rowIndex: Int

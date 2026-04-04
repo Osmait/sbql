@@ -3,6 +3,7 @@ import SwiftUI
 
 /// NSTextView wrapper for SQL editing with monospace font and Cmd+Enter support.
 struct SQLEditorView: NSViewRepresentable {
+    var activeTheme: ThemeName
     @Environment(AppViewModel.self) private var appVM
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -51,6 +52,7 @@ struct SQLEditorView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
         context.coordinator.appVM = appVM
+        let _ = activeTheme
 
         // Update theme colors
         let newBg = NSColor(SbqlTheme.Colors.surface)

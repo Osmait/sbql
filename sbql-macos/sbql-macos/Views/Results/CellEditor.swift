@@ -25,6 +25,7 @@ struct CellEditor: View {
 
             TextEditor(text: $editedValue)
                 .font(SbqlTheme.Typography.code)
+                .foregroundStyle(SbqlTheme.Colors.textPrimary)
                 .frame(width: 280, height: 80)
                 .scrollContentBackground(.hidden)
                 .background(SbqlTheme.Colors.surfaceElevated)
@@ -48,5 +49,6 @@ struct CellEditor: View {
         }
         .padding(SbqlTheme.Spacing.md)
         .frame(width: 320)
+        .background(SbqlTheme.Colors.surface)
     }
 }
