@@ -54,6 +54,7 @@ impl From<sbql_core::DbBackend> for FfiDbBackend {
             sbql_core::DbBackend::Mysql => FfiDbBackend::Mysql,
             sbql_core::DbBackend::Sqlite => FfiDbBackend::Sqlite,
             sbql_core::DbBackend::Redis => FfiDbBackend::Redis,
+            sbql_core::DbBackend::DynamoDb => FfiDbBackend::DynamoDb,
         }
     }
 }
@@ -65,6 +66,7 @@ impl From<FfiDbBackend> for sbql_core::DbBackend {
             FfiDbBackend::Mysql => sbql_core::DbBackend::Mysql,
             FfiDbBackend::Sqlite => sbql_core::DbBackend::Sqlite,
             FfiDbBackend::Redis => sbql_core::DbBackend::Redis,
+            FfiDbBackend::DynamoDb => sbql_core::DbBackend::DynamoDb,
         }
     }
 }

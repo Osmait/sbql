@@ -12,6 +12,7 @@ pub enum DbBackend {
     Sqlite,
     Mysql,
     Redis,
+    DynamoDb,
 }
 
 /// A pool that wraps either PostgreSQL, SQLite, or Redis.
@@ -21,6 +22,7 @@ pub enum DbPool {
     Sqlite(SqlitePool),
     Mysql(MySqlPool),
     Redis(Box<redis::aio::ConnectionManager>),
+    DynamoDb(Box<aws_sdk_dynamodb::Client>),
 }
 
 impl std::fmt::Debug for DbPool {
@@ -32,6 +34,10 @@ impl std::fmt::Debug for DbPool {
             DbPool::Redis(_) => f
                 .debug_tuple("Redis")
                 .field(&"ConnectionManager(..)")
+                .finish(),
+            DbPool::DynamoDb(_) => f
+                .debug_tuple("DynamoDb")
+                .field(&"Client(..)")
                 .finish(),
         }
     }
@@ -45,6 +51,7 @@ impl DbPool {
             DbPool::Sqlite(_) => DbBackend::Sqlite,
             DbPool::Mysql(_) => DbBackend::Mysql,
             DbPool::Redis(_) => DbBackend::Redis,
+            DbPool::DynamoDb(_) => DbBackend::DynamoDb,
         }
     }
 
@@ -55,6 +62,7 @@ impl DbPool {
             DbPool::Sqlite(p) => p.close().await,
             DbPool::Mysql(p) => p.close().await,
             DbPool::Redis(_) => { /* ConnectionManager manages its own lifecycle */ }
+            DbPool::DynamoDb(_) => { /* SDK client manages its own lifecycle */ }
         }
     }
 }

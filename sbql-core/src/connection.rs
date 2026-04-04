@@ -77,6 +77,39 @@ impl ConnectionManager {
                 let cm = redis::aio::ConnectionManager::new(client).await?;
                 DbPool::Redis(Box::new(cm))
             }
+            DbBackend::DynamoDb => {
+                let endpoint = url.clone();
+                let region = config.database.clone();
+                let access_key = config.user.clone();
+                let secret_key = password.to_string();
+
+                let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
+                    .region(aws_config::Region::new(region));
+
+                if !access_key.is_empty() && !secret_key.is_empty() {
+                    loader = loader.credentials_provider(
+                        aws_sdk_dynamodb::config::Credentials::new(
+                            access_key,
+                            secret_key,
+                            None,
+                            None,
+                            "sbql",
+                        ),
+                    );
+                }
+
+                let sdk_config = loader.load().await;
+                let mut dynamo_config =
+                    aws_sdk_dynamodb::config::Builder::from(&sdk_config);
+
+                if !endpoint.is_empty() && endpoint != "http://:0" {
+                    dynamo_config = dynamo_config.endpoint_url(&endpoint);
+                }
+
+                let client =
+                    aws_sdk_dynamodb::Client::from_conf(dynamo_config.build());
+                DbPool::DynamoDb(Box::new(client))
+            }
         };
 
         self.pools.write().await.insert(config.id, pool);
@@ -103,6 +136,14 @@ impl ConnectionManager {
             DbPool::Redis(cm) => {
                 let mut conn = cm.as_ref().clone();
                 let _: String = redis::cmd("PING").query_async(&mut conn).await?;
+            }
+            DbPool::DynamoDb(client) => {
+                client
+                    .list_tables()
+                    .limit(1)
+                    .send()
+                    .await
+                    .map_err(|e| SbqlError::DynamoDb(e.to_string()))?;
             }
         }
         Ok(())

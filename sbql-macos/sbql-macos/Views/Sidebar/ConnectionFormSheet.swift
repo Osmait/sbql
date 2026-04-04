@@ -39,6 +39,7 @@ struct ConnectionFormSheet: View {
                             Text("PostgreSQL").tag(Connection.Backend.postgres)
                             Text("MySQL").tag(Connection.Backend.mysql)
                             Text("SQLite").tag(Connection.Backend.sqlite)
+                            Text("DynamoDB").tag(Connection.Backend.dynamodb)
                         }
                         .pickerStyle(.segmented)
                     }
@@ -63,6 +64,12 @@ struct ConnectionFormSheet: View {
                                 }
                             }
                         }
+                    } else if connection.backend == .dynamodb {
+                        formField("Endpoint", text: $connection.host, prompt: "localhost")
+                        formField("Port", value: $connection.port)
+                        formField("Region", text: $connection.database, prompt: "us-east-1")
+                        formField("Access Key", text: $connection.user, prompt: "AKIAIOSFODNN7EXAMPLE")
+                        formField("Secret Key", text: $password, prompt: "Enter secret key", isSecure: true)
                     } else if connection.backend == .sqlite {
                         formField("File Path", text: Binding(
                             get: { connection.filePath ?? "" },

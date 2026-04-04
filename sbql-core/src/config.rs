@@ -109,6 +109,30 @@ impl ConnectionConfig {
         }
     }
 
+    /// Create a new DynamoDB connection config.
+    ///
+    /// `region` is stored in the `database` field, `host`/`port` form the
+    /// optional endpoint override, `user` holds the AWS access-key id (secret
+    /// key goes into the keyring).
+    pub fn new_dynamodb(
+        name: impl Into<String>,
+        host: impl Into<String>,
+        port: u16,
+        region: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            backend: DbBackend::DynamoDb,
+            host: host.into(),
+            port,
+            user: String::new(),
+            database: region.into(),
+            ssl_mode: SslMode::default(),
+            file_path: None,
+        }
+    }
+
     /// Create a new Redis connection config.
     pub fn new_redis(name: impl Into<String>, host: impl Into<String>, port: u16) -> Self {
         Self {
@@ -167,6 +191,7 @@ impl ConnectionConfig {
                     format!("{scheme}://{}:{}/{}", self.host, self.port, self.database,)
                 }
             }
+            DbBackend::DynamoDb => format!("http://{}:{}", self.host, self.port),
         }
     }
 
@@ -179,6 +204,7 @@ impl ConnectionConfig {
     pub fn save_password(&self, password: &str) -> Result<()> {
         if self.backend == DbBackend::Sqlite
             || (self.backend == DbBackend::Redis && password.is_empty())
+            || (self.backend == DbBackend::DynamoDb && password.is_empty())
         {
             return Ok(());
         }

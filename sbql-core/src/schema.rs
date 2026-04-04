@@ -84,6 +84,7 @@ pub async fn list_tables(pool: &DbPool) -> Result<Vec<TableEntry>> {
         DbPool::Sqlite(sq) => list_tables_sqlite(sq).await,
         DbPool::Mysql(my) => list_tables_mysql(my).await,
         DbPool::Redis(_) => Ok(vec![]),
+        DbPool::DynamoDb(client) => list_tables_dynamodb(client).await,
     }
 }
 
@@ -95,6 +96,7 @@ pub async fn get_primary_keys(pool: &DbPool, schema: &str, table: &str) -> Resul
         DbPool::Sqlite(sq) => get_primary_keys_sqlite(sq, table).await,
         DbPool::Mysql(my) => get_primary_keys_mysql(my, table).await,
         DbPool::Redis(_) => Ok(vec![]),
+        DbPool::DynamoDb(client) => get_primary_keys_dynamodb(client, table).await,
     }
 }
 
@@ -106,6 +108,7 @@ pub async fn load_diagram(pool: &DbPool) -> Result<DiagramData> {
         DbPool::Sqlite(sq) => load_diagram_sqlite(sq).await,
         DbPool::Mysql(my) => load_diagram_mysql(my).await,
         DbPool::Redis(_) => Ok(DiagramData::default()),
+        DbPool::DynamoDb(_) => Ok(DiagramData::default()),
     }
 }
 
@@ -132,6 +135,9 @@ pub async fn execute_cell_update(
         DbPool::Redis(_) => Err(SbqlError::Schema(
             "Cell update not supported for Redis".into(),
         )),
+        DbPool::DynamoDb(_) => Err(SbqlError::Schema(
+            "Cell update not supported for DynamoDB".into(),
+        )),
     }
 }
 
@@ -149,6 +155,9 @@ pub async fn execute_row_delete(
         DbPool::Mysql(my) => execute_row_delete_mysql(my, schema, table, pk_col, pk_val).await,
         DbPool::Redis(_) => Err(SbqlError::Schema(
             "Row delete not supported for Redis".into(),
+        )),
+        DbPool::DynamoDb(_) => Err(SbqlError::Schema(
+            "Row delete not supported for DynamoDB".into(),
         )),
     }
 }
@@ -771,6 +780,54 @@ async fn execute_row_delete_mysql(
 /// Quote an identifier for MySQL using backticks.
 fn quote_ident_mysql(ident: &str) -> String {
     format!("`{}`", ident.replace('`', "``"))
+}
+
+// ---------------------------------------------------------------------------
+// DynamoDB implementations
+// ---------------------------------------------------------------------------
+
+async fn list_tables_dynamodb(
+    client: &aws_sdk_dynamodb::Client,
+) -> Result<Vec<TableEntry>> {
+    let resp = client
+        .list_tables()
+        .send()
+        .await
+        .map_err(|e| SbqlError::DynamoDb(e.to_string()))?;
+    Ok(resp
+        .table_names()
+        .iter()
+        .map(|name| TableEntry {
+            schema: "dynamodb".to_string(),
+            name: name.clone(),
+        })
+        .collect())
+}
+
+async fn get_primary_keys_dynamodb(
+    client: &aws_sdk_dynamodb::Client,
+    table: &str,
+) -> Result<Vec<String>> {
+    let resp = client
+        .describe_table()
+        .table_name(table)
+        .send()
+        .await
+        .map_err(|e| SbqlError::DynamoDb(e.to_string()))?;
+    let table_desc = resp
+        .table()
+        .ok_or_else(|| SbqlError::Schema(format!("Table {} not found", table)))?;
+    let pks: Vec<String> = table_desc
+        .key_schema()
+        .iter()
+        .map(|ks| ks.attribute_name().to_string())
+        .collect();
+    if pks.is_empty() {
+        return Err(SbqlError::Schema(format!(
+            "No primary key found for {table}"
+        )));
+    }
+    Ok(pks)
 }
 
 #[cfg(test)]

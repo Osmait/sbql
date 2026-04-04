@@ -20,6 +20,7 @@ pub enum FfiDbBackend {
     Mysql,
     Sqlite,
     Redis,
+    DynamoDb,
 }
 
 #[derive(Debug, Clone, uniffi::Enum)]

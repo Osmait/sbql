@@ -3,7 +3,7 @@ use sqlx::postgres::PgRow;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Column, Decode, MySqlPool, PgPool, Postgres, Row, SqlitePool, TypeInfo, ValueRef};
 
-use crate::error::Result;
+use crate::error::{Result, SbqlError};
 use crate::pool::DbPool;
 
 pub const PAGE_SIZE: usize = 100;
@@ -15,6 +15,7 @@ pub fn pool_backend_name(pool: &DbPool) -> &'static str {
         DbPool::Sqlite(_) => "sqlite",
         DbPool::Mysql(_) => "mysql",
         DbPool::Redis(_) => "redis",
+        DbPool::DynamoDb(_) => "dynamodb",
     }
 }
 
@@ -41,6 +42,7 @@ pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<Query
         DbPool::Sqlite(sq) => execute_page_sqlite(sq, sql, page).await,
         DbPool::Mysql(my) => execute_page_mysql(my, sql, page).await,
         DbPool::Redis(cm) => execute_page_redis(cm, sql).await,
+        DbPool::DynamoDb(client) => execute_page_dynamodb(client, sql).await,
     }
 }
 
@@ -58,6 +60,7 @@ pub async fn suggest_distinct_values(
         DbPool::Sqlite(sq) => suggest_distinct_values_sqlite(sq, sql, column, prefix, limit).await,
         DbPool::Mysql(my) => suggest_distinct_values_mysql(my, sql, column, prefix, limit).await,
         DbPool::Redis(_) => Ok(vec![]),
+        DbPool::DynamoDb(_) => Ok(vec![]),
     }
 }
 
@@ -616,6 +619,82 @@ fn is_string_like(value: &redis::Value) -> bool {
         value,
         redis::Value::BulkString(_) | redis::Value::SimpleString(_) | redis::Value::Int(_)
     )
+}
+
+// ---------------------------------------------------------------------------
+// DynamoDB implementation
+// ---------------------------------------------------------------------------
+
+async fn execute_page_dynamodb(
+    client: &aws_sdk_dynamodb::Client,
+    statement: &str,
+) -> Result<QueryResult> {
+    let resp = client
+        .execute_statement()
+        .statement(statement)
+        .send()
+        .await
+        .map_err(|e| SbqlError::DynamoDb(e.to_string()))?;
+
+    let items = resp.items();
+    if items.is_empty() {
+        return Ok(QueryResult::default());
+    }
+
+    // Collect all unique column names (DynamoDB is schemaless)
+    let mut col_set = indexmap::IndexSet::new();
+    for item in items {
+        for key in item.keys() {
+            col_set.insert(key.clone());
+        }
+    }
+    let columns: Vec<String> = col_set.into_iter().collect();
+
+    let rows: Vec<Vec<String>> = items
+        .iter()
+        .map(|item| {
+            columns
+                .iter()
+                .map(|col| {
+                    item.get(col)
+                        .map(dynamo_attr_to_string)
+                        .unwrap_or_default()
+                })
+                .collect()
+        })
+        .collect();
+
+    Ok(QueryResult {
+        columns,
+        rows,
+        page: 0,
+        has_next_page: false,
+    })
+}
+
+fn dynamo_attr_to_string(attr: &aws_sdk_dynamodb::types::AttributeValue) -> String {
+    use aws_sdk_dynamodb::types::AttributeValue;
+    match attr {
+        AttributeValue::S(s) => s.clone(),
+        AttributeValue::N(n) => n.clone(),
+        AttributeValue::Bool(b) => b.to_string(),
+        AttributeValue::Null(_) => String::new(),
+        AttributeValue::B(blob) => format!("\\x{}", hex_encode(blob.as_ref())),
+        AttributeValue::Ss(set) => format!("[{}]", set.join(", ")),
+        AttributeValue::Ns(set) => format!("[{}]", set.join(", ")),
+        AttributeValue::L(list) => {
+            let items: Vec<String> = list.iter().map(dynamo_attr_to_string).collect();
+            format!("[{}]", items.join(", "))
+        }
+        AttributeValue::M(map) => {
+            let pairs: Vec<String> = map
+                .iter()
+                .map(|(k, v)| format!("{}: {}", k, dynamo_attr_to_string(v)))
+                .collect();
+            format!("{{{}}}", pairs.join(", "))
+        }
+        _ => "<unknown>".into(),
+    }
 }
 
 // ---------------------------------------------------------------------------

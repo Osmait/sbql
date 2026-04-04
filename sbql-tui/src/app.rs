@@ -144,6 +144,16 @@ impl ConnectionForm {
                 5 => "Database",
                 _ => "",
             },
+            DbBackend::DynamoDb => match idx {
+                0 => "Backend",
+                1 => "Name",
+                2 => "Endpoint",
+                3 => "Port",
+                4 => "Region",
+                5 => "Access Key",
+                6 => "Secret Key",
+                _ => "",
+            },
         }
     }
 
@@ -153,6 +163,7 @@ impl ConnectionForm {
             DbBackend::Postgres | DbBackend::Mysql => 8, // backend, name, host, port, user, database, password, ssl_mode
             DbBackend::Sqlite => 3,   // backend, name, file_path
             DbBackend::Redis => 6,    // backend, name, host, port, password, database
+            DbBackend::DynamoDb => 7, // backend, name, endpoint, port, region, access_key, secret_key
         }
     }
 
@@ -162,7 +173,8 @@ impl ConnectionForm {
             DbBackend::Postgres => DbBackend::Mysql,
             DbBackend::Mysql => DbBackend::Sqlite,
             DbBackend::Sqlite => DbBackend::Redis,
-            DbBackend::Redis => DbBackend::Postgres,
+            DbBackend::Redis => DbBackend::DynamoDb,
+            DbBackend::DynamoDb => DbBackend::Postgres,
         };
         self.field_index = 0;
     }
@@ -204,6 +216,16 @@ impl ConnectionForm {
                 3 => Some(&mut self.port),
                 4 => Some(&mut self.password),
                 5 => Some(&mut self.database),
+                _ => None,
+            },
+            DbBackend::DynamoDb => match self.field_index {
+                0 => None, // Backend is cycled
+                1 => Some(&mut self.name),
+                2 => Some(&mut self.host),
+                3 => Some(&mut self.port),
+                4 => Some(&mut self.database), // region
+                5 => Some(&mut self.user),     // access_key
+                6 => Some(&mut self.password),  // secret_key
                 _ => None,
             },
         }

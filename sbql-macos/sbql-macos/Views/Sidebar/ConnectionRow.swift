@@ -83,6 +83,7 @@ struct ConnectionRow: View {
         case .mysql: ("MY", Color(hex: 0x00758F))
         case .sqlite: ("SQ", Color(hex: 0x44A8D6))
         case .redis: ("RD", Color(hex: 0xD82C20))
+        case .dynamodb: ("DB", Color(hex: 0x4053D6))
         }
         return Text(label)
             .font(.system(size: 9, weight: .bold, design: .monospaced))

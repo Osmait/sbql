@@ -1753,6 +1753,7 @@ public enum FfiDbBackend {
     case mysql
     case sqlite
     case redis
+    case dynamoDb
 }
 
 
@@ -1778,6 +1779,8 @@ public struct FfiConverterTypeFfiDbBackend: FfiConverterRustBuffer {
         
         case 4: return .redis
         
+        case 5: return .dynamoDb
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -1800,6 +1803,10 @@ public struct FfiConverterTypeFfiDbBackend: FfiConverterRustBuffer {
         
         case .redis:
             writeInt(&buf, Int32(4))
+        
+        
+        case .dynamoDb:
+            writeInt(&buf, Int32(5))
         
         }
     }

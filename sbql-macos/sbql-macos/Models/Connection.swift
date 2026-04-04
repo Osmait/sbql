@@ -19,6 +19,7 @@ struct Connection: Identifiable, Hashable {
         case sqlite
         case redis
         case mysql
+        case dynamodb
     }
 
     enum SSLMode: String, CaseIterable, Hashable {
@@ -47,6 +48,8 @@ struct Connection: Identifiable, Hashable {
             filePath ?? "In-memory"
         case .redis:
             "\(host):\(port)/\(database)"
+        case .dynamodb:
+            "\(host):\(port) (\(database))"
         }
     }
 
@@ -90,6 +93,19 @@ struct Connection: Identifiable, Hashable {
         )
     }
 
+    static func newDynamodb() -> Connection {
+        Connection(
+            id: UUID().uuidString.lowercased(),
+            name: "",
+            backend: .dynamodb,
+            host: "localhost",
+            port: 8000,
+            user: "",
+            database: "us-east-1",
+            sslMode: .prefer
+        )
+    }
+
 }
 
 // MARK: - FFI Conversions
@@ -129,6 +145,7 @@ extension Connection.Backend {
         case .sqlite: self = .sqlite
         case .redis: self = .redis
         case .mysql: self = .mysql
+        case .dynamoDb: self = .dynamodb
         }
     }
 
@@ -138,6 +155,7 @@ extension Connection.Backend {
         case .sqlite: .sqlite
         case .redis: .redis
         case .mysql: .mysql
+        case .dynamodb: .dynamoDb
         }
     }
 }

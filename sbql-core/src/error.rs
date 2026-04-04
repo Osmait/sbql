@@ -26,6 +26,9 @@ pub enum SbqlError {
     #[error("Redis error: {0}")]
     Redis(#[from] redis::RedisError),
 
+    #[error("DynamoDB error: {0}")]
+    DynamoDb(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
