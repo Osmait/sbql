@@ -46,6 +46,18 @@ final class AppViewModel {
     // MARK: - Connection flow
 
     func connect(id: String) async {
+        // Check biometric if required
+        if let conn = connections.connections.first(where: { $0.id == id }),
+           conn.requiresBiometric {
+            let authenticated = await BiometricService.authenticate(
+                reason: "Authenticate to connect to \(conn.name)"
+            )
+            guard authenticated else {
+                showToast("Authentication required")
+                return
+            }
+        }
+
         do {
             try await service.connect(id: id)
             connections.markConnected(id: id)

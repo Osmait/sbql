@@ -104,6 +104,29 @@ struct ConnectionFormSheet: View {
                             ), prompt: "/path/to/database.db")
                         }
                     }
+
+                    // Safe Mode toggle
+                    if BiometricService.isAvailable {
+                        HStack {
+                            Toggle(isOn: $connection.requiresBiometric) {
+                                HStack(spacing: SbqlTheme.Spacing.xs) {
+                                    Image(systemName: "touchid")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(connection.requiresBiometric ? SbqlTheme.Colors.accent : SbqlTheme.Colors.textTertiary)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text("Safe Mode")
+                                            .font(SbqlTheme.Typography.bodyMedium)
+                                            .foregroundStyle(SbqlTheme.Colors.textPrimary)
+                                        Text("Require Touch ID to connect")
+                                            .font(SbqlTheme.Typography.caption)
+                                            .foregroundStyle(SbqlTheme.Colors.textTertiary)
+                                    }
+                                }
+                            }
+                            .toggleStyle(.switch)
+                            .tint(SbqlTheme.Colors.accent)
+                        }
+                    }
                 }
                 .padding(SbqlTheme.Spacing.lg)
             }
@@ -198,6 +221,8 @@ struct ConnectionFormSheet: View {
             do {
                 let pw = password.isEmpty ? nil : password
                 try await appVM.connections.saveConnection(connection, password: pw)
+                // Persist biometric flag in UserDefaults
+                UserDefaults.standard.set(connection.requiresBiometric, forKey: "biometric_\(connection.id)")
                 dismiss()
             } catch {
                 appVM.showError(error)

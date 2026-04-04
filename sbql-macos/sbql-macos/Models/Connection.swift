@@ -11,6 +11,7 @@ struct Connection: Identifiable, Hashable {
     var database: String
     var sslMode: SSLMode
     var filePath: String?
+    var requiresBiometric: Bool = false
 
     var isConnected: Bool = false
 
@@ -137,6 +138,8 @@ extension Connection {
         database = ffi.database
         sslMode = SSLMode(ffi: ffi.sslMode)
         filePath = ffi.filePath
+        // Biometric flag persisted in UserDefaults (not in Rust FFI)
+        requiresBiometric = UserDefaults.standard.bool(forKey: "biometric_\(ffi.id)")
     }
 
     var ffi: FfiConnectionConfig {

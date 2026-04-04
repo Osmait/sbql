@@ -30,6 +30,12 @@ struct ConnectionRow: View {
 
             Spacer()
 
+            if connection.requiresBiometric {
+                Image(systemName: "touchid")
+                    .font(.system(size: 9))
+                    .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.5))
+            }
+
             backendBadge
         }
         .padding(.horizontal, SbqlTheme.Spacing.sm)
