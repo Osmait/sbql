@@ -9,6 +9,14 @@ enum ThemeName: String, CaseIterable, Identifiable {
     case oneDark = "One Dark Pro"
     case nord = "Nord"
     case tokyoNight = "Tokyo Night"
+    case githubDark = "GitHub Dark"
+    case gruvbox = "Gruvbox Dark"
+    case solarized = "Solarized Dark"
+    case moonlight = "Moonlight"
+    case kanagawa = "Kanagawa"
+    case rosePine = "Rosé Pine"
+    case ayuDark = "Ayu Dark"
+    case everforest = "Everforest Dark"
 
     var id: String { rawValue }
 
@@ -21,6 +29,14 @@ enum ThemeName: String, CaseIterable, Identifiable {
         case .oneDark: return "Dark — warm Atom-inspired tones"
         case .nord: return "Dark — arctic cool blue hues"
         case .tokyoNight: return "Dark — neon-tinged Tokyo palette"
+        case .githubDark: return "Dark — GitHub's official dark theme"
+        case .gruvbox: return "Dark — retro warm Vim classic"
+        case .solarized: return "Dark — Ethan Schoonover's precision palette"
+        case .moonlight: return "Dark — soft purple moonlit tones"
+        case .kanagawa: return "Dark — Japanese ink-inspired Neovim theme"
+        case .rosePine: return "Dark — elegant muted rose tones"
+        case .ayuDark: return "Dark — warm orange Sublime/VS Code theme"
+        case .everforest: return "Dark — nature-inspired green hues"
         }
     }
 }
@@ -86,6 +102,14 @@ final class ThemeManager {
         case .oneDark: return oneDarkPalette
         case .nord: return nordPalette
         case .tokyoNight: return tokyoNightPalette
+        case .githubDark: return githubDarkPalette
+        case .gruvbox: return gruvboxPalette
+        case .solarized: return solarizedPalette
+        case .moonlight: return moonlightPalette
+        case .kanagawa: return kanagawaPalette
+        case .rosePine: return rosePinePalette
+        case .ayuDark: return ayuDarkPalette
+        case .everforest: return everforestPalette
         }
     }
 
@@ -261,6 +285,206 @@ final class ThemeManager {
             Color(hex: 0xFF9E64), Color(hex: 0xF7768E), Color(hex: 0x73DACA),
             Color(hex: 0xE0AF68), Color(hex: 0x2AC3DE), Color(hex: 0x7DCFFF),
             Color(hex: 0xBB9AF7),
+        ]
+    )
+
+    // MARK: - GitHub Dark (github.com)
+
+    private static let githubDarkPalette = ThemePalette(
+        background: Color(hex: 0x0D1117),
+        surface: Color(hex: 0x161B22),
+        surfaceElevated: Color(hex: 0x21262D),
+        surfaceHover: Color(hex: 0x30363D),
+        accent: Color(hex: 0x58A6FF),
+        accentHover: Color(hex: 0x79C0FF),
+        danger: Color(hex: 0xF85149),
+        success: Color(hex: 0x3FB950),
+        warning: Color(hex: 0xD29922),
+        textPrimary: Color(hex: 0xE6EDF3),
+        textSecondary: Color(hex: 0xB1BAC4),
+        textTertiary: Color(hex: 0x8B949E),
+        border: Color(hex: 0x30363D),
+        borderSubtle: Color(hex: 0x21262D),
+        fkLinePalette: [
+            Color(hex: 0x58A6FF), Color(hex: 0xBC8CFF), Color(hex: 0x3FB950),
+            Color(hex: 0xD29922), Color(hex: 0xF85149), Color(hex: 0x79C0FF),
+            Color(hex: 0xDB6D28), Color(hex: 0xF778BA), Color(hex: 0x56D364),
+            Color(hex: 0xA371F7),
+        ]
+    )
+
+    // MARK: - Gruvbox Dark (github.com/morhetz/gruvbox)
+
+    private static let gruvboxPalette = ThemePalette(
+        background: Color(hex: 0x1D2021), // bg0_h (hard contrast)
+        surface: Color(hex: 0x282828), // bg0
+        surfaceElevated: Color(hex: 0x3C3836), // bg1
+        surfaceHover: Color(hex: 0x504945), // bg2
+        accent: Color(hex: 0xFE8019), // orange
+        accentHover: Color(hex: 0xFABD2F), // yellow
+        danger: Color(hex: 0xFB4934), // red
+        success: Color(hex: 0xB8BB26), // green
+        warning: Color(hex: 0xFABD2F), // yellow
+        textPrimary: Color(hex: 0xEBDBB2), // fg (light0)
+        textSecondary: Color(hex: 0xBDAE93), // fg3
+        textTertiary: Color(hex: 0xA89984), // fg4
+        border: Color(hex: 0x504945), // bg2
+        borderSubtle: Color(hex: 0x3C3836), // bg1
+        fkLinePalette: [
+            Color(hex: 0xFE8019), Color(hex: 0x83A598), Color(hex: 0xB8BB26),
+            Color(hex: 0xFABD2F), Color(hex: 0xFB4934), Color(hex: 0x8EC07C),
+            Color(hex: 0xD3869B), Color(hex: 0xD65D0E), Color(hex: 0x689D6A),
+            Color(hex: 0x458588),
+        ]
+    )
+
+    // MARK: - Solarized Dark (ethanschoonover.com/solarized)
+
+    private static let solarizedPalette = ThemePalette(
+        background: Color(hex: 0x002B36), // base03
+        surface: Color(hex: 0x073642), // base02
+        surfaceElevated: Color(hex: 0x0A4050), // between base02 and base01
+        surfaceHover: Color(hex: 0x586E75), // base01
+        accent: Color(hex: 0x268BD2), // blue
+        accentHover: Color(hex: 0x2AA198), // cyan
+        danger: Color(hex: 0xDC322F), // red
+        success: Color(hex: 0x859900), // green
+        warning: Color(hex: 0xB58900), // yellow
+        textPrimary: Color(hex: 0xFDF6E3), // base3
+        textSecondary: Color(hex: 0xEEE8D5), // base2
+        textTertiary: Color(hex: 0x93A1A1), // base1
+        border: Color(hex: 0x586E75), // base01
+        borderSubtle: Color(hex: 0x073642), // base02
+        fkLinePalette: [
+            Color(hex: 0x268BD2), Color(hex: 0x2AA198), Color(hex: 0x859900),
+            Color(hex: 0xB58900), Color(hex: 0xDC322F), Color(hex: 0xD33682),
+            Color(hex: 0xCB4B16), Color(hex: 0x6C71C4), Color(hex: 0x2AA198),
+            Color(hex: 0x268BD2),
+        ]
+    )
+
+    // MARK: - Moonlight (github.com/atomiks/moonlight-vscode-theme)
+
+    private static let moonlightPalette = ThemePalette(
+        background: Color(hex: 0x1E2030),
+        surface: Color(hex: 0x222436),
+        surfaceElevated: Color(hex: 0x2F334D),
+        surfaceHover: Color(hex: 0x3B3F5C),
+        accent: Color(hex: 0x82AAFF), // blue
+        accentHover: Color(hex: 0xC099FF), // purple
+        danger: Color(hex: 0xFF757F),
+        success: Color(hex: 0xC3E88D),
+        warning: Color(hex: 0xFFC777),
+        textPrimary: Color(hex: 0xC8D3F5),
+        textSecondary: Color(hex: 0xA9B8E8),
+        textTertiary: Color(hex: 0x7A88CF),
+        border: Color(hex: 0x3B3F5C),
+        borderSubtle: Color(hex: 0x2F334D),
+        fkLinePalette: [
+            Color(hex: 0x82AAFF), Color(hex: 0xC099FF), Color(hex: 0xC3E88D),
+            Color(hex: 0xFFC777), Color(hex: 0xFF757F), Color(hex: 0x4FD6BE),
+            Color(hex: 0xFF966C), Color(hex: 0xFCA7EA), Color(hex: 0x86E1FC),
+            Color(hex: 0xB4C2F0),
+        ]
+    )
+
+    // MARK: - Kanagawa (github.com/rebelot/kanagawa.nvim)
+
+    private static let kanagawaPalette = ThemePalette(
+        background: Color(hex: 0x16161D), // sumiInk0
+        surface: Color(hex: 0x1F1F28), // sumiInk1 (default bg)
+        surfaceElevated: Color(hex: 0x2A2A37), // sumiInk3
+        surfaceHover: Color(hex: 0x363646), // sumiInk4
+        accent: Color(hex: 0x957FB8), // oniViolet
+        accentHover: Color(hex: 0x7E9CD8), // crystalBlue
+        danger: Color(hex: 0xE82424), // samuraiRed
+        success: Color(hex: 0x76946A), // autumnGreen
+        warning: Color(hex: 0xE6C384), // carpYellow
+        textPrimary: Color(hex: 0xDCD7BA), // fujiWhite
+        textSecondary: Color(hex: 0xC8C093), // oldWhite
+        textTertiary: Color(hex: 0x727169), // fujiGray
+        border: Color(hex: 0x363646), // sumiInk4
+        borderSubtle: Color(hex: 0x2A2A37), // sumiInk3
+        fkLinePalette: [
+            Color(hex: 0x957FB8), Color(hex: 0x7E9CD8), Color(hex: 0x76946A),
+            Color(hex: 0xE6C384), Color(hex: 0xE82424), Color(hex: 0x6A9589),
+            Color(hex: 0xFFA066), Color(hex: 0xD27E99), Color(hex: 0x7FB4CA),
+            Color(hex: 0x938AA9),
+        ]
+    )
+
+    // MARK: - Rosé Pine (rosepinetheme.com)
+
+    private static let rosePinePalette = ThemePalette(
+        background: Color(hex: 0x191724), // base
+        surface: Color(hex: 0x1F1D2E), // surface
+        surfaceElevated: Color(hex: 0x26233A), // overlay
+        surfaceHover: Color(hex: 0x312D45),
+        accent: Color(hex: 0xEBBCBA), // rose
+        accentHover: Color(hex: 0xC4A7E7), // iris
+        danger: Color(hex: 0xEB6F92), // love
+        success: Color(hex: 0x9CCFD8), // foam
+        warning: Color(hex: 0xF6C177), // gold
+        textPrimary: Color(hex: 0xE0DEF4), // text
+        textSecondary: Color(hex: 0xC4C0DB),
+        textTertiary: Color(hex: 0x908CAA), // subtle
+        border: Color(hex: 0x312D45),
+        borderSubtle: Color(hex: 0x26233A),
+        fkLinePalette: [
+            Color(hex: 0xEBBCBA), Color(hex: 0xC4A7E7), Color(hex: 0x9CCFD8),
+            Color(hex: 0xF6C177), Color(hex: 0xEB6F92), Color(hex: 0x31748F),
+            Color(hex: 0xE0DEF4), Color(hex: 0xC4A7E7), Color(hex: 0x9CCFD8),
+            Color(hex: 0xEBBCBA),
+        ]
+    )
+
+    // MARK: - Ayu Dark (github.com/ayu-theme)
+
+    private static let ayuDarkPalette = ThemePalette(
+        background: Color(hex: 0x0B0E14),
+        surface: Color(hex: 0x0D1017),
+        surfaceElevated: Color(hex: 0x131721),
+        surfaceHover: Color(hex: 0x1C2029),
+        accent: Color(hex: 0xFFAD66), // orange (func)
+        accentHover: Color(hex: 0xD2A6FF), // purple (keyword)
+        danger: Color(hex: 0xF07178),
+        success: Color(hex: 0xAAD94C),
+        warning: Color(hex: 0xE6B450),
+        textPrimary: Color(hex: 0xBFBDB6),
+        textSecondary: Color(hex: 0x9B9787),
+        textTertiary: Color(hex: 0x6C7080),
+        border: Color(hex: 0x1C2029),
+        borderSubtle: Color(hex: 0x131721),
+        fkLinePalette: [
+            Color(hex: 0xFFAD66), Color(hex: 0xD2A6FF), Color(hex: 0xAAD94C),
+            Color(hex: 0xE6B450), Color(hex: 0xF07178), Color(hex: 0x73B8FF),
+            Color(hex: 0x95E6CB), Color(hex: 0xF29668), Color(hex: 0x59C2FF),
+            Color(hex: 0xD2A6FF),
+        ]
+    )
+
+    // MARK: - Everforest Dark (github.com/sainnhe/everforest)
+
+    private static let everforestPalette = ThemePalette(
+        background: Color(hex: 0x272E33), // bg_dim
+        surface: Color(hex: 0x2D353B), // bg0
+        surfaceElevated: Color(hex: 0x343F44), // bg1
+        surfaceHover: Color(hex: 0x3D484D), // bg2
+        accent: Color(hex: 0xA7C080), // green (primary)
+        accentHover: Color(hex: 0x7FBBB3), // aqua
+        danger: Color(hex: 0xE67E80), // red
+        success: Color(hex: 0xA7C080), // green
+        warning: Color(hex: 0xDBBC7F), // yellow
+        textPrimary: Color(hex: 0xD3C6AA), // fg
+        textSecondary: Color(hex: 0xBAAF9A),
+        textTertiary: Color(hex: 0x859289), // grey1
+        border: Color(hex: 0x3D484D), // bg2
+        borderSubtle: Color(hex: 0x343F44), // bg1
+        fkLinePalette: [
+            Color(hex: 0xA7C080), Color(hex: 0x7FBBB3), Color(hex: 0xD699B6),
+            Color(hex: 0xDBBC7F), Color(hex: 0xE67E80), Color(hex: 0x83C092),
+            Color(hex: 0xE69875), Color(hex: 0x7FBBB3), Color(hex: 0xA7C080),
+            Color(hex: 0xD699B6),
         ]
     )
 }
