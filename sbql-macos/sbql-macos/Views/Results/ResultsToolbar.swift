@@ -23,7 +23,7 @@ struct ResultsToolbar: View {
                     }
                     .foregroundStyle(SbqlTheme.Colors.accent)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hover)
 
                 Button {
                     appVM.discardEdits()
@@ -36,7 +36,7 @@ struct ResultsToolbar: View {
                     }
                     .foregroundStyle(SbqlTheme.Colors.textSecondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hover)
 
                 Divider()
                     .frame(height: 14)
@@ -60,7 +60,7 @@ struct ResultsToolbar: View {
                         : SbqlTheme.Colors.accent.opacity(0.4)
                 )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hover)
             .keyboardShortcut("f", modifiers: .command)
 
             if appVM.results.sortedColumn != nil {
@@ -76,7 +76,7 @@ struct ResultsToolbar: View {
                     }
                     .foregroundStyle(SbqlTheme.Colors.warning)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hover)
             }
 
             // SQL Editor toggle
@@ -101,7 +101,7 @@ struct ResultsToolbar: View {
                 .background(SbqlTheme.Colors.accent.opacity(appVM.editor.isVisible ? 0.15 : 0.06))
                 .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hover)
             .keyboardShortcut("e", modifiers: .command)
             .help(appVM.editor.isVisible ? "Hide SQL editor" : "Show SQL editor")
 
@@ -168,7 +168,7 @@ struct ResultsToolbar: View {
                         .font(.system(size: 10))
                         .foregroundStyle(appVM.results.snapshot != nil ? SbqlTheme.Colors.accent : SbqlTheme.Colors.accent.opacity(0.4))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverIcon)
                 .help("Take snapshot for diff")
 
                 if appVM.results.snapshot != nil {
@@ -186,7 +186,7 @@ struct ResultsToolbar: View {
                         }
                         .foregroundStyle(appVM.results.isDiffMode ? SbqlTheme.Colors.warning : SbqlTheme.Colors.accent.opacity(0.5))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.hover)
                     .help(appVM.results.isDiffMode ? "Exit diff" : "Compare with snapshot")
                 }
             }
@@ -227,7 +227,7 @@ struct ResultsToolbar: View {
                         .background(SbqlTheme.Colors.surfaceElevated)
                         .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverIcon)
                 .disabled(appVM.results.currentResult.page == 0)
 
                 Text(appVM.results.pageDisplay)
@@ -250,7 +250,7 @@ struct ResultsToolbar: View {
                         .background(SbqlTheme.Colors.surfaceElevated)
                         .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverIcon)
                 .disabled(!appVM.results.currentResult.hasNextPage)
             }
         }

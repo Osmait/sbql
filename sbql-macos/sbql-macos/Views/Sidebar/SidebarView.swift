@@ -165,7 +165,7 @@ struct SidebarView: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(SbqlTheme.Colors.accent)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverIcon)
             }
         }
         .padding(.horizontal, SbqlTheme.Spacing.lg)

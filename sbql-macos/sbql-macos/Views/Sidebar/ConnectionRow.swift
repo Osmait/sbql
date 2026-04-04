@@ -48,6 +48,7 @@ struct ConnectionRow: View {
         .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
         .animation(SbqlTheme.Animations.quick, value: isSelected)
         .animation(SbqlTheme.Animations.gentle, value: connection.isConnected)
+        .hoverHighlight()
         .contentShape(Rectangle())
         .onTapGesture {
             appVM.connections.selectedConnectionId = connection.id

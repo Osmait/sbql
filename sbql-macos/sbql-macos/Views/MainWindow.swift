@@ -150,7 +150,7 @@ struct MainWindow: View {
                             : SbqlTheme.Colors.textTertiary
                     )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hoverIcon)
             .keyboardShortcut("s", modifiers: [.command, .control])
 
             SbqlTheme.Colors.border
@@ -183,7 +183,7 @@ struct MainWindow: View {
                         )
                         .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hover)
             }
 
             // Table tabs
@@ -208,7 +208,7 @@ struct MainWindow: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(SbqlTheme.Colors.textTertiary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverIcon)
                 .help("Close all tabs")
             }
 
@@ -222,7 +222,7 @@ struct MainWindow: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.6))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hoverIcon)
             .help("Query History")
 
             Button {
@@ -232,7 +232,7 @@ struct MainWindow: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.6))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hoverIcon)
             .help("Saved Queries")
 
             SbqlTheme.Colors.border
@@ -267,7 +267,7 @@ struct MainWindow: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.6))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hoverIcon)
         }
     }
 
@@ -390,7 +390,7 @@ struct MainWindow: View {
                     .frame(width: 14, height: 14)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hoverIcon)
             .opacity(isActive ? 1 : 0.5)
         }
         .padding(.horizontal, SbqlTheme.Spacing.sm)
@@ -404,6 +404,7 @@ struct MainWindow: View {
                     .clipShape(RoundedRectangle(cornerRadius: 1))
             }
         }
+        .hoverHighlight()
         .contentShape(Rectangle())
         .onTapGesture {
             if let sql = appVM.results.switchToTab(id: tab.id, currentSql: appVM.editor.sqlText) {

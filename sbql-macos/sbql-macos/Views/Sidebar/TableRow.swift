@@ -37,6 +37,7 @@ struct TableRow: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
         .animation(SbqlTheme.Animations.quick, value: isSelected)
+        .hoverHighlight()
         .contentShape(Rectangle())
         .onTapGesture {
             appVM.connections.selectedTable = table

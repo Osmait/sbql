@@ -22,7 +22,7 @@ struct DiagramZoomToolbar: View {
                     .foregroundStyle(SbqlTheme.Colors.accent)
                     .frame(width: 44)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.hoverIcon)
 
             Divider()
                 .frame(height: 16)
@@ -54,6 +54,6 @@ struct DiagramZoomToolbar: View {
                 .frame(width: 32, height: 32)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hoverIcon)
     }
 }
