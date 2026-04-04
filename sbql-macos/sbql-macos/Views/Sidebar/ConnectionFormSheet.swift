@@ -8,6 +8,15 @@ struct ConnectionFormSheet: View {
     @State private var password: String = ""
     @State private var isSaving = false
 
+    private let backends: [(Connection.Backend, String, String, Color)] = [
+        (.postgres, "PG", "PostgreSQL", Color(hex: 0x336791)),
+        (.mysql, "MY", "MySQL", Color(hex: 0x00758F)),
+        (.sqlite, "SQ", "SQLite", Color(hex: 0x44A8D6)),
+        (.mongodb, "MG", "MongoDB", Color(hex: 0x47A248)),
+        (.redis, "RD", "Redis", Color(hex: 0xD82C20)),
+        (.dynamodb, "DB", "DynamoDB", Color(hex: 0x4053D6)),
+    ]
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -28,60 +37,72 @@ struct ConnectionFormSheet: View {
                 VStack(spacing: SbqlTheme.Spacing.lg) {
                     formField("Name", text: $connection.name, prompt: "My Database")
 
-                    // Backend picker
-                    HStack {
+                    // Backend grid
+                    VStack(alignment: .leading, spacing: SbqlTheme.Spacing.sm) {
                         Text("Backend")
                             .font(SbqlTheme.Typography.bodyMedium)
                             .foregroundStyle(SbqlTheme.Colors.textSecondary)
-                            .frame(width: 80, alignment: .leading)
 
-                        Picker("", selection: $connection.backend) {
-                            Text("PostgreSQL").tag(Connection.Backend.postgres)
-                            Text("MySQL").tag(Connection.Backend.mysql)
-                            Text("SQLite").tag(Connection.Backend.sqlite)
-                            Text("MongoDB").tag(Connection.Backend.mongodb)
-                            Text("DynamoDB").tag(Connection.Backend.dynamodb)
-                        }
-                        .pickerStyle(.segmented)
-                    }
-
-                    if connection.backend == .postgres || connection.backend == .mysql {
-                        formField("Host", text: $connection.host, prompt: "localhost")
-                        formField("Port", value: $connection.port)
-                        formField("User", text: $connection.user, prompt: connection.backend == .mysql ? "root" : "postgres")
-                        formField("Database", text: $connection.database, prompt: connection.backend == .mysql ? "mydb" : "postgres")
-                        formField("Password", text: $password, prompt: "Enter password", isSecure: true)
-
-                        // SSL mode
-                        HStack {
-                            Text("SSL Mode")
-                                .font(SbqlTheme.Typography.bodyMedium)
-                                .foregroundStyle(SbqlTheme.Colors.textSecondary)
-                                .frame(width: 80, alignment: .leading)
-
-                            Picker("", selection: $connection.sslMode) {
-                                ForEach(Connection.SSLMode.allCases, id: \.self) { mode in
-                                    Text(mode.displayName).tag(mode)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 6)], spacing: 6) {
+                            ForEach(backends, id: \.0) { backend, abbr, label, color in
+                                Button {
+                                    connection.backend = backend
+                                } label: {
+                                    VStack(spacing: 3) {
+                                        Text(abbr)
+                                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                            .foregroundStyle(connection.backend == backend ? .white : color)
+                                        Text(label)
+                                            .font(.system(size: 9))
+                                            .foregroundStyle(connection.backend == backend ? .white.opacity(0.9) : SbqlTheme.Colors.textSecondary)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        connection.backend == backend
+                                            ? color
+                                            : SbqlTheme.Colors.surfaceElevated
+                                    )
+                                    .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium)
+                                            .stroke(connection.backend == backend ? color : Color.clear, lineWidth: 1)
+                                    )
                                 }
+                                .buttonStyle(.plain)
                             }
                         }
-                    } else if connection.backend == .mongodb {
-                        formField("Host", text: $connection.host, prompt: "localhost")
-                        formField("Port", value: $connection.port)
-                        formField("User", text: $connection.user, prompt: "admin (optional)")
-                        formField("Database", text: $connection.database, prompt: "mydb")
-                        formField("Password", text: $password, prompt: "Enter password (optional)", isSecure: true)
-                    } else if connection.backend == .dynamodb {
-                        formField("Endpoint", text: $connection.host, prompt: "localhost")
-                        formField("Port", value: $connection.port)
-                        formField("Region", text: $connection.database, prompt: "us-east-1")
-                        formField("Access Key", text: $connection.user, prompt: "AKIAIOSFODNN7EXAMPLE")
-                        formField("Secret Key", text: $password, prompt: "Enter secret key", isSecure: true)
-                    } else if connection.backend == .sqlite {
-                        formField("File Path", text: Binding(
-                            get: { connection.filePath ?? "" },
-                            set: { connection.filePath = $0.isEmpty ? nil : $0 }
-                        ), prompt: "/path/to/database.db")
+                    }
+
+                    // Dynamic form fields based on backend
+                    Group {
+                        switch connection.backend {
+                        case .postgres, .mysql:
+                            sqlFormFields(defaultUser: connection.backend == .mysql ? "root" : "postgres",
+                                          defaultDb: connection.backend == .mysql ? "mydb" : "postgres",
+                                          showSSL: true)
+                        case .mongodb:
+                            formField("Host", text: $connection.host, prompt: "localhost")
+                            formField("Port", value: $connection.port)
+                            formField("User", text: $connection.user, prompt: "admin (optional)")
+                            formField("Database", text: $connection.database, prompt: "mydb")
+                            formField("Password", text: $password, prompt: "Enter password (optional)", isSecure: true)
+                        case .redis:
+                            formField("Host", text: $connection.host, prompt: "localhost")
+                            formField("Port", value: $connection.port)
+                            formField("Password", text: $password, prompt: "Enter password (optional)", isSecure: true)
+                        case .dynamodb:
+                            formField("Endpoint", text: $connection.host, prompt: "localhost")
+                            formField("Port", value: $connection.port)
+                            formField("Region", text: $connection.database, prompt: "us-east-1")
+                            formField("Access Key", text: $connection.user, prompt: "AKIAIOSFODNN7EXAMPLE")
+                            formField("Secret Key", text: $password, prompt: "Enter secret key", isSecure: true)
+                        case .sqlite:
+                            formField("File Path", text: Binding(
+                                get: { connection.filePath ?? "" },
+                                set: { connection.filePath = $0.isEmpty ? nil : $0 }
+                            ), prompt: "/path/to/database.db")
+                        }
                     }
                 }
                 .padding(SbqlTheme.Spacing.lg)
@@ -92,18 +113,43 @@ struct ConnectionFormSheet: View {
             // Actions
             HStack {
                 Spacer()
-                Button("Save") {
-                    save()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(SbqlTheme.Colors.accent)
-                .disabled(isSaving || connection.name.isEmpty)
+                Button("Save") { save() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(SbqlTheme.Colors.accent)
+                    .disabled(isSaving || connection.name.isEmpty)
             }
             .padding(SbqlTheme.Spacing.lg)
         }
-        .frame(width: 420, height: 480)
+        .frame(width: 440, height: 520)
         .background(SbqlTheme.Colors.surface)
     }
+
+    // MARK: - SQL Form Fields (PG/MySQL shared)
+
+    @ViewBuilder
+    private func sqlFormFields(defaultUser: String, defaultDb: String, showSSL: Bool) -> some View {
+        formField("Host", text: $connection.host, prompt: "localhost")
+        formField("Port", value: $connection.port)
+        formField("User", text: $connection.user, prompt: defaultUser)
+        formField("Database", text: $connection.database, prompt: defaultDb)
+        formField("Password", text: $password, prompt: "Enter password", isSecure: true)
+
+        if showSSL {
+            HStack {
+                Text("SSL Mode")
+                    .font(SbqlTheme.Typography.bodyMedium)
+                    .foregroundStyle(SbqlTheme.Colors.textSecondary)
+                    .frame(width: 80, alignment: .leading)
+                Picker("", selection: $connection.sslMode) {
+                    ForEach(Connection.SSLMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Form Fields
 
     private func formField(_ label: String, text: Binding<String>, prompt: String, isSecure: Bool = false) -> some View {
         HStack {
@@ -137,7 +183,7 @@ struct ConnectionFormSheet: View {
                 .foregroundStyle(SbqlTheme.Colors.textSecondary)
                 .frame(width: 80, alignment: .leading)
 
-            TextField("5432", value: value, format: .number)
+            TextField("", value: value, format: .number)
                 .textFieldStyle(.plain)
                 .font(SbqlTheme.Typography.body)
                 .padding(SbqlTheme.Spacing.sm)

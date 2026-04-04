@@ -60,6 +60,27 @@ struct MainWindow: View {
             window.styleMask.insert(.fullSizeContentView)
         })
         .onAppear { appVM.onAppear() }
+        .sheet(isPresented: Binding(
+            get: { appVM.isShowingHistory },
+            set: { appVM.isShowingHistory = $0 }
+        )) {
+            QueryHistoryModal()
+                .environment(appVM)
+        }
+        .sheet(isPresented: Binding(
+            get: { appVM.isShowingSavedQueries },
+            set: { appVM.isShowingSavedQueries = $0 }
+        )) {
+            SavedQueriesModal()
+                .environment(appVM)
+        }
+        .sheet(isPresented: Binding(
+            get: { appVM.savedQueries.isShowingSaveSheet },
+            set: { appVM.savedQueries.isShowingSaveSheet = $0 }
+        )) {
+            SaveQuerySheet()
+                .environment(appVM)
+        }
     }
 
     // MARK: - Main Content Island
@@ -161,6 +182,31 @@ struct MainWindow: View {
             }
 
             Spacer()
+
+            // History & Saved buttons
+            Button {
+                appVM.isShowingHistory = true
+            } label: {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+            .help("Query History")
+
+            Button {
+                appVM.isShowingSavedQueries = true
+            } label: {
+                Image(systemName: "bookmark")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.6))
+            }
+            .buttonStyle(.plain)
+            .help("Saved Queries")
+
+            SbqlTheme.Colors.border
+                .frame(width: 1, height: 16)
+                .opacity(0.5)
 
             connectionInfo
             headerActions

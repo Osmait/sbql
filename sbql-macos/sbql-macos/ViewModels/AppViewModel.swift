@@ -14,6 +14,8 @@ final class AppViewModel {
     var activeTab: ActiveTab = .query
     var isSidebarVisible: Bool = true
     var isExporting: Bool = false
+    var isShowingHistory: Bool = false
+    var isShowingSavedQueries: Bool = false
     var toastMessage: String?
     var toastIsError: Bool = false
 

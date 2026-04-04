@@ -111,17 +111,7 @@ struct SidebarView: View {
                     .animation(SbqlTheme.Animations.gentle, value: appVM.connections.filteredTables.count)
                 }
 
-                // Saved queries section
-                Divider()
-                    .background(SbqlTheme.Colors.border)
-                    .padding(.vertical, SbqlTheme.Spacing.sm)
-                SavedQueriesSection()
-
-                // History section
-                Divider()
-                    .background(SbqlTheme.Colors.border)
-                    .padding(.vertical, SbqlTheme.Spacing.sm)
-                QueryHistorySection()
+                // History and Saved Queries moved to header buttons
             }
             .animation(SbqlTheme.Animations.smooth, value: appVM.connections.tables.count)
         }
@@ -134,12 +124,7 @@ struct SidebarView: View {
                 ConnectionFormSheet(connection: conn)
             }
         }
-        .sheet(isPresented: Binding(
-            get: { appVM.savedQueries.isShowingSaveSheet },
-            set: { appVM.savedQueries.isShowingSaveSheet = $0 }
-        )) {
-            SaveQuerySheet()
-        }
+        // Save query sheet moved to MainWindow
     }
 
     private func backendGroupHeader(_ backend: Connection.Backend, count: Int) -> some View {
