@@ -327,7 +327,23 @@ fn mysql_value_to_string(row: &MySqlRow, idx: usize, type_name: &str) -> String 
             };
         }
     }
-    if type_is_any(type_name, &["DATETIME", "TIMESTAMP"]) {
+    if type_eq(type_name, "DATETIME") {
+        if let Ok(v) = row.try_get::<Option<chrono::NaiveDateTime>, _>(idx) {
+            return match v {
+                Some(val) => val.to_string(),
+                None => String::new(),
+            };
+        }
+    }
+    if type_eq(type_name, "TIMESTAMP") {
+        // MySQL TIMESTAMP maps to chrono::DateTime<Utc> in sqlx, not NaiveDateTime
+        if let Ok(v) = row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(idx) {
+            return match v {
+                Some(val) => val.to_string(),
+                None => String::new(),
+            };
+        }
+        // Fallback: try NaiveDateTime
         if let Ok(v) = row.try_get::<Option<chrono::NaiveDateTime>, _>(idx) {
             return match v {
                 Some(val) => val.to_string(),

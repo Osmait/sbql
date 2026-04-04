@@ -23,8 +23,32 @@ dirs = "5"
 indexmap.workspace = true
 redis.workspace = true
 
+[features]
+dhat-heap = ["dep:dhat"]
+
+[dependencies.dhat]
+workspace = true
+optional = true
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 testcontainers = "0.23"
-testcontainers-modules = { version = "0.11", features = ["postgres", "redis"] }
+testcontainers-modules = { version = "0.11", features = ["postgres", "redis", "mysql"] }
 tempfile = "3"
+criterion = { workspace = true }
+
+[[bench]]
+name = "query_builder"
+harness = false
+
+[[bench]]
+name = "query_execution"
+harness = false
+
+[[bench]]
+name = "postgres_integration"
+harness = false
+
+[[bench]]
+name = "redis_integration"
+harness = false

@@ -578,13 +578,15 @@ async fn execute_row_delete_sqlite(
 // ---------------------------------------------------------------------------
 
 async fn list_tables_mysql(pool: &MySqlPool) -> Result<Vec<TableEntry>> {
+    // MySQL information_schema returns VARBINARY columns; CAST to CHAR for sqlx String compat.
     let rows = sqlx::query(
         r#"
-        SELECT TABLE_SCHEMA, TABLE_NAME
+        SELECT CAST(TABLE_SCHEMA AS CHAR) AS table_schema,
+               CAST(TABLE_NAME AS CHAR)   AS table_name
         FROM information_schema.TABLES
         WHERE TABLE_SCHEMA = DATABASE()
           AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')
-        ORDER BY TABLE_SCHEMA, TABLE_NAME
+        ORDER BY TABLE_NAME
         "#,
     )
     .fetch_all(pool)
@@ -594,9 +596,9 @@ async fn list_tables_mysql(pool: &MySqlPool) -> Result<Vec<TableEntry>> {
         .into_iter()
         .map(|r| TableEntry {
             schema: r
-                .try_get::<String, _>("TABLE_SCHEMA")
+                .try_get::<String, _>("table_schema")
                 .unwrap_or_default(),
-            name: r.try_get::<String, _>("TABLE_NAME").unwrap_or_default(),
+            name: r.try_get::<String, _>("table_name").unwrap_or_default(),
         })
         .collect())
 }
@@ -604,10 +606,10 @@ async fn list_tables_mysql(pool: &MySqlPool) -> Result<Vec<TableEntry>> {
 async fn get_primary_keys_mysql(pool: &MySqlPool, table: &str) -> Result<Vec<String>> {
     let rows = sqlx::query(
         r#"
-        SELECT COLUMN_NAME
+        SELECT CAST(COLUMN_NAME AS CHAR) AS column_name
         FROM information_schema.KEY_COLUMN_USAGE
         WHERE TABLE_SCHEMA = DATABASE()
-          AND TABLE_NAME = ?
+          AND CAST(TABLE_NAME AS CHAR) = ?
           AND CONSTRAINT_NAME = 'PRIMARY'
         ORDER BY ORDINAL_POSITION
         "#,
@@ -618,7 +620,7 @@ async fn get_primary_keys_mysql(pool: &MySqlPool, table: &str) -> Result<Vec<Str
 
     let pks: Vec<String> = rows
         .into_iter()
-        .filter_map(|r| r.try_get::<String, _>("COLUMN_NAME").ok())
+        .filter_map(|r| r.try_get::<String, _>("column_name").ok())
         .collect();
 
     if pks.is_empty() {
@@ -635,21 +637,21 @@ async fn load_diagram_mysql(pool: &MySqlPool) -> Result<DiagramData> {
     let col_rows = sqlx::query(
         r#"
         SELECT
-            TABLE_SCHEMA,
-            TABLE_NAME,
-            COLUMN_NAME,
-            COLUMN_TYPE AS data_type,
-            IS_NULLABLE,
-            COLUMN_KEY
-        FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE()
+            CAST(c.TABLE_SCHEMA AS CHAR)  AS table_schema,
+            CAST(c.TABLE_NAME AS CHAR)    AS table_name,
+            CAST(c.COLUMN_NAME AS CHAR)   AS column_name,
+            CAST(c.COLUMN_TYPE AS CHAR)   AS data_type,
+            CAST(c.IS_NULLABLE AS CHAR)   AS is_nullable,
+            CAST(c.COLUMN_KEY AS CHAR)    AS column_key
+        FROM information_schema.COLUMNS c
+        WHERE c.TABLE_SCHEMA = DATABASE()
           AND EXISTS (
             SELECT 1 FROM information_schema.TABLES t
-            WHERE t.TABLE_SCHEMA = COLUMNS.TABLE_SCHEMA
-              AND t.TABLE_NAME   = COLUMNS.TABLE_NAME
+            WHERE t.TABLE_SCHEMA = c.TABLE_SCHEMA
+              AND t.TABLE_NAME   = c.TABLE_NAME
               AND t.TABLE_TYPE   = 'BASE TABLE'
           )
-        ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
+        ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION
         "#,
     )
     .fetch_all(pool)
@@ -658,15 +660,15 @@ async fn load_diagram_mysql(pool: &MySqlPool) -> Result<DiagramData> {
     let mut table_map: indexmap::IndexMap<(String, String), Vec<ColumnInfo>> =
         indexmap::IndexMap::new();
     for row in col_rows {
-        let ts: String = row.try_get("TABLE_SCHEMA").unwrap_or_default();
-        let tn: String = row.try_get("TABLE_NAME").unwrap_or_default();
-        let column_key: String = row.try_get("COLUMN_KEY").unwrap_or_default();
+        let ts: String = row.try_get("table_schema").unwrap_or_default();
+        let tn: String = row.try_get("table_name").unwrap_or_default();
+        let column_key: String = row.try_get("column_key").unwrap_or_default();
         let col = ColumnInfo {
-            name: row.try_get("COLUMN_NAME").unwrap_or_default(),
+            name: row.try_get("column_name").unwrap_or_default(),
             data_type: row.try_get("data_type").unwrap_or_default(),
             is_pk: column_key == "PRI",
             is_nullable: row
-                .try_get::<String, _>("IS_NULLABLE")
+                .try_get::<String, _>("is_nullable")
                 .map(|s| s == "YES")
                 .unwrap_or(true),
         };
@@ -686,13 +688,13 @@ async fn load_diagram_mysql(pool: &MySqlPool) -> Result<DiagramData> {
     let fk_rows = sqlx::query(
         r#"
         SELECT
-            tc.CONSTRAINT_NAME,
-            tc.TABLE_SCHEMA  AS from_schema,
-            tc.TABLE_NAME    AS from_table,
-            kcu.COLUMN_NAME  AS from_col,
-            kcu.REFERENCED_TABLE_SCHEMA AS to_schema,
-            kcu.REFERENCED_TABLE_NAME   AS to_table,
-            kcu.REFERENCED_COLUMN_NAME  AS to_col
+            CAST(tc.CONSTRAINT_NAME AS CHAR)  AS constraint_name,
+            CAST(tc.TABLE_SCHEMA AS CHAR)     AS from_schema,
+            CAST(tc.TABLE_NAME AS CHAR)       AS from_table,
+            CAST(kcu.COLUMN_NAME AS CHAR)     AS from_col,
+            CAST(kcu.REFERENCED_TABLE_SCHEMA AS CHAR) AS to_schema,
+            CAST(kcu.REFERENCED_TABLE_NAME AS CHAR)   AS to_table,
+            CAST(kcu.REFERENCED_COLUMN_NAME AS CHAR)  AS to_col
         FROM information_schema.TABLE_CONSTRAINTS tc
         JOIN information_schema.KEY_COLUMN_USAGE kcu
           ON kcu.CONSTRAINT_NAME  = tc.CONSTRAINT_NAME
@@ -709,7 +711,7 @@ async fn load_diagram_mysql(pool: &MySqlPool) -> Result<DiagramData> {
     let foreign_keys: Vec<ForeignKey> = fk_rows
         .into_iter()
         .map(|row| ForeignKey {
-            constraint_name: row.try_get("CONSTRAINT_NAME").unwrap_or_default(),
+            constraint_name: row.try_get("constraint_name").unwrap_or_default(),
             from_schema: row.try_get("from_schema").unwrap_or_default(),
             from_table: row.try_get("from_table").unwrap_or_default(),
             from_col: row.try_get("from_col").unwrap_or_default(),
