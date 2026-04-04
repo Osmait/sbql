@@ -35,6 +35,8 @@ pub struct QueryResult {
     pub page: usize,
     /// Whether there might be more pages after this one.
     pub has_next_page: bool,
+    /// Total row count for the query (fetched on page 0 via COUNT(*)).
+    pub total_count: Option<u64>,
 }
 
 /// The output format for streaming database export.
@@ -65,16 +67,44 @@ pub async fn export_all(
 }
 
 /// Execute a raw SQL string and return the first `PAGE_SIZE` rows of page
-/// `page` (0-indexed).
+/// `page` (0-indexed). On page 0, also fetches the total row count.
 #[tracing::instrument(skip_all, fields(backend = pool_backend_name(pool), page))]
 pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<QueryResult> {
-    match pool {
+    let mut result = match pool {
         DbPool::Postgres(pg) => execute_page_pg(pg, sql, page).await,
         DbPool::Sqlite(sq) => execute_page_sqlite(sq, sql, page).await,
         DbPool::Mysql(my) => execute_page_mysql(my, sql, page).await,
         DbPool::Redis(cm) => execute_page_redis(cm, sql).await,
         DbPool::DynamoDb(client) => execute_page_dynamodb(client, sql).await,
+    }?;
+
+    // Fetch total count on page 0 for SQL backends (cheap enough for most queries)
+    if page == 0 && !matches!(pool, DbPool::Redis(_) | DbPool::DynamoDb(_)) {
+        result.total_count = fetch_total_count(pool, sql).await.ok();
     }
+
+    Ok(result)
+}
+
+/// Run `SELECT COUNT(*) FROM (sql)` to get the total row count.
+async fn fetch_total_count(pool: &DbPool, sql: &str) -> Result<u64> {
+    let trimmed = sql.trim_end_matches(';').trim();
+    let count_sql = format!("SELECT COUNT(*) AS cnt FROM ({trimmed}) AS _sbql_count");
+
+    let count: i64 = match pool {
+        DbPool::Postgres(pg) => {
+            sqlx::query_scalar(&count_sql).fetch_one(pg).await?
+        }
+        DbPool::Sqlite(sq) => {
+            sqlx::query_scalar::<_, i64>(&count_sql).fetch_one(sq).await?
+        }
+        DbPool::Mysql(my) => {
+            sqlx::query_scalar(&count_sql).fetch_one(my).await?
+        }
+        _ => return Err(SbqlError::Schema("Count not supported".into())),
+    };
+
+    Ok(count as u64)
 }
 
 /// Suggest distinct values for a column using prefix search.
@@ -122,6 +152,7 @@ async fn execute_page_pg(pool: &PgPool, sql: &str, page: usize) -> Result<QueryR
         rows: result_rows,
         page,
         has_next_page,
+        total_count: None,
     })
 }
 
@@ -180,6 +211,7 @@ async fn execute_page_sqlite(pool: &SqlitePool, sql: &str, page: usize) -> Resul
         rows: result_rows,
         page,
         has_next_page,
+        total_count: None,
     })
 }
 
@@ -239,6 +271,7 @@ async fn execute_page_mysql(pool: &MySqlPool, sql: &str, page: usize) -> Result<
         rows: result_rows,
         page,
         has_next_page,
+        total_count: None,
     })
 }
 
@@ -510,6 +543,7 @@ fn single_value_result(val: String) -> QueryResult {
         rows: vec![vec![val]],
         page: 0,
         has_next_page: false,
+        total_count: None,
     }
 }
 
@@ -520,6 +554,7 @@ fn kv_result(col_a: &str, col_b: &str, rows: Vec<Vec<String>>) -> QueryResult {
         rows,
         page: 0,
         has_next_page: false,
+        total_count: None,
     }
 }
 
@@ -560,6 +595,7 @@ pub fn redis_value_to_query_result(value: &redis::Value) -> QueryResult {
             rows: text.lines().map(|l| vec![l.to_string()]).collect(),
             page: 0,
             has_next_page: false,
+            total_count: None,
         },
         redis::Value::BigNumber(n) => single_value_result(n.to_string()),
         redis::Value::Map(pairs) => {
@@ -591,6 +627,7 @@ pub fn redis_value_to_query_result(value: &redis::Value) -> QueryResult {
             rows: vec![vec![format!("ERR {}", e.details().unwrap_or_default())]],
             page: 0,
             has_next_page: false,
+            total_count: None,
         },
     }
 }
@@ -700,6 +737,7 @@ async fn execute_page_dynamodb(
         rows,
         page: 0,
         has_next_page: false,
+        total_count: None,
     })
 }
 

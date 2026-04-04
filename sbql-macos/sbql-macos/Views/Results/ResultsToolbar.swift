@@ -159,13 +159,20 @@ struct ResultsToolbar: View {
             }
 
             // Row count
-            Text("\(appVM.results.currentResult.rowCount) rows")
-                .font(SbqlTheme.Typography.caption)
-                .foregroundStyle(SbqlTheme.Colors.textTertiary)
-                .padding(.horizontal, SbqlTheme.Spacing.sm)
-                .padding(.vertical, SbqlTheme.Spacing.xxs)
-                .background(SbqlTheme.Colors.surfaceElevated)
-                .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
+            HStack(spacing: 2) {
+                Text("\(appVM.results.currentResult.rowCount) rows")
+                    .font(SbqlTheme.Typography.caption)
+                    .foregroundStyle(SbqlTheme.Colors.textTertiary)
+                if let total = appVM.results.currentResult.totalCount, total > 0 {
+                    Text("/ \(total) total")
+                        .font(SbqlTheme.Typography.caption)
+                        .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.6))
+                }
+            }
+            .padding(.horizontal, SbqlTheme.Spacing.sm)
+            .padding(.vertical, SbqlTheme.Spacing.xxs)
+            .background(SbqlTheme.Colors.surfaceElevated)
+            .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
 
             // Pagination
             HStack(spacing: SbqlTheme.Spacing.xs) {

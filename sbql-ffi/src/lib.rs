@@ -68,6 +68,7 @@ pub struct FfiQueryResult {
     pub rows: Vec<Vec<String>>,
     pub page: u32,
     pub has_next_page: bool,
+    pub total_count: Option<u64>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -527,6 +528,7 @@ fn extract_query_result(events: Vec<sbql_core::CoreEvent>) -> Result<FfiQueryRes
         rows: vec![],
         page: 0,
         has_next_page: false,
+        total_count: None,
     })
 }
 

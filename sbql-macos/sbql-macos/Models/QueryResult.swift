@@ -6,6 +6,7 @@ struct QueryResultData: Equatable {
     let rows: [[String]]
     let page: UInt32
     let hasNextPage: Bool
+    let totalCount: UInt64?
 
     var isEmpty: Bool {
         rows.isEmpty
@@ -19,7 +20,7 @@ struct QueryResultData: Equatable {
         columns.count
     }
 
-    static let empty = QueryResultData(columns: [], rows: [], page: 0, hasNextPage: false)
+    static let empty = QueryResultData(columns: [], rows: [], page: 0, hasNextPage: false, totalCount: nil)
 }
 
 extension QueryResultData {
@@ -28,5 +29,6 @@ extension QueryResultData {
         rows = ffi.rows
         page = ffi.page
         hasNextPage = ffi.hasNextPage
+        totalCount = ffi.totalCount
     }
 }

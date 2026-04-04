@@ -123,6 +123,7 @@ impl From<sbql_core::QueryResult> for FfiQueryResult {
             rows: r.rows,
             page: r.page as u32,
             has_next_page: r.has_next_page,
+            total_count: r.total_count,
         }
     }
 }

@@ -1541,14 +1541,16 @@ public struct FfiQueryResult {
     public var rows: [[String]]
     public var page: UInt32
     public var hasNextPage: Bool
+    public var totalCount: UInt64?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(columns: [String], rows: [[String]], page: UInt32, hasNextPage: Bool) {
+    public init(columns: [String], rows: [[String]], page: UInt32, hasNextPage: Bool, totalCount: UInt64?) {
         self.columns = columns
         self.rows = rows
         self.page = page
         self.hasNextPage = hasNextPage
+        self.totalCount = totalCount
     }
 }
 
@@ -1571,6 +1573,9 @@ extension FfiQueryResult: Equatable, Hashable {
         if lhs.hasNextPage != rhs.hasNextPage {
             return false
         }
+        if lhs.totalCount != rhs.totalCount {
+            return false
+        }
         return true
     }
 
@@ -1579,6 +1584,7 @@ extension FfiQueryResult: Equatable, Hashable {
         hasher.combine(rows)
         hasher.combine(page)
         hasher.combine(hasNextPage)
+        hasher.combine(totalCount)
     }
 }
 
@@ -1594,7 +1600,8 @@ public struct FfiConverterTypeFfiQueryResult: FfiConverterRustBuffer {
                 columns: FfiConverterSequenceString.read(from: &buf), 
                 rows: FfiConverterSequenceSequenceString.read(from: &buf), 
                 page: FfiConverterUInt32.read(from: &buf), 
-                hasNextPage: FfiConverterBool.read(from: &buf)
+                hasNextPage: FfiConverterBool.read(from: &buf), 
+                totalCount: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
@@ -1603,6 +1610,7 @@ public struct FfiConverterTypeFfiQueryResult: FfiConverterRustBuffer {
         FfiConverterSequenceSequenceString.write(value.rows, into: &buf)
         FfiConverterUInt32.write(value.page, into: &buf)
         FfiConverterBool.write(value.hasNextPage, into: &buf)
+        FfiConverterOptionUInt64.write(value.totalCount, into: &buf)
     }
 }
 
@@ -2183,6 +2191,30 @@ extension SbqlFfiError: Foundation.LocalizedError {
 
 
 
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
+    typealias SwiftType = UInt64?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt64.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
 
 #if swift(>=5.8)
 @_documentation(visibility: private)

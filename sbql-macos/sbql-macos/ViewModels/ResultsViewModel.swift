@@ -170,7 +170,18 @@ final class ResultsViewModel {
     // MARK: - Existing API
 
     func applyResult(_ result: QueryResultData) {
-        currentResult = result
+        // Preserve totalCount from page 0 when navigating to subsequent pages
+        if result.totalCount == nil, let existingTotal = currentResult.totalCount {
+            currentResult = QueryResultData(
+                columns: result.columns,
+                rows: result.rows,
+                page: result.page,
+                hasNextPage: result.hasNextPage,
+                totalCount: existingTotal
+            )
+        } else {
+            currentResult = result
+        }
         dirtyCells.removeAll()
         pendingDeletions.removeAll()
         // Keep the active tab in sync
