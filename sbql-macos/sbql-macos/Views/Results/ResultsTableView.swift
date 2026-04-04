@@ -16,7 +16,7 @@ struct ResultsTableView: NSViewRepresentable {
         tableView.style = .plain
         tableView.backgroundColor = NSColor(SbqlTheme.Colors.background)
         tableView.rowHeight = SbqlTheme.Size.rowHeight
-        tableView.intercellSpacing = NSSize(width: 0, height: 1)
+        tableView.intercellSpacing = NSSize(width: 16, height: 1)
         tableView.gridColor = NSColor(SbqlTheme.Colors.borderSubtle)
         tableView.gridStyleMask = [.solidHorizontalGridLineMask]
         tableView.usesAlternatingRowBackgroundColors = false
