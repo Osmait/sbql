@@ -202,6 +202,7 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
                 sbql_core::DbBackend::Redis => "Redis",
                 sbql_core::DbBackend::DynamoDb => "DynamoDB",
                 sbql_core::DbBackend::MongoDb => "MongoDB",
+                sbql_core::DbBackend::SqlServer => "SQL Server",
             };
             let hint = if is_active { "  Space: cycle" } else { "" };
             let para = Paragraph::new(format!("{backend_display}{hint}")).block(
@@ -273,6 +274,15 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
                 6 => &form.password,
                 _ => continue,
             },
+            sbql_core::DbBackend::SqlServer => match i {
+                1 => &form.name,
+                2 => &form.host,
+                3 => &form.port,
+                4 => &form.user,
+                5 => &form.database,
+                6 => &form.password,
+                _ => continue,
+            },
         };
 
         let is_password = ((form.backend == sbql_core::DbBackend::Postgres
@@ -280,7 +290,8 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
             && i == 6)
             || (form.backend == sbql_core::DbBackend::Redis && i == 4)
             || (form.backend == sbql_core::DbBackend::DynamoDb && i == 6)
-            || (form.backend == sbql_core::DbBackend::MongoDb && i == 6);
+            || (form.backend == sbql_core::DbBackend::MongoDb && i == 6)
+            || (form.backend == sbql_core::DbBackend::SqlServer && i == 6);
         let display = if is_password {
             if value.is_empty() && form.editing_id.is_some() {
                 "(unchanged)".to_owned()

@@ -32,6 +32,12 @@ pub enum SbqlError {
     #[error("MongoDB error: {0}")]
     MongoDb(String),
 
+    #[error("SQL Server error: {0}")]
+    SqlServer(String),
+
+    #[error("Import error: {0}")]
+    Import(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

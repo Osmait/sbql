@@ -19,6 +19,7 @@ uuid.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+csv.workspace = true
 dirs = "5"
 futures = "0.3"
 indexmap.workspace = true
@@ -26,6 +27,10 @@ redis.workspace = true
 aws-config.workspace = true
 aws-sdk-dynamodb.workspace = true
 mongodb.workspace = true
+tiberius.workspace = true
+bb8.workspace = true
+bb8-tiberius.workspace = true
+tokio-util.workspace = true
 
 [features]
 dhat-heap = ["dep:dhat"]

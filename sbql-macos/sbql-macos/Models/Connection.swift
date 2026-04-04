@@ -22,6 +22,7 @@ struct Connection: Identifiable, Hashable {
         case mysql
         case dynamodb
         case mongodb
+        case sqlserver
     }
 
     enum SSLMode: String, CaseIterable, Hashable {
@@ -54,6 +55,8 @@ struct Connection: Identifiable, Hashable {
             "\(host):\(port) (\(database))"
         case .mongodb:
             "\(host):\(port)/\(database)"
+        case .sqlserver:
+            "\(user)@\(host):\(port)/\(database)"
         }
     }
 
@@ -106,6 +109,19 @@ struct Connection: Identifiable, Hashable {
             port: 27017,
             user: "",
             database: "",
+            sslMode: .prefer
+        )
+    }
+
+    static func newSqlServer() -> Connection {
+        Connection(
+            id: UUID().uuidString.lowercased(),
+            name: "",
+            backend: .sqlserver,
+            host: "localhost",
+            port: 1433,
+            user: "sa",
+            database: "master",
             sslMode: .prefer
         )
     }
@@ -166,6 +182,7 @@ extension Connection.Backend {
         case .mysql: self = .mysql
         case .dynamoDb: self = .dynamodb
         case .mongoDb: self = .mongodb
+        case .sqlServer: self = .sqlserver
         }
     }
 
@@ -177,6 +194,7 @@ extension Connection.Backend {
         case .mysql: .mysql
         case .dynamodb: .dynamoDb
         case .mongodb: .mongoDb
+        case .sqlserver: .sqlServer
         }
     }
 }

@@ -22,6 +22,7 @@ pub enum FfiDbBackend {
     Redis,
     DynamoDb,
     MongoDb,
+    SqlServer,
 }
 
 #[derive(Debug, Clone, uniffi::Enum)]
@@ -44,6 +45,12 @@ pub enum FfiExportFormat {
     Csv,
     Json,
     SqlInsert,
+}
+
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum FfiImportFormat {
+    Csv,
+    Json,
 }
 
 // ---------------------------------------------------------------------------
@@ -430,6 +437,29 @@ impl SbqlEngine {
             FfiExportFormat::SqlInsert => sbql_core::ExportFormat::SqlInsert,
         };
         core.export_all(&path, fmt, &table_name)
+            .await
+            .map_err(|e| SbqlFfiError::core(e.to_string()))
+    }
+
+    // -------------------------------------------------------------------
+    // Import
+    // -------------------------------------------------------------------
+
+    /// Import a CSV or JSON file into a database table.
+    #[uniffi::method(async_runtime = "tokio")]
+    pub async fn import_file(
+        &self,
+        path: String,
+        format: FfiImportFormat,
+        schema: String,
+        table_name: String,
+    ) -> Result<u64, SbqlFfiError> {
+        let core = self.core.lock().await;
+        let fmt = match format {
+            FfiImportFormat::Csv => sbql_core::ImportFormat::Csv,
+            FfiImportFormat::Json => sbql_core::ImportFormat::Json,
+        };
+        core.import_file(&path, fmt, &schema, &table_name)
             .await
             .map_err(|e| SbqlFfiError::core(e.to_string()))
     }

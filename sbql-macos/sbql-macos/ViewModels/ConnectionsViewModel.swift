@@ -31,7 +31,7 @@ final class ConnectionsViewModel {
     /// Connections grouped by backend, filtered by search.
     var groupedConnections: [(backend: Connection.Backend, connections: [Connection])] {
         let filtered = filteredConnections
-        let order: [Connection.Backend] = [.postgres, .mysql, .sqlite, .mongodb, .redis, .dynamodb]
+        let order: [Connection.Backend] = [.postgres, .mysql, .sqlserver, .sqlite, .mongodb, .redis, .dynamodb]
         return order.compactMap { backend in
             let group = filtered.filter { $0.backend == backend }
             return group.isEmpty ? nil : (backend: backend, connections: group)

@@ -119,6 +119,25 @@ impl ConnectionManager {
                 let db = client.database(&config.database);
                 DbPool::MongoDb(Box::new(db))
             }
+            DbBackend::SqlServer => {
+                let mut tib_config = tiberius::Config::new();
+                tib_config.host(&config.host);
+                tib_config.port(config.port);
+                tib_config.database(&config.database);
+                tib_config.authentication(tiberius::AuthMethod::sql_server(
+                    &config.user,
+                    password,
+                ));
+                tib_config.trust_cert();
+                let mgr = bb8_tiberius::ConnectionManager::new(tib_config);
+                let pool = bb8::Pool::builder()
+                    .max_size(5)
+                    .connection_timeout(std::time::Duration::from_secs(10))
+                    .build(mgr)
+                    .await
+                    .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+                DbPool::SqlServer(Box::new(pool))
+            }
         };
 
         self.pools.write().await.insert(config.id, pool);
@@ -158,6 +177,15 @@ impl ConnectionManager {
                 db.run_command(mongodb::bson::doc! { "ping": 1 })
                     .await
                     .map_err(|e| SbqlError::MongoDb(e.to_string()))?;
+            }
+            DbPool::SqlServer(pool) => {
+                let mut conn = pool
+                    .get()
+                    .await
+                    .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+                conn.query("SELECT 1", &[])
+                    .await
+                    .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
             }
         }
         Ok(())

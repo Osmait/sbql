@@ -14,6 +14,7 @@ pub enum DbBackend {
     Redis,
     DynamoDb,
     MongoDb,
+    SqlServer,
 }
 
 /// A pool that wraps either PostgreSQL, SQLite, or Redis.
@@ -25,6 +26,7 @@ pub enum DbPool {
     Redis(Box<redis::aio::ConnectionManager>),
     DynamoDb(Box<aws_sdk_dynamodb::Client>),
     MongoDb(Box<mongodb::Database>),
+    SqlServer(Box<bb8::Pool<bb8_tiberius::ConnectionManager>>),
 }
 
 impl std::fmt::Debug for DbPool {
@@ -45,6 +47,10 @@ impl std::fmt::Debug for DbPool {
                 .debug_tuple("MongoDb")
                 .field(&"Database(..)")
                 .finish(),
+            DbPool::SqlServer(_) => f
+                .debug_tuple("SqlServer")
+                .field(&"bb8::Pool(..)")
+                .finish(),
         }
     }
 }
@@ -59,6 +65,7 @@ impl DbPool {
             DbPool::Redis(_) => DbBackend::Redis,
             DbPool::DynamoDb(_) => DbBackend::DynamoDb,
             DbPool::MongoDb(_) => DbBackend::MongoDb,
+            DbPool::SqlServer(_) => DbBackend::SqlServer,
         }
     }
 
@@ -71,6 +78,7 @@ impl DbPool {
             DbPool::Redis(_) => { /* ConnectionManager manages its own lifecycle */ }
             DbPool::DynamoDb(_) => { /* SDK client manages its own lifecycle */ }
             DbPool::MongoDb(_) => { /* MongoDB client manages its own lifecycle */ }
+            DbPool::SqlServer(_) => { /* bb8 pool manages its own lifecycle */ }
         }
     }
 }

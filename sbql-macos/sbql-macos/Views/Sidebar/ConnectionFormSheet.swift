@@ -15,6 +15,7 @@ struct ConnectionFormSheet: View {
         (.mongodb, "MG", "MongoDB", Color(hex: 0x47A248)),
         (.redis, "RD", "Redis", Color(hex: 0xD82C20)),
         (.dynamodb, "DB", "DynamoDB", Color(hex: 0x4053D6)),
+        (.sqlserver, "MS", "SQL Server", Color(hex: 0xCC2927)),
     ]
 
     var body: some View {
@@ -77,10 +78,12 @@ struct ConnectionFormSheet: View {
                     // Dynamic form fields based on backend
                     Group {
                         switch connection.backend {
-                        case .postgres, .mysql:
-                            sqlFormFields(defaultUser: connection.backend == .mysql ? "root" : "postgres",
-                                          defaultDb: connection.backend == .mysql ? "mydb" : "postgres",
-                                          showSSL: true)
+                        case .postgres, .mysql, .sqlserver:
+                            sqlFormFields(
+                                defaultUser: connection.backend == .mysql ? "root" : connection.backend == .sqlserver ? "sa" : "postgres",
+                                defaultDb: connection.backend == .mysql ? "mydb" : connection.backend == .sqlserver ? "master" : "postgres",
+                                showSSL: connection.backend != .sqlserver
+                            )
                         case .mongodb:
                             formField("Host", text: $connection.host, prompt: "localhost")
                             formField("Port", value: $connection.port)

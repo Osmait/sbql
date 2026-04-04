@@ -153,6 +153,27 @@ impl ConnectionConfig {
         }
     }
 
+    /// Create a new SQL Server connection config.
+    pub fn new_sqlserver(
+        name: impl Into<String>,
+        host: impl Into<String>,
+        port: u16,
+        user: impl Into<String>,
+        database: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            backend: DbBackend::SqlServer,
+            host: host.into(),
+            port,
+            user: user.into(),
+            database: database.into(),
+            ssl_mode: SslMode::default(),
+            file_path: None,
+        }
+    }
+
     /// Create a new Redis connection config.
     pub fn new_redis(name: impl Into<String>, host: impl Into<String>, port: u16) -> Self {
         Self {
@@ -228,6 +249,16 @@ impl ConnectionConfig {
                         self.host, self.port, self.database,
                     )
                 }
+            }
+            DbBackend::SqlServer => {
+                format!(
+                    "sqlserver://{}:{}@{}:{}/{}",
+                    self.user,
+                    urlencoding_simple(password),
+                    self.host,
+                    self.port,
+                    self.database,
+                )
             }
         }
     }

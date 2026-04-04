@@ -581,6 +581,11 @@ public protocol SbqlEngineProtocol: AnyObject, Sendable {
     func getPrimaryKeys(schema: String, table: String) async throws  -> [String]
     
     /**
+     * Import a CSV or JSON file into a database table.
+     */
+    func importFile(path: String, format: FfiImportFormat, schema: String, tableName: String) async throws  -> UInt64
+    
+    /**
      * List tables in the active connection.
      */
     func listTables() async throws  -> [FfiTableEntry]
@@ -914,6 +919,26 @@ open func getPrimaryKeys(schema: String, table: String)async throws  -> [String]
             completeFunc: ffi_sbql_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_sbql_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceString.lift,
+            errorHandler: FfiConverterTypeSbqlFfiError_lift
+        )
+}
+    
+    /**
+     * Import a CSV or JSON file into a database table.
+     */
+open func importFile(path: String, format: FfiImportFormat, schema: String, tableName: String)async throws  -> UInt64  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_sbql_ffi_fn_method_sbqlengine_import_file(
+                    self.uniffiClonePointer(),
+                    FfiConverterString.lower(path),FfiConverterTypeFfiImportFormat_lower(format),FfiConverterString.lower(schema),FfiConverterString.lower(tableName)
+                )
+            },
+            pollFunc: ffi_sbql_ffi_rust_future_poll_u64,
+            completeFunc: ffi_sbql_ffi_rust_future_complete_u64,
+            freeFunc: ffi_sbql_ffi_rust_future_free_u64,
+            liftFunc: FfiConverterUInt64.lift,
             errorHandler: FfiConverterTypeSbqlFfiError_lift
         )
 }
@@ -1788,6 +1813,7 @@ public enum FfiDbBackend {
     case redis
     case dynamoDb
     case mongoDb
+    case sqlServer
 }
 
 
@@ -1816,6 +1842,8 @@ public struct FfiConverterTypeFfiDbBackend: FfiConverterRustBuffer {
         case 5: return .dynamoDb
         
         case 6: return .mongoDb
+        
+        case 7: return .sqlServer
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -1847,6 +1875,10 @@ public struct FfiConverterTypeFfiDbBackend: FfiConverterRustBuffer {
         
         case .mongoDb:
             writeInt(&buf, Int32(6))
+        
+        
+        case .sqlServer:
+            writeInt(&buf, Int32(7))
         
         }
     }
@@ -1946,6 +1978,76 @@ public func FfiConverterTypeFfiExportFormat_lower(_ value: FfiExportFormat) -> R
 
 
 extension FfiExportFormat: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum FfiImportFormat {
+    
+    case csv
+    case json
+}
+
+
+#if compiler(>=6)
+extension FfiImportFormat: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiImportFormat: FfiConverterRustBuffer {
+    typealias SwiftType = FfiImportFormat
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiImportFormat {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .csv
+        
+        case 2: return .json
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FfiImportFormat, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .csv:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .json:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiImportFormat_lift(_ buf: RustBuffer) throws -> FfiImportFormat {
+    return try FfiConverterTypeFfiImportFormat.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiImportFormat_lower(_ value: FfiImportFormat) -> RustBuffer {
+    return FfiConverterTypeFfiImportFormat.lower(value)
+}
+
+
+extension FfiImportFormat: Equatable, Hashable {}
 
 
 
@@ -2520,6 +2622,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sbql_ffi_checksum_method_sbqlengine_get_primary_keys() != 49847) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sbql_ffi_checksum_method_sbqlengine_import_file() != 54017) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sbql_ffi_checksum_method_sbqlengine_list_tables() != 23806) {

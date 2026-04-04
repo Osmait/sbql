@@ -14,6 +14,7 @@ pub mod config;
 pub mod connection;
 pub mod error;
 mod handlers;
+pub mod import;
 pub mod pool;
 pub mod query;
 pub mod query_builder;
@@ -26,6 +27,7 @@ pub use config::{
 };
 pub use error::{Result, SbqlError};
 pub use pool::{DbBackend, DbPool};
+pub use import::ImportFormat;
 pub use query::{ExportFormat, QueryResult, PAGE_SIZE};
 pub use query_builder::SortDirection;
 pub use schema::{ColumnInfo, DiagramData, ForeignKey, TableEntry, TableSchema};
@@ -234,6 +236,18 @@ impl Core {
     // -----------------------------------------------------------------------
     // Helpers used by handler modules
     // -----------------------------------------------------------------------
+
+    /// Import a CSV or JSON file into a database table.
+    pub async fn import_file(
+        &self,
+        path: &str,
+        format: ImportFormat,
+        schema: &str,
+        table: &str,
+    ) -> Result<u64> {
+        let pool = self.active_pool().await?;
+        import::import_file(&pool, path, format, schema, table).await
+    }
 
     /// Stream all rows of the current effective SQL to a file.
     pub async fn export_all(

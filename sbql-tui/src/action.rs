@@ -1011,6 +1011,44 @@ fn apply_form_submit(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCo
             };
             (config, password)
         }
+        sbql_core::DbBackend::SqlServer => {
+            if form.host.trim().is_empty() {
+                state.conn.form.error = Some("Host is required".into());
+                return;
+            }
+            let port: u16 = match form.port.trim().parse() {
+                Ok(p) => p,
+                Err(_) => {
+                    state.conn.form.error = Some("Port must be a number (1-65535)".into());
+                    return;
+                }
+            };
+            if form.database.trim().is_empty() {
+                state.conn.form.error = Some("Database is required".into());
+                return;
+            }
+
+            let mut config = sbql_core::ConnectionConfig::new_sqlserver(
+                form.name.trim(),
+                form.host.trim(),
+                port,
+                form.user.trim(),
+                form.database.trim(),
+            );
+
+            if let Some(id) = form.editing_id {
+                config.id = id;
+            }
+
+            let password = if form.password.is_empty() && form.editing_id.is_some() {
+                None
+            } else if form.password.is_empty() {
+                Some(String::new())
+            } else {
+                Some(form.password.clone())
+            };
+            (config, password)
+        }
     };
 
     let _ = cmd_tx.send(CoreCommand::SaveConnection { config, password });

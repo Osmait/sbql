@@ -164,6 +164,16 @@ impl ConnectionForm {
                 6 => "Password",
                 _ => "",
             },
+            DbBackend::SqlServer => match idx {
+                0 => "Backend",
+                1 => "Name",
+                2 => "Host",
+                3 => "Port",
+                4 => "User",
+                5 => "Database",
+                6 => "Password",
+                _ => "",
+            },
         }
     }
 
@@ -175,6 +185,7 @@ impl ConnectionForm {
             DbBackend::Redis => 6,    // backend, name, host, port, password, database
             DbBackend::DynamoDb => 7, // backend, name, endpoint, port, region, access_key, secret_key
             DbBackend::MongoDb => 7,  // backend, name, host, port, database, user, password
+            DbBackend::SqlServer => 7, // backend, name, host, port, user, database, password
         }
     }
 
@@ -186,7 +197,8 @@ impl ConnectionForm {
             DbBackend::Sqlite => DbBackend::Redis,
             DbBackend::Redis => DbBackend::DynamoDb,
             DbBackend::DynamoDb => DbBackend::MongoDb,
-            DbBackend::MongoDb => DbBackend::Postgres,
+            DbBackend::MongoDb => DbBackend::SqlServer,
+            DbBackend::SqlServer => DbBackend::Postgres,
         };
         self.field_index = 0;
     }
@@ -247,6 +259,16 @@ impl ConnectionForm {
                 3 => Some(&mut self.port),
                 4 => Some(&mut self.database),
                 5 => Some(&mut self.user),
+                6 => Some(&mut self.password),
+                _ => None,
+            },
+            DbBackend::SqlServer => match self.field_index {
+                0 => None, // Backend is cycled
+                1 => Some(&mut self.name),
+                2 => Some(&mut self.host),
+                3 => Some(&mut self.port),
+                4 => Some(&mut self.user),
+                5 => Some(&mut self.database),
                 6 => Some(&mut self.password),
                 _ => None,
             },

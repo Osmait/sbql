@@ -86,6 +86,7 @@ pub async fn list_tables(pool: &DbPool) -> Result<Vec<TableEntry>> {
         DbPool::Redis(_) => Ok(vec![]),
         DbPool::DynamoDb(client) => list_tables_dynamodb(client).await,
         DbPool::MongoDb(db) => list_tables_mongodb(db).await,
+        DbPool::SqlServer(pool) => list_tables_sqlserver(pool).await,
     }
 }
 
@@ -99,6 +100,7 @@ pub async fn get_primary_keys(pool: &DbPool, schema: &str, table: &str) -> Resul
         DbPool::Redis(_) => Ok(vec![]),
         DbPool::DynamoDb(client) => get_primary_keys_dynamodb(client, table).await,
         DbPool::MongoDb(_) => Ok(vec!["_id".to_string()]),
+        DbPool::SqlServer(pool) => get_primary_keys_sqlserver(pool, schema, table).await,
     }
 }
 
@@ -112,6 +114,7 @@ pub async fn load_diagram(pool: &DbPool) -> Result<DiagramData> {
         DbPool::Redis(_) => Ok(DiagramData::default()),
         DbPool::DynamoDb(_) => Ok(DiagramData::default()),
         DbPool::MongoDb(_) => Ok(DiagramData::default()),
+        DbPool::SqlServer(pool) => load_diagram_sqlserver(pool).await,
     }
 }
 
@@ -144,6 +147,10 @@ pub async fn execute_cell_update(
         DbPool::MongoDb(_) => Err(SbqlError::Schema(
             "Cell update not supported for MongoDB".into(),
         )),
+        DbPool::SqlServer(pool) => {
+            execute_cell_update_sqlserver(pool, schema, table, pk_col, pk_val, target_col, new_val)
+                .await
+        }
     }
 }
 
@@ -168,6 +175,9 @@ pub async fn execute_row_delete(
         DbPool::MongoDb(_) => Err(SbqlError::Schema(
             "Row delete not supported for MongoDB".into(),
         )),
+        DbPool::SqlServer(pool) => {
+            execute_row_delete_sqlserver(pool, schema, table, pk_col, pk_val).await
+        }
     }
 }
 
@@ -789,6 +799,307 @@ async fn execute_row_delete_mysql(
 /// Quote an identifier for MySQL using backticks.
 fn quote_ident_mysql(ident: &str) -> String {
     format!("`{}`", ident.replace('`', "``"))
+}
+
+// ---------------------------------------------------------------------------
+// SQL Server implementations
+// ---------------------------------------------------------------------------
+
+async fn list_tables_sqlserver(
+    pool: &bb8::Pool<bb8_tiberius::ConnectionManager>,
+) -> Result<Vec<TableEntry>> {
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    let stream = conn
+        .query(
+            "SELECT s.name AS table_schema, t.name AS table_name \
+             FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id \
+             ORDER BY s.name, t.name",
+            &[],
+        )
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    let rows = stream
+        .into_first_result()
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+
+    Ok(rows
+        .iter()
+        .map(|r| TableEntry {
+            schema: r
+                .try_get::<&str, _>("table_schema")
+                .ok()
+                .flatten()
+                .unwrap_or("dbo")
+                .to_string(),
+            name: r
+                .try_get::<&str, _>("table_name")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
+        })
+        .collect())
+}
+
+async fn get_primary_keys_sqlserver(
+    pool: &bb8::Pool<bb8_tiberius::ConnectionManager>,
+    schema: &str,
+    table: &str,
+) -> Result<Vec<String>> {
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    let stream = conn
+        .query(
+            "SELECT c.name AS column_name FROM sys.index_columns ic \
+             JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id \
+             JOIN sys.indexes i ON ic.object_id = i.object_id AND ic.index_id = i.index_id \
+             JOIN sys.tables t ON i.object_id = t.object_id \
+             JOIN sys.schemas s ON t.schema_id = s.schema_id \
+             WHERE i.is_primary_key = 1 AND s.name = @P1 AND t.name = @P2 \
+             ORDER BY ic.key_ordinal",
+            &[&schema, &table],
+        )
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    let rows = stream
+        .into_first_result()
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+
+    let pks: Vec<String> = rows
+        .iter()
+        .filter_map(|r| {
+            r.try_get::<&str, _>("column_name")
+                .ok()
+                .flatten()
+                .map(|s| s.to_string())
+        })
+        .collect();
+
+    if pks.is_empty() {
+        return Err(SbqlError::Schema(format!(
+            "No primary key found for {schema}.{table}"
+        )));
+    }
+
+    Ok(pks)
+}
+
+async fn load_diagram_sqlserver(
+    pool: &bb8::Pool<bb8_tiberius::ConnectionManager>,
+) -> Result<DiagramData> {
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+
+    // --- Columns with PK flag ---
+    let col_stream = conn
+        .query(
+            "SELECT s.name AS table_schema, t.name AS table_name, \
+             c.name AS column_name, tp.name AS data_type, \
+             c.is_nullable, \
+             CASE WHEN EXISTS ( \
+                SELECT 1 FROM sys.index_columns ic \
+                JOIN sys.indexes i ON ic.object_id = i.object_id AND ic.index_id = i.index_id \
+                WHERE i.is_primary_key = 1 AND ic.object_id = c.object_id AND ic.column_id = c.column_id \
+             ) THEN 1 ELSE 0 END AS is_pk \
+             FROM sys.columns c \
+             JOIN sys.tables t ON c.object_id = t.object_id \
+             JOIN sys.schemas s ON t.schema_id = s.schema_id \
+             JOIN sys.types tp ON c.user_type_id = tp.user_type_id \
+             ORDER BY s.name, t.name, c.column_id",
+            &[],
+        )
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    let col_rows = col_stream
+        .into_first_result()
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+
+    let mut table_map: indexmap::IndexMap<(String, String), Vec<ColumnInfo>> =
+        indexmap::IndexMap::new();
+    for row in &col_rows {
+        let ts = row
+            .try_get::<&str, _>("table_schema")
+            .ok()
+            .flatten()
+            .unwrap_or("dbo")
+            .to_string();
+        let tn = row
+            .try_get::<&str, _>("table_name")
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .to_string();
+        let is_pk: bool = row.try_get::<i32, _>("is_pk").ok().flatten().unwrap_or(0) == 1;
+        let is_nullable: bool =
+            row.try_get::<bool, _>("is_nullable").ok().flatten().unwrap_or(true);
+        let col = ColumnInfo {
+            name: row
+                .try_get::<&str, _>("column_name")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
+            data_type: row
+                .try_get::<&str, _>("data_type")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
+            is_pk,
+            is_nullable,
+        };
+        table_map.entry((ts, tn)).or_default().push(col);
+    }
+
+    let tables: Vec<TableSchema> = table_map
+        .into_iter()
+        .map(|((schema, name), columns)| TableSchema {
+            schema,
+            name,
+            columns,
+        })
+        .collect();
+
+    // --- Foreign keys ---
+    let fk_stream = conn
+        .query(
+            "SELECT fk.name AS constraint_name, \
+             ps.name AS from_schema, pt.name AS from_table, pc.name AS from_col, \
+             rs.name AS to_schema, rt.name AS to_table, rc.name AS to_col \
+             FROM sys.foreign_keys fk \
+             JOIN sys.foreign_key_columns fkc ON fk.object_id = fkc.constraint_object_id \
+             JOIN sys.tables pt ON fkc.parent_object_id = pt.object_id \
+             JOIN sys.schemas ps ON pt.schema_id = ps.schema_id \
+             JOIN sys.columns pc ON fkc.parent_object_id = pc.object_id AND fkc.parent_column_id = pc.column_id \
+             JOIN sys.tables rt ON fkc.referenced_object_id = rt.object_id \
+             JOIN sys.schemas rs ON rt.schema_id = rs.schema_id \
+             JOIN sys.columns rc ON fkc.referenced_object_id = rc.object_id AND fkc.referenced_column_id = rc.column_id \
+             ORDER BY ps.name, pt.name, fk.name",
+            &[],
+        )
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    let fk_rows = fk_stream
+        .into_first_result()
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+
+    let foreign_keys: Vec<ForeignKey> = fk_rows
+        .iter()
+        .map(|row| ForeignKey {
+            constraint_name: row
+                .try_get::<&str, _>("constraint_name")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
+            from_schema: row
+                .try_get::<&str, _>("from_schema")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
+            from_table: row
+                .try_get::<&str, _>("from_table")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
+            from_col: row
+                .try_get::<&str, _>("from_col")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
+            to_schema: row
+                .try_get::<&str, _>("to_schema")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
+            to_table: row
+                .try_get::<&str, _>("to_table")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
+            to_col: row
+                .try_get::<&str, _>("to_col")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string(),
+        })
+        .collect();
+
+    Ok(DiagramData {
+        tables,
+        foreign_keys,
+    })
+}
+
+async fn execute_cell_update_sqlserver(
+    pool: &bb8::Pool<bb8_tiberius::ConnectionManager>,
+    schema: &str,
+    table: &str,
+    pk_col: &str,
+    pk_val: &str,
+    target_col: &str,
+    new_val: &str,
+) -> Result<()> {
+    let q_schema = quote_ident_sqlserver(schema);
+    let q_table = quote_ident_sqlserver(table);
+    let q_target = quote_ident_sqlserver(target_col);
+    let q_pk = quote_ident_sqlserver(pk_col);
+    let sql = format!(
+        "UPDATE {q_schema}.{q_table} SET {q_target} = @P1 WHERE CAST({q_pk} AS NVARCHAR(MAX)) = @P2"
+    );
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    conn.execute(&sql, &[&new_val, &pk_val])
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    Ok(())
+}
+
+async fn execute_row_delete_sqlserver(
+    pool: &bb8::Pool<bb8_tiberius::ConnectionManager>,
+    schema: &str,
+    table: &str,
+    pk_col: &str,
+    pk_val: &str,
+) -> Result<()> {
+    let q_schema = quote_ident_sqlserver(schema);
+    let q_table = quote_ident_sqlserver(table);
+    let q_pk = quote_ident_sqlserver(pk_col);
+    let sql = format!(
+        "DELETE FROM {q_schema}.{q_table} WHERE CAST({q_pk} AS NVARCHAR(MAX)) = @P1"
+    );
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    conn.execute(&sql, &[&pk_val])
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    Ok(())
+}
+
+/// Quote an identifier for SQL Server using brackets.
+fn quote_ident_sqlserver(ident: &str) -> String {
+    format!("[{}]", ident.replace(']', "]]"))
 }
 
 // ---------------------------------------------------------------------------

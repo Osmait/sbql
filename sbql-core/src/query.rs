@@ -21,6 +21,7 @@ pub fn pool_backend_name(pool: &DbPool) -> &'static str {
         DbPool::Redis(_) => "redis",
         DbPool::DynamoDb(_) => "dynamodb",
         DbPool::MongoDb(_) => "mongodb",
+        DbPool::SqlServer(_) => "sqlserver",
     }
 }
 
@@ -61,7 +62,7 @@ pub async fn export_all(
         DbPool::Postgres(pg) => export_all_pg(pg, sql, path, format, table_name).await,
         DbPool::Sqlite(sq) => export_all_sqlite(sq, sql, path, format, table_name).await,
         DbPool::Mysql(my) => export_all_mysql(my, sql, path, format, table_name).await,
-        DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_) => {
+        DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_) | DbPool::SqlServer(_) => {
             Err(SbqlError::Schema("Export not supported for this backend".into()))
         }
     }
@@ -78,10 +79,11 @@ pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<Query
         DbPool::Redis(cm) => execute_page_redis(cm, sql).await,
         DbPool::DynamoDb(client) => execute_page_dynamodb(client, sql).await,
         DbPool::MongoDb(db) => execute_page_mongodb(db, sql).await,
+        DbPool::SqlServer(pool) => execute_page_sqlserver(pool, sql, page).await,
     }?;
 
     // Fetch total count on page 0 for SQL backends (cheap enough for most queries)
-    if page == 0 && !matches!(pool, DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_)) {
+    if page == 0 && !matches!(pool, DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_) | DbPool::SqlServer(_)) {
         result.total_count = fetch_total_count(pool, sql).await.ok();
     }
 
@@ -102,6 +104,24 @@ async fn fetch_total_count(pool: &DbPool, sql: &str) -> Result<u64> {
         }
         DbPool::Mysql(my) => {
             sqlx::query_scalar(&count_sql).fetch_one(my).await?
+        }
+        DbPool::SqlServer(pool) => {
+            let mut conn = pool
+                .get()
+                .await
+                .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+            let stream = conn
+                .query(&count_sql, &[])
+                .await
+                .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+            let row = stream
+                .into_row()
+                .await
+                .map_err(|e| SbqlError::SqlServer(e.to_string()))?
+                .ok_or_else(|| SbqlError::SqlServer("No count row returned".into()))?;
+            row.try_get::<i32, _>("cnt")
+                .map_err(|e| SbqlError::SqlServer(e.to_string()))?
+                .unwrap_or(0) as i64
         }
         _ => return Err(SbqlError::Schema("Count not supported".into())),
     };
@@ -125,6 +145,7 @@ pub async fn suggest_distinct_values(
         DbPool::Redis(_) => Ok(vec![]),
         DbPool::DynamoDb(_) => Ok(vec![]),
         DbPool::MongoDb(_) => Ok(vec![]),
+        DbPool::SqlServer(_) => Ok(vec![]),
     }
 }
 
@@ -468,6 +489,172 @@ fn mysql_value_to_string(row: &MySqlRow, idx: usize, type_name: &str) -> String 
 /// Quote an identifier for MySQL using backticks.
 fn quote_ident_mysql(ident: &str) -> String {
     format!("`{}`", ident.replace('`', "``"))
+}
+
+// ---------------------------------------------------------------------------
+// SQL Server implementation
+// ---------------------------------------------------------------------------
+
+async fn execute_page_sqlserver(
+    pool: &bb8::Pool<bb8_tiberius::ConnectionManager>,
+    sql: &str,
+    page: usize,
+) -> Result<QueryResult> {
+    let trimmed = sql.trim_end_matches(';').trim();
+    let offset = page * PAGE_SIZE;
+    let paginated = format!(
+        "SELECT * FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS _sbql_rn FROM ({trimmed}) AS _sbql_inner) AS _sbql_outer WHERE _sbql_rn > {offset} AND _sbql_rn <= {}",
+        offset + PAGE_SIZE + 1
+    );
+
+    let mut conn = pool
+        .get()
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    let stream = conn
+        .query(&paginated, &[])
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    let result_sets = stream
+        .into_results()
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    let rows = result_sets.into_iter().next().unwrap_or_default();
+
+    let has_next_page = rows.len() > PAGE_SIZE;
+    let rows_to_show = if has_next_page {
+        &rows[..PAGE_SIZE]
+    } else {
+        &rows[..]
+    };
+
+    let columns: Vec<String> = if let Some(first) = rows_to_show.first() {
+        first
+            .columns()
+            .iter()
+            .filter(|c| c.name() != "_sbql_rn")
+            .map(|c| c.name().to_string())
+            .collect()
+    } else {
+        vec![]
+    };
+
+    let result_rows: Vec<Vec<String>> = rows_to_show
+        .iter()
+        .map(|row| {
+            row.columns()
+                .iter()
+                .filter(|c| c.name() != "_sbql_rn")
+                .map(|col| sqlserver_value_to_string(row, col))
+                .collect()
+        })
+        .collect();
+
+    // Fetch total count for SQL Server on page 0
+    let total_count = if page == 0 {
+        let count_sql = format!(
+            "SELECT COUNT(*) AS cnt FROM ({trimmed}) AS _sbql_count"
+        );
+        let count_stream = conn
+            .query(&count_sql, &[])
+            .await
+            .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+        let count_row = count_stream
+            .into_row()
+            .await
+            .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+        count_row
+            .and_then(|r| r.try_get::<i32, _>("cnt").ok().flatten())
+            .map(|c| c as u64)
+    } else {
+        None
+    };
+
+    Ok(QueryResult {
+        columns,
+        rows: result_rows,
+        page,
+        has_next_page,
+        total_count,
+    })
+}
+
+/// Convert a single SQL Server column value to a display string.
+fn sqlserver_value_to_string(row: &tiberius::Row, col: &tiberius::Column) -> String {
+    let col_name = col.name();
+
+    // Try common types via try_get by column name.
+    // String-like types (nvarchar, varchar, char, nchar, text, ntext)
+    if let Some(val) = row.try_get::<&str, _>(col_name).ok().flatten() {
+        return val.to_string();
+    }
+    // i32 (int)
+    if let Some(val) = row.try_get::<i32, _>(col_name).ok().flatten() {
+        return val.to_string();
+    }
+    // i64 (bigint)
+    if let Some(val) = row.try_get::<i64, _>(col_name).ok().flatten() {
+        return val.to_string();
+    }
+    // i16 (smallint)
+    if let Some(val) = row.try_get::<i16, _>(col_name).ok().flatten() {
+        return val.to_string();
+    }
+    // f64 (float)
+    if let Some(val) = row.try_get::<f64, _>(col_name).ok().flatten() {
+        return val.to_string();
+    }
+    // f32 (real)
+    if let Some(val) = row.try_get::<f32, _>(col_name).ok().flatten() {
+        return val.to_string();
+    }
+    // bool (bit)
+    if let Some(val) = row.try_get::<bool, _>(col_name).ok().flatten() {
+        return val.to_string();
+    }
+    // Numeric (decimal, numeric)
+    if let Some(val) = row
+        .try_get::<tiberius::numeric::Numeric, _>(col_name)
+        .ok()
+        .flatten()
+    {
+        return val.to_string();
+    }
+    // NaiveDate (date)
+    if let Some(val) = row
+        .try_get::<chrono::NaiveDate, _>(col_name)
+        .ok()
+        .flatten()
+    {
+        return val.to_string();
+    }
+    // NaiveDateTime (datetime, datetime2, smalldatetime)
+    if let Some(val) = row
+        .try_get::<chrono::NaiveDateTime, _>(col_name)
+        .ok()
+        .flatten()
+    {
+        return val.to_string();
+    }
+    // UUID (uniqueidentifier)
+    if let Some(val) = row
+        .try_get::<uuid::Uuid, _>(col_name)
+        .ok()
+        .flatten()
+    {
+        return val.to_string();
+    }
+    // u8 (tinyint)
+    if let Some(val) = row.try_get::<u8, _>(col_name).ok().flatten() {
+        return val.to_string();
+    }
+    // Binary (varbinary, binary, image) -> hex
+    if let Some(val) = row.try_get::<&[u8], _>(col_name).ok().flatten() {
+        return format!("\\x{}", hex_encode(val));
+    }
+
+    // NULL or truly unknown
+    String::new()
 }
 
 // ---------------------------------------------------------------------------

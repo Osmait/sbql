@@ -98,6 +98,7 @@ struct ConnectionRow: View {
         case .redis: ("RD", Color(hex: 0xD82C20))
         case .dynamodb: ("DB", Color(hex: 0x4053D6))
         case .mongodb: ("MG", Color(hex: 0x47A248))
+        case .sqlserver: ("MS", Color(hex: 0xCC2927))
         }
         return Text(label)
             .font(.system(size: 9, weight: .bold, design: .monospaced))

@@ -64,6 +64,15 @@ tree-sitter = "0.25"
 tree-sitter-highlight = "0.25"
 tree-sitter-sequel = "0.3"
 
+# SQL Server (tiberius + bb8 connection pooling)
+tiberius = { version = "0.12", default-features = false, features = ["chrono", "rustls"] }
+bb8 = "0.8"
+bb8-tiberius = "0.15"
+tokio-util = { version = "0.7", features = ["compat"] }
+
+# CSV parsing
+csv = "1"
+
 # Benchmarking & profiling
 criterion = { version = "0.5", features = ["async_tokio"] }
 dhat = "0.3"

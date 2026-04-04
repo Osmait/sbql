@@ -332,6 +332,11 @@ RustBuffer uniffi_sbql_ffi_fn_method_sbqlengine_get_connections(void*_Nonnull pt
 uint64_t uniffi_sbql_ffi_fn_method_sbqlengine_get_primary_keys(void*_Nonnull ptr, RustBuffer schema, RustBuffer table
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_FN_METHOD_SBQLENGINE_IMPORT_FILE
+#define UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_FN_METHOD_SBQLENGINE_IMPORT_FILE
+uint64_t uniffi_sbql_ffi_fn_method_sbqlengine_import_file(void*_Nonnull ptr, RustBuffer path, RustBuffer format, RustBuffer schema, RustBuffer table_name
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_FN_METHOD_SBQLENGINE_LIST_TABLES
 #define UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_FN_METHOD_SBQLENGINE_LIST_TABLES
 uint64_t uniffi_sbql_ffi_fn_method_sbqlengine_list_tables(void*_Nonnull ptr
@@ -712,6 +717,12 @@ uint16_t uniffi_sbql_ffi_checksum_method_sbqlengine_get_connections(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_CHECKSUM_METHOD_SBQLENGINE_GET_PRIMARY_KEYS
 #define UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_CHECKSUM_METHOD_SBQLENGINE_GET_PRIMARY_KEYS
 uint16_t uniffi_sbql_ffi_checksum_method_sbqlengine_get_primary_keys(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_CHECKSUM_METHOD_SBQLENGINE_IMPORT_FILE
+#define UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_CHECKSUM_METHOD_SBQLENGINE_IMPORT_FILE
+uint16_t uniffi_sbql_ffi_checksum_method_sbqlengine_import_file(void
     
 );
 #endif

@@ -56,6 +56,7 @@ impl From<sbql_core::DbBackend> for FfiDbBackend {
             sbql_core::DbBackend::Redis => FfiDbBackend::Redis,
             sbql_core::DbBackend::DynamoDb => FfiDbBackend::DynamoDb,
             sbql_core::DbBackend::MongoDb => FfiDbBackend::MongoDb,
+            sbql_core::DbBackend::SqlServer => FfiDbBackend::SqlServer,
         }
     }
 }
@@ -69,6 +70,7 @@ impl From<FfiDbBackend> for sbql_core::DbBackend {
             FfiDbBackend::Redis => sbql_core::DbBackend::Redis,
             FfiDbBackend::DynamoDb => sbql_core::DbBackend::DynamoDb,
             FfiDbBackend::MongoDb => sbql_core::DbBackend::MongoDb,
+            FfiDbBackend::SqlServer => sbql_core::DbBackend::SqlServer,
         }
     }
 }

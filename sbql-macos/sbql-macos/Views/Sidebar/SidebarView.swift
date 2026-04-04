@@ -135,6 +135,7 @@ struct SidebarView: View {
         case .redis: ("Redis", Color(hex: 0xD82C20))
         case .dynamodb: ("DynamoDB", Color(hex: 0x4053D6))
         case .mongodb: ("MongoDB", Color(hex: 0x47A248))
+        case .sqlserver: ("SQL Server", Color(hex: 0xCC2927))
         }
         return HStack(spacing: SbqlTheme.Spacing.xs) {
             Circle()
