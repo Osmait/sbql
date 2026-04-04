@@ -395,6 +395,59 @@ mod tests {
         assert_eq!(result, "SELECT * FROM \"my\"schema\".\"my\"table\"");
     }
 
+    // --- MySQL tests ---
+
+    #[test]
+    fn test_table_select_sql_mysql() {
+        assert_eq!(
+            table_select_sql("mydb", "users", DbBackend::Mysql),
+            "SELECT * FROM `mydb`.`users`"
+        );
+    }
+
+    #[test]
+    fn test_apply_order_mysql() {
+        let sql = "SELECT * FROM users";
+        let result =
+            apply_order(sql, "name", SortDirection::Ascending, DbBackend::Mysql).unwrap();
+        let upper = result.to_uppercase();
+        assert!(upper.contains("ORDER BY"), "missing ORDER BY: {result}");
+        assert!(upper.contains("NAME"), "missing column: {result}");
+        assert!(upper.contains("ASC"), "missing ASC: {result}");
+    }
+
+    #[test]
+    fn test_clear_order_mysql() {
+        let sql = "SELECT * FROM users ORDER BY name ASC";
+        let result = clear_order(sql, DbBackend::Mysql).unwrap();
+        assert!(!result.to_uppercase().contains("ORDER BY"));
+    }
+
+    #[test]
+    fn test_apply_filter_column_mysql() {
+        let sql = "SELECT * FROM users";
+        let result = apply_filter(sql, "status:active", None, DbBackend::Mysql).unwrap();
+        let upper = result.to_uppercase();
+        assert!(upper.contains("WHERE"), "missing WHERE: {result}");
+        assert!(upper.contains("LIKE"), "missing LIKE: {result}");
+        // MySQL uses LIKE (case-insensitive by default), not ILIKE
+        assert!(!upper.contains("ILIKE"), "should not use ILIKE for MySQL: {result}");
+        // MySQL should NOT have COLLATE NOCASE (that's SQLite)
+        assert!(!upper.contains("COLLATE NOCASE"), "should not use COLLATE NOCASE for MySQL: {result}");
+        assert!(upper.contains("%ACTIVE%"), "missing value: {result}");
+    }
+
+    #[test]
+    fn test_apply_filter_global_mysql() {
+        let sql = "SELECT * FROM users";
+        let cols = vec!["name".to_string(), "email".to_string()];
+        let result = apply_filter(sql, "alice", Some(&cols), DbBackend::Mysql).unwrap();
+        let upper = result.to_uppercase();
+        assert!(upper.contains("WHERE"));
+        assert!(upper.contains("LIKE"));
+        assert!(!upper.contains("ILIKE"));
+    }
+
     #[test]
     fn test_parse_filter_query_empty_string() {
         let (col, val) = parse_filter_query("");
