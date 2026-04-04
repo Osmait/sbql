@@ -12,7 +12,7 @@ final class ConnectionsViewModel {
     var editingConnection: Connection?
     var connectionFilter: String = ""
 
-    private let service = SbqlService.shared
+    private var service: SbqlService { SbqlService.shared }
 
     var activeConnection: Connection? {
         connections.first { $0.isConnected }

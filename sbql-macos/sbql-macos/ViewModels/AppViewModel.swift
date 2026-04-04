@@ -21,7 +21,7 @@ final class AppViewModel {
     var toastMessage: String?
     var toastIsError: Bool = false
 
-    private let service = SbqlService.shared
+    private var service: SbqlService { SbqlService.shared }
 
     enum ActiveTab: String, CaseIterable {
         case query = "Query"

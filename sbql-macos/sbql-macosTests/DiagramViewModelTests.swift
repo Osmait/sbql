@@ -210,8 +210,8 @@ struct DiagramViewModelTests {
         let bounds = vm.computeContentBounds()
         #expect(bounds.minX == 100)
         #expect(bounds.minY == 100)
-        // maxX = 500 + nodeWidth(240) = 740, width = 740 - 100 = 640
-        #expect(bounds.width == 640)
+        // maxX = 500 + nodeWidth(300) = 800, width = 800 - 100 = 700
+        #expect(bounds.width == 700)
         // maxY = 300 + headerHeight(32) + 5*rowHeight(22) = 300 + 142 = 442
         // height = 442 - 100 = 342
         let expectedHeight = 300 + DiagramLayout.headerHeight + 5 * DiagramLayout.rowHeight - 100
@@ -232,7 +232,7 @@ struct DiagramViewModelTests {
         // Scale should be clamped between 0.2 and 1.5
         #expect(vm.scale >= 0.2)
         #expect(vm.scale <= 1.5)
-        // Offset should be set (non-zero for centering)
-        #expect(vm.offset != .zero)
+        // fitToScreen now only adjusts scale (offset removed for simplicity)
+        #expect(vm.scale > 0)
     }
 }
