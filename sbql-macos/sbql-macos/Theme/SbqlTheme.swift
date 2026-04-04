@@ -20,6 +20,20 @@ enum SbqlTheme {
         static let border = Color(hex: 0x45475A) // Surface1
         static let borderSubtle = Color(hex: 0x313244) // Surface0
         static let selection = Color(hex: 0xCBA6F7).opacity(0.15) // Mauve
+
+        /// Distinct colors for FK relationship lines in the ER diagram.
+        static let fkLinePalette: [Color] = [
+            Color(hex: 0xCBA6F7), // Mauve
+            Color(hex: 0x89B4FA), // Blue
+            Color(hex: 0xA6E3A1), // Green
+            Color(hex: 0xFAB387), // Peach
+            Color(hex: 0xF38BA8), // Red
+            Color(hex: 0x94E2D5), // Teal
+            Color(hex: 0xF9E2AF), // Yellow
+            Color(hex: 0xF5C2E7), // Pink
+            Color(hex: 0x74C7EC), // Sapphire
+            Color(hex: 0xB4BEFE), // Lavender
+        ]
     }
 
     // MARK: - Corner Radii

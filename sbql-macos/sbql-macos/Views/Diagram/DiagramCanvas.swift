@@ -20,8 +20,10 @@ struct DiagramCanvas: View {
             )
 
             let bounds = diagram.computeContentBounds()
-            let canvasWidth = max(geo.size.width / diagram.scale, bounds.maxX + 200)
-            let canvasHeight = max(geo.size.height / diagram.scale, bounds.maxY + 200)
+            let canvasWidth = max(geo.size.width, bounds.maxX + 200)
+            let canvasHeight = max(geo.size.height, bounds.maxY + 200)
+            let scaledWidth = canvasWidth * diagram.scale
+            let scaledHeight = canvasHeight * diagram.scale
 
             ScrollView([.horizontal, .vertical]) {
                 ZStack(alignment: .topLeading) {
@@ -63,8 +65,9 @@ struct DiagramCanvas: View {
                     }
                 }
                 .frame(width: canvasWidth, height: canvasHeight)
+                .scaleEffect(diagram.scale, anchor: .topLeading)
+                .frame(width: scaledWidth, height: scaledHeight, alignment: .topLeading)
             }
-            .scaleEffect(diagram.scale, anchor: .topLeading)
             .gesture(
                 MagnifyGesture()
                     .onChanged { value in
@@ -74,6 +77,10 @@ struct DiagramCanvas: View {
             .onAppear {
                 viewportSize = geo.size
                 diagram.computeInitialLayout()
+                // Auto-fit to viewport after layout
+                DispatchQueue.main.async {
+                    diagram.fitToScreen(viewportSize: geo.size)
+                }
             }
             .onChange(of: geo.size) { _, newSize in
                 viewportSize = newSize
@@ -84,12 +91,37 @@ struct DiagramCanvas: View {
     // MARK: - Edge Drawing
 
     private func drawEdges(context: inout GraphicsContext, edges: [DiagramEdge]) {
+        let anyEdgeHovered = edges.contains(where: { $0.isHovered })
+        let hoveredTable = diagram.hoveredTableId
+        let anyHighlight = anyEdgeHovered || hoveredTable != nil
+        let palette = SbqlTheme.Colors.fkLinePalette
+
         for edge in edges {
             let path = DiagramEdgeGeometry.bezierPath(for: edge)
-            let color = edge.isHovered
-                ? SbqlTheme.Colors.accent
-                : SbqlTheme.Colors.accent.opacity(0.35)
-            let lineWidth: CGFloat = edge.isHovered ? 2.0 : 1.5
+            let baseColor = palette[edge.colorIndex]
+            let color: Color
+            let lineWidth: CGFloat
+
+            // Edge is directly hovered
+            let isEdgeActive = edge.isHovered
+            // Edge connects to the hovered table
+            let isTableActive = hoveredTable != nil &&
+                (edge.fromTableId == hoveredTable || edge.toTableId == hoveredTable)
+
+            if isEdgeActive {
+                color = baseColor
+                lineWidth = 2.5
+            } else if isTableActive {
+                color = baseColor.opacity(0.85)
+                lineWidth = 2.0
+            } else if anyHighlight {
+                // Dim non-active lines when something is highlighted
+                color = baseColor.opacity(0.10)
+                lineWidth = 1.0
+            } else {
+                color = baseColor.opacity(0.55)
+                lineWidth = 1.5
+            }
 
             context.stroke(path, with: .color(color), lineWidth: lineWidth)
 

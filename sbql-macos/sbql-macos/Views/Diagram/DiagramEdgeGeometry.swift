@@ -10,6 +10,7 @@ struct DiagramEdge: Identifiable {
     let fromPoint: CGPoint
     let toPoint: CGPoint
     let isHovered: Bool
+    let colorIndex: Int
 }
 
 /// Computes drawable edges anchored to specific column rows at left/right node edges.
@@ -22,7 +23,7 @@ enum DiagramEdgeGeometry {
     ) -> [DiagramEdge] {
         let tableById = Dictionary(uniqueKeysWithValues: tables.map { ($0.id, $0) })
 
-        return foreignKeys.compactMap { fk in
+        return foreignKeys.enumerated().compactMap { (index, fk) in
             let fromId = "\(fk.fromSchema).\(fk.fromTable)"
             let toId = "\(fk.toSchema).\(fk.toTable)"
 
@@ -52,7 +53,8 @@ enum DiagramEdgeGeometry {
                 toCol: fk.toCol,
                 fromPoint: CGPoint(x: fromX, y: fromY),
                 toPoint: CGPoint(x: toX, y: toY),
-                isHovered: hoveredConstraint == fk.constraintName
+                isHovered: hoveredConstraint == fk.constraintName,
+                colorIndex: index % SbqlTheme.Colors.fkLinePalette.count
             )
         }
     }

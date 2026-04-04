@@ -3,36 +3,42 @@ import SwiftUI
 /// Thin shell: loading/empty/canvas states with zoom toolbar overlay.
 struct DiagramView: View {
     @Environment(AppViewModel.self) private var appVM
+    @State private var viewportSize: CGSize = .zero
 
     var body: some View {
         let diagram = appVM.diagram
 
-        ZStack {
-            SbqlTheme.Colors.background.ignoresSafeArea()
+        GeometryReader { geo in
+            ZStack {
+                SbqlTheme.Colors.background.ignoresSafeArea()
 
-            if diagram.isLoading {
-                LoadingOverlay(message: "Loading diagram...")
-            } else if diagram.diagramData.tables.isEmpty {
-                emptyState
-            } else {
-                ZStack(alignment: .bottomTrailing) {
-                    DiagramCanvas()
+                if diagram.isLoading {
+                    LoadingOverlay(message: "Loading diagram...")
+                } else if diagram.diagramData.tables.isEmpty {
+                    emptyState
+                } else {
+                    ZStack(alignment: .bottomTrailing) {
+                        DiagramCanvas()
 
-                    DiagramZoomToolbar(
-                        zoomPercent: diagram.zoomPercent,
-                        onZoomIn: { diagram.zoomIn() },
-                        onZoomOut: { diagram.zoomOut() },
-                        onResetZoom: { diagram.scale = 1.0 },
-                        onFitToScreen: {
-                            // Use a reasonable default; fitToScreen is called from GeometryReader in canvas
-                        }
-                    )
-                    .padding(SbqlTheme.Spacing.lg)
+                        DiagramZoomToolbar(
+                            zoomPercent: diagram.zoomPercent,
+                            onZoomIn: { diagram.zoomIn() },
+                            onZoomOut: { diagram.zoomOut() },
+                            onResetZoom: { diagram.scale = 1.0 },
+                            onFitToScreen: { diagram.fitToScreen(viewportSize: viewportSize) }
+                        )
+                        .padding(SbqlTheme.Spacing.lg)
+                    }
                 }
             }
+            .onAppear { viewportSize = geo.size }
+            .onChange(of: geo.size) { _, newSize in viewportSize = newSize }
         }
         .onChange(of: diagram.diagramData.tables.count) {
             diagram.computeInitialLayout()
+            DispatchQueue.main.async {
+                diagram.fitToScreen(viewportSize: viewportSize)
+            }
         }
     }
 

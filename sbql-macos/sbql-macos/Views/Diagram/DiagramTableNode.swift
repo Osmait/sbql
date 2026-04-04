@@ -127,7 +127,7 @@ struct DiagramTableNode: View {
 
             Spacer()
 
-            Text(col.dataType)
+            Text(Self.abbreviateType(col.dataType))
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(SbqlTheme.Colors.textTertiary)
                 .lineLimit(1)
@@ -168,5 +168,25 @@ struct DiagramTableNode: View {
         if isSelected { return 8 }
         if isHovered { return 6 }
         return 4
+    }
+
+    // MARK: - Type Abbreviation
+
+    private static func abbreviateType(_ raw: String) -> String {
+        let t = raw.lowercased().trimmingCharacters(in: .whitespaces)
+        if t.hasPrefix("character varying") { return "varchar" }
+        if t == "character" { return "char" }
+        if t.hasPrefix("timestamp with time zone") { return "timestamptz" }
+        if t.hasPrefix("timestamp without time zone") { return "timestamp" }
+        if t.hasPrefix("time with time zone") { return "timetz" }
+        if t.hasPrefix("time without time zone") { return "time" }
+        if t == "double precision" { return "float8" }
+        if t == "boolean" { return "bool" }
+        if t == "integer" { return "int" }
+        if t == "bigint" { return "int8" }
+        if t == "smallint" { return "int2" }
+        if t.hasPrefix("numeric") { return "numeric" }
+        if t == "user-defined" { return "enum" }
+        return raw
     }
 }
