@@ -502,9 +502,10 @@ async fn execute_page_sqlserver(
 ) -> Result<QueryResult> {
     let trimmed = sql.trim_end_matches(';').trim();
     let offset = page * PAGE_SIZE;
+    // SQL Server: wrap in subquery with TOP to allow ORDER BY inside subqueries
     let paginated = format!(
-        "SELECT * FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS _sbql_rn FROM ({trimmed}) AS _sbql_inner) AS _sbql_outer WHERE _sbql_rn > {offset} AND _sbql_rn <= {}",
-        offset + PAGE_SIZE + 1
+        "SELECT TOP {} * FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS _sbql_rn FROM (SELECT TOP 2147483647 * FROM ({trimmed}) AS _sbql_src) AS _sbql_inner) AS _sbql_outer WHERE _sbql_rn > {offset}",
+        PAGE_SIZE + 1
     );
 
     let mut conn = pool
