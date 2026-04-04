@@ -1,5 +1,5 @@
 use sbql_core::{
-    query::execute_page,
+    query::{execute_page, suggest_distinct_values},
     schema::{
         execute_cell_update, execute_row_delete, get_primary_keys, list_tables, load_diagram,
     },
@@ -265,4 +265,261 @@ async fn test_sqlite_empty_result() {
     assert_eq!(result.rows.len(), 0);
     assert!(!result.has_next_page);
     assert!(result.columns.is_empty());
+}
+
+#[tokio::test]
+async fn test_sqlite_null_handling() {
+    let sq = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE null_test (
+            id INTEGER PRIMARY KEY,
+            int_val INTEGER,
+            text_val TEXT,
+            real_val REAL,
+            blob_val BLOB
+        )",
+    )
+    .execute(&sq)
+    .await
+    .unwrap();
+
+    sqlx::query("INSERT INTO null_test (id, int_val, text_val, real_val, blob_val) VALUES (1, NULL, NULL, NULL, NULL)")
+        .execute(&sq)
+        .await
+        .unwrap();
+
+    let pool = DbPool::Sqlite(sq);
+    let result = execute_page(&pool, "SELECT * FROM null_test", 0)
+        .await
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    let row = &result.rows[0];
+    let cols = &result.columns;
+
+    let int_idx = cols.iter().position(|c| c == "int_val").unwrap();
+    assert_eq!(row[int_idx], "");
+
+    let text_idx = cols.iter().position(|c| c == "text_val").unwrap();
+    assert_eq!(row[text_idx], "");
+
+    let real_idx = cols.iter().position(|c| c == "real_val").unwrap();
+    assert_eq!(row[real_idx], "");
+
+    let blob_idx = cols.iter().position(|c| c == "blob_val").unwrap();
+    assert_eq!(row[blob_idx], "");
+}
+
+#[tokio::test]
+async fn test_sqlite_unicode() {
+    let sq = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+
+    sqlx::query("CREATE TABLE unicode_test (id INTEGER PRIMARY KEY, val TEXT)")
+        .execute(&sq)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO unicode_test (id, val) VALUES (1, ?)")
+        .bind(String::from("🎉"))
+        .execute(&sq)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO unicode_test (id, val) VALUES (2, ?)")
+        .bind(String::from("日本語テスト"))
+        .execute(&sq)
+        .await
+        .unwrap();
+
+    let pool = DbPool::Sqlite(sq);
+    let result = execute_page(&pool, "SELECT * FROM unicode_test ORDER BY id", 0)
+        .await
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 2);
+    let cols = &result.columns;
+    let val_idx = cols.iter().position(|c| c == "val").unwrap();
+    assert_eq!(result.rows[0][val_idx], "🎉");
+    assert_eq!(result.rows[1][val_idx], "日本語テスト");
+}
+
+#[tokio::test]
+async fn test_sqlite_special_chars_in_values() {
+    let sq = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+
+    sqlx::query("CREATE TABLE special_chars (id INTEGER PRIMARY KEY, val TEXT)")
+        .execute(&sq)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO special_chars (id, val) VALUES (1, ?)")
+        .bind("it's a test")
+        .execute(&sq)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO special_chars (id, val) VALUES (2, ?)")
+        .bind("back\\slash")
+        .execute(&sq)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO special_chars (id, val) VALUES (3, ?)")
+        .bind("line\nbreak")
+        .execute(&sq)
+        .await
+        .unwrap();
+
+    let pool = DbPool::Sqlite(sq);
+    let result = execute_page(&pool, "SELECT * FROM special_chars ORDER BY id", 0)
+        .await
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 3);
+    let cols = &result.columns;
+    let val_idx = cols.iter().position(|c| c == "val").unwrap();
+    assert_eq!(result.rows[0][val_idx], "it's a test");
+    assert_eq!(result.rows[1][val_idx], "back\\slash");
+    assert_eq!(result.rows[2][val_idx], "line\nbreak");
+}
+
+#[tokio::test]
+async fn test_sqlite_large_text() {
+    let sq = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+
+    sqlx::query("CREATE TABLE large_text (id INTEGER PRIMARY KEY, val TEXT)")
+        .execute(&sq)
+        .await
+        .unwrap();
+
+    let large = "x".repeat(10 * 1024); // 10KB
+    sqlx::query("INSERT INTO large_text (id, val) VALUES (1, ?)")
+        .bind(&large)
+        .execute(&sq)
+        .await
+        .unwrap();
+
+    let pool = DbPool::Sqlite(sq);
+    let result = execute_page(&pool, "SELECT * FROM large_text", 0)
+        .await
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    let cols = &result.columns;
+    let val_idx = cols.iter().position(|c| c == "val").unwrap();
+    assert_eq!(result.rows[0][val_idx], large);
+    assert_eq!(result.rows[0][val_idx].len(), 10 * 1024);
+}
+
+#[tokio::test]
+async fn test_sqlite_suggest_distinct_values() {
+    let sq = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+
+    sqlx::query("CREATE TABLE suggest_test (id INTEGER PRIMARY KEY, name TEXT)")
+        .execute(&sq)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "INSERT INTO suggest_test (id, name) VALUES (1, 'Alice'), (2, 'Alicia'), (3, 'Bob'), (4, 'Alice'), (5, 'Charlie')",
+    )
+    .execute(&sq)
+    .await
+    .unwrap();
+
+    let pool = DbPool::Sqlite(sq);
+    let suggestions =
+        suggest_distinct_values(&pool, "SELECT * FROM suggest_test", "name", "Al", 10)
+            .await
+            .unwrap();
+
+    assert_eq!(suggestions.len(), 2);
+    assert!(suggestions.contains(&"Alice".to_string()));
+    assert!(suggestions.contains(&"Alicia".to_string()));
+}
+
+#[tokio::test]
+async fn test_sqlite_composite_primary_key() {
+    let sq = SqlitePoolOptions::new()
+        .max_connections(1)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("PRAGMA foreign_keys = ON")
+                    .execute(&mut *conn)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE composite_pk (
+            a INTEGER NOT NULL,
+            b INTEGER NOT NULL,
+            val TEXT,
+            PRIMARY KEY (a, b)
+        )",
+    )
+    .execute(&sq)
+    .await
+    .unwrap();
+
+    let pool = DbPool::Sqlite(sq);
+    let pks = get_primary_keys(&pool, "main", "composite_pk")
+        .await
+        .expect("get_primary_keys failed");
+    assert_eq!(pks.len(), 2);
+    assert!(pks.contains(&"a".to_string()));
+    assert!(pks.contains(&"b".to_string()));
+}
+
+#[tokio::test]
+async fn test_sqlite_user_limit_respected() {
+    let sq = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+
+    sqlx::query("CREATE TABLE limit_test (id INTEGER PRIMARY KEY AUTOINCREMENT, val TEXT)")
+        .execute(&sq)
+        .await
+        .unwrap();
+
+    for i in 0..100 {
+        sqlx::query("INSERT INTO limit_test (val) VALUES (?)")
+            .bind(format!("row_{i}"))
+            .execute(&sq)
+            .await
+            .unwrap();
+    }
+
+    let pool = DbPool::Sqlite(sq);
+    let result = execute_page(&pool, "SELECT * FROM limit_test LIMIT 3", 0)
+        .await
+        .unwrap();
+    assert_eq!(result.rows.len(), 3);
 }

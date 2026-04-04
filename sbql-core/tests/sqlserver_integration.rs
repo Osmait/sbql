@@ -299,4 +299,189 @@ async fn test_sqlserver_integration() {
             row[dec_idx]
         );
     }
+
+    // --- 9. unicode (emoji + CJK) ---
+    {
+        let mut conn = raw.get().await.unwrap();
+        conn.execute(
+            "CREATE TABLE unicode_test (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                label NVARCHAR(200)
+            )",
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let emoji_cjk = "Hello \u{1F600} \u{4E16}\u{754C}"; // Hello 😀 世界
+        conn.execute(
+            "INSERT INTO unicode_test (label) VALUES (@P1)",
+            &[&emoji_cjk],
+        )
+        .await
+        .unwrap();
+
+        let result = execute_page(&pool, "SELECT * FROM unicode_test", 0)
+            .await
+            .expect("Failed to execute unicode_test query");
+        assert_eq!(result.rows.len(), 1);
+
+        let label_idx = result
+            .columns
+            .iter()
+            .position(|c| c == "label")
+            .unwrap();
+        assert_eq!(
+            result.rows[0][label_idx], emoji_cjk,
+            "Unicode roundtrip failed"
+        );
+    }
+
+    // --- 10. null handling ---
+    {
+        let mut conn = raw.get().await.unwrap();
+        conn.execute(
+            "CREATE TABLE null_test (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                int_col INT,
+                nvar_col NVARCHAR(50),
+                dt_col DATETIME2,
+                bit_col BIT
+            )",
+            &[],
+        )
+        .await
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO null_test (int_col, nvar_col, dt_col, bit_col)
+             VALUES (NULL, NULL, NULL, NULL)",
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let result = execute_page(&pool, "SELECT * FROM null_test", 0)
+            .await
+            .expect("Failed to execute null_test query");
+        assert_eq!(result.rows.len(), 1);
+
+        let row = &result.rows[0];
+        let cols = &result.columns;
+
+        // All nullable columns should round-trip as NULL (displayed as empty or "NULL")
+        for col_name in &["int_col", "nvar_col", "dt_col", "bit_col"] {
+            let idx = cols.iter().position(|c| c == col_name).unwrap();
+            assert!(
+                row[idx].is_empty() || row[idx] == "NULL",
+                "Expected NULL representation for {col_name}, got: '{}'",
+                row[idx]
+            );
+        }
+    }
+
+    // --- 11. large text (nvarchar(max) with 10KB) ---
+    {
+        let mut conn = raw.get().await.unwrap();
+        conn.execute(
+            "CREATE TABLE large_text_test (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                content NVARCHAR(MAX)
+            )",
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let large_text: String = "A".repeat(10 * 1024); // 10KB
+        conn.execute(
+            "INSERT INTO large_text_test (content) VALUES (@P1)",
+            &[&large_text.as_str()],
+        )
+        .await
+        .unwrap();
+
+        let result = execute_page(&pool, "SELECT * FROM large_text_test", 0)
+            .await
+            .expect("Failed to execute large_text_test query");
+        assert_eq!(result.rows.len(), 1);
+
+        let content_idx = result
+            .columns
+            .iter()
+            .position(|c| c == "content")
+            .unwrap();
+        assert_eq!(
+            result.rows[0][content_idx].len(),
+            10 * 1024,
+            "Large text length mismatch"
+        );
+        assert_eq!(result.rows[0][content_idx], large_text);
+    }
+
+    // --- 12. empty result set ---
+    {
+        let mut conn = raw.get().await.unwrap();
+        conn.execute(
+            "CREATE TABLE empty_test (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                val NVARCHAR(50)
+            )",
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let result = execute_page(&pool, "SELECT * FROM empty_test", 0)
+            .await
+            .expect("Failed to execute empty_test query");
+        assert!(
+            result.rows.is_empty(),
+            "Expected empty result set, got {} rows",
+            result.rows.len()
+        );
+        assert!(!result.has_next_page);
+    }
+
+    // --- 13. composite primary key ---
+    {
+        let mut conn = raw.get().await.unwrap();
+        conn.execute(
+            "CREATE TABLE composite_pk_test (
+                tenant_id INT NOT NULL,
+                item_id INT NOT NULL,
+                label NVARCHAR(50),
+                PRIMARY KEY (tenant_id, item_id)
+            )",
+            &[],
+        )
+        .await
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO composite_pk_test (tenant_id, item_id, label)
+             VALUES (1, 100, 'first'), (1, 200, 'second'), (2, 100, 'third')",
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let pks = get_primary_keys(&pool, "dbo", "composite_pk_test")
+            .await
+            .expect("Failed to get composite PKs");
+        assert_eq!(pks.len(), 2, "Expected 2 PK columns, got: {pks:?}");
+        assert!(
+            pks.contains(&"tenant_id".to_string()),
+            "Expected tenant_id in PKs, got: {pks:?}"
+        );
+        assert!(
+            pks.contains(&"item_id".to_string()),
+            "Expected item_id in PKs, got: {pks:?}"
+        );
+
+        let result = execute_page(&pool, "SELECT * FROM composite_pk_test", 0)
+            .await
+            .expect("Failed to execute composite_pk_test query");
+        assert_eq!(result.rows.len(), 3);
+    }
 }

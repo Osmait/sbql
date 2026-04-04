@@ -161,3 +161,114 @@ async fn test_redis_diagram_empty() {
     assert!(diagram.tables.is_empty());
     assert!(diagram.foreign_keys.is_empty());
 }
+
+#[tokio::test]
+async fn test_redis_mset_mget() {
+    let (pool, _container) = setup_redis().await;
+
+    // MSET multiple keys at once
+    let result = execute_page(&pool, "MSET k1 v1 k2 v2 k3 v3", 0)
+        .await
+        .unwrap();
+    assert_eq!(result.rows[0][0], "OK");
+
+    // MGET all three keys
+    let result = execute_page(&pool, "MGET k1 k2 k3", 0).await.unwrap();
+    assert_eq!(result.rows.len(), 3);
+
+    let values: Vec<&str> = result.rows.iter().map(|r| r.last().unwrap().as_str()).collect();
+    assert!(values.contains(&"v1"), "Missing v1: {values:?}");
+    assert!(values.contains(&"v2"), "Missing v2: {values:?}");
+    assert!(values.contains(&"v3"), "Missing v3: {values:?}");
+}
+
+#[tokio::test]
+async fn test_redis_expire_and_ttl() {
+    let (pool, _container) = setup_redis().await;
+
+    // SET with EX (expire in seconds)
+    execute_page(&pool, "SET ttlkey somevalue EX 300", 0)
+        .await
+        .unwrap();
+
+    // TTL should return a positive number
+    let result = execute_page(&pool, "TTL ttlkey", 0).await.unwrap();
+    let ttl: i64 = result.rows[0][0].parse().expect("TTL should be a number");
+    assert!(ttl > 0, "Expected positive TTL, got: {ttl}");
+    assert!(ttl <= 300, "TTL should be <= 300, got: {ttl}");
+}
+
+#[tokio::test]
+async fn test_redis_incr_decr() {
+    let (pool, _container) = setup_redis().await;
+
+    execute_page(&pool, "SET counter 10", 0).await.unwrap();
+
+    let result = execute_page(&pool, "INCR counter", 0).await.unwrap();
+    assert_eq!(result.rows[0][0], "11");
+
+    let result = execute_page(&pool, "INCR counter", 0).await.unwrap();
+    assert_eq!(result.rows[0][0], "12");
+
+    let result = execute_page(&pool, "DECR counter", 0).await.unwrap();
+    assert_eq!(result.rows[0][0], "11");
+}
+
+#[tokio::test]
+async fn test_redis_large_value() {
+    let (pool, _container) = setup_redis().await;
+
+    // Create a 10KB value
+    let large_value: String = "A".repeat(10 * 1024);
+    let cmd = format!("SET bigkey {}", large_value);
+    execute_page(&pool, &cmd, 0).await.unwrap();
+
+    let result = execute_page(&pool, "GET bigkey", 0).await.unwrap();
+    assert_eq!(result.rows[0][0].len(), 10 * 1024);
+    assert_eq!(result.rows[0][0], large_value);
+}
+
+#[tokio::test]
+async fn test_redis_unicode_values() {
+    let (pool, _container) = setup_redis().await;
+
+    // SET emoji value
+    execute_page(&pool, "SET emoji \u{1F600}\u{1F680}", 0)
+        .await
+        .unwrap();
+    let result = execute_page(&pool, "GET emoji", 0).await.unwrap();
+    assert_eq!(result.rows[0][0], "\u{1F600}\u{1F680}");
+
+    // SET CJK value
+    execute_page(&pool, "SET cjk \u{4F60}\u{597D}\u{4E16}\u{754C}", 0)
+        .await
+        .unwrap();
+    let result = execute_page(&pool, "GET cjk", 0).await.unwrap();
+    assert_eq!(result.rows[0][0], "\u{4F60}\u{597D}\u{4E16}\u{754C}");
+}
+
+#[tokio::test]
+async fn test_redis_sorted_set() {
+    let (pool, _container) = setup_redis().await;
+
+    // ZADD members with scores
+    execute_page(&pool, "ZADD leaderboard 100 alice", 0)
+        .await
+        .unwrap();
+    execute_page(&pool, "ZADD leaderboard 200 bob", 0)
+        .await
+        .unwrap();
+    execute_page(&pool, "ZADD leaderboard 150 charlie", 0)
+        .await
+        .unwrap();
+
+    // ZRANGE returns members in score order
+    let result = execute_page(&pool, "ZRANGE leaderboard 0 -1", 0)
+        .await
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 3);
+    // Sorted by score ascending: alice(100), charlie(150), bob(200)
+    let values: Vec<&str> = result.rows.iter().map(|r| r.last().unwrap().as_str()).collect();
+    assert_eq!(values, vec!["alice", "charlie", "bob"]);
+}

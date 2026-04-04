@@ -531,3 +531,237 @@ async fn test_user_defined_limit_respected() {
         .unwrap();
     assert_eq!(result.rows.len(), 3);
 }
+
+#[tokio::test]
+async fn test_pg_null_in_all_types() {
+    let container = Postgres::default().start().await.unwrap();
+    let host_ip = container.get_host().await.unwrap();
+    let host_port = container.get_host_port_ipv4(5432).await.unwrap();
+    let connection_string = format!(
+        "postgresql://postgres:postgres@{}:{}/postgres",
+        host_ip, host_port
+    );
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
+
+    sqlx::query(
+        "CREATE TABLE null_all (
+            id SERIAL PRIMARY KEY,
+            int_val INTEGER,
+            text_val TEXT,
+            bool_val BOOLEAN,
+            real_val REAL,
+            ts_val TIMESTAMPTZ,
+            json_val JSONB,
+            arr_val TEXT[],
+            uuid_val UUID,
+            bytes_val BYTEA
+        );",
+    )
+    .execute(&pg_pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO null_all (int_val, text_val, bool_val, real_val, ts_val, json_val, arr_val, uuid_val, bytes_val)
+         VALUES (NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);",
+    )
+    .execute(&pg_pool)
+    .await
+    .unwrap();
+
+    let result = execute_page(&pool, "SELECT * FROM null_all ORDER BY id", 0)
+        .await
+        .unwrap();
+    assert_eq!(result.rows.len(), 1);
+    let row = &result.rows[0];
+    let cols = &result.columns;
+
+    // All nullable columns should come back as empty string
+    for col_name in &[
+        "int_val", "text_val", "bool_val", "real_val", "ts_val", "json_val", "arr_val",
+        "uuid_val", "bytes_val",
+    ] {
+        let idx = cols.iter().position(|c| c == col_name).unwrap();
+        assert_eq!(row[idx], "", "Expected empty string for NULL {col_name}");
+    }
+}
+
+#[tokio::test]
+async fn test_pg_unicode_roundtrip() {
+    let container = Postgres::default().start().await.unwrap();
+    let host_ip = container.get_host().await.unwrap();
+    let host_port = container.get_host_port_ipv4(5432).await.unwrap();
+    let connection_string = format!(
+        "postgresql://postgres:postgres@{}:{}/postgres",
+        host_ip, host_port
+    );
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
+
+    sqlx::query("CREATE TABLE unicode_test (id SERIAL PRIMARY KEY, val TEXT);")
+        .execute(&pg_pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO unicode_test (val) VALUES ($1)")
+        .bind(String::from("🎉"))
+        .execute(&pg_pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO unicode_test (val) VALUES ($1)")
+        .bind(String::from("日本語テスト"))
+        .execute(&pg_pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO unicode_test (val) VALUES ($1)")
+        .bind(String::from("مرحبا بالعالم"))
+        .execute(&pg_pool)
+        .await
+        .unwrap();
+
+    let result = execute_page(&pool, "SELECT * FROM unicode_test ORDER BY id", 0)
+        .await
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 3);
+    let cols = &result.columns;
+    let val_idx = cols.iter().position(|c| c == "val").unwrap();
+    assert_eq!(result.rows[0][val_idx], "🎉");
+    assert_eq!(result.rows[1][val_idx], "日本語テスト");
+    assert_eq!(result.rows[2][val_idx], "مرحبا بالعالم");
+}
+
+#[tokio::test]
+async fn test_pg_jsonb_nested() {
+    let container = Postgres::default().start().await.unwrap();
+    let host_ip = container.get_host().await.unwrap();
+    let host_port = container.get_host_port_ipv4(5432).await.unwrap();
+    let connection_string = format!(
+        "postgresql://postgres:postgres@{}:{}/postgres",
+        host_ip, host_port
+    );
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
+
+    sqlx::query("CREATE TABLE jsonb_test (id SERIAL PRIMARY KEY, data JSONB);")
+        .execute(&pg_pool)
+        .await
+        .unwrap();
+
+    sqlx::query(r#"INSERT INTO jsonb_test (data) VALUES ('{"a":{"b":{"c":1}}}'::jsonb);"#)
+        .execute(&pg_pool)
+        .await
+        .unwrap();
+
+    let result = execute_page(&pool, "SELECT * FROM jsonb_test ORDER BY id", 0)
+        .await
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    let cols = &result.columns;
+    let data_idx = cols.iter().position(|c| c == "data").unwrap();
+    assert_eq!(result.rows[0][data_idx], r#"{"a":{"b":{"c":1}}}"#);
+}
+
+#[tokio::test]
+async fn test_pg_composite_pk() {
+    let container = Postgres::default().start().await.unwrap();
+    let host_ip = container.get_host().await.unwrap();
+    let host_port = container.get_host_port_ipv4(5432).await.unwrap();
+    let connection_string = format!(
+        "postgresql://postgres:postgres@{}:{}/postgres",
+        host_ip, host_port
+    );
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
+
+    sqlx::query(
+        "CREATE TABLE composite_pk (
+            a INTEGER NOT NULL,
+            b INTEGER NOT NULL,
+            val TEXT,
+            PRIMARY KEY (a, b)
+        );",
+    )
+    .execute(&pg_pool)
+    .await
+    .unwrap();
+
+    let pks = get_primary_keys(&pool, "public", "composite_pk")
+        .await
+        .expect("get_primary_keys failed");
+    assert_eq!(pks.len(), 2);
+    assert!(pks.contains(&"a".to_string()));
+    assert!(pks.contains(&"b".to_string()));
+}
+
+#[tokio::test]
+async fn test_pg_view_in_list_tables() {
+    let container = Postgres::default().start().await.unwrap();
+    let host_ip = container.get_host().await.unwrap();
+    let host_port = container.get_host_port_ipv4(5432).await.unwrap();
+    let connection_string = format!(
+        "postgresql://postgres:postgres@{}:{}/postgres",
+        host_ip, host_port
+    );
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
+
+    sqlx::query("CREATE TABLE base_table (id SERIAL PRIMARY KEY, name TEXT);")
+        .execute(&pg_pool)
+        .await
+        .unwrap();
+
+    sqlx::query("CREATE VIEW my_view AS SELECT id, name FROM base_table;")
+        .execute(&pg_pool)
+        .await
+        .unwrap();
+
+    let tables = list_tables(&pool).await.expect("list_tables failed");
+    let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
+    assert!(names.contains(&"base_table"), "Expected 'base_table'");
+    assert!(names.contains(&"my_view"), "Expected 'my_view' in list_tables, got: {names:?}");
+}
+
+#[tokio::test]
+async fn test_pg_special_chars_in_data() {
+    let container = Postgres::default().start().await.unwrap();
+    let host_ip = container.get_host().await.unwrap();
+    let host_port = container.get_host_port_ipv4(5432).await.unwrap();
+    let connection_string = format!(
+        "postgresql://postgres:postgres@{}:{}/postgres",
+        host_ip, host_port
+    );
+    let pg_pool = PgPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Postgres(pg_pool.clone());
+
+    sqlx::query("CREATE TABLE special_chars (id SERIAL PRIMARY KEY, val TEXT);")
+        .execute(&pg_pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO special_chars (val) VALUES ($1)")
+        .bind("it's a test")
+        .execute(&pg_pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO special_chars (val) VALUES ($1)")
+        .bind("back\\slash")
+        .execute(&pg_pool)
+        .await
+        .unwrap();
+
+    let result = execute_page(&pool, "SELECT * FROM special_chars ORDER BY id", 0)
+        .await
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 2);
+    let cols = &result.columns;
+    let val_idx = cols.iter().position(|c| c == "val").unwrap();
+    assert_eq!(result.rows[0][val_idx], "it's a test");
+    assert_eq!(result.rows[1][val_idx], "back\\slash");
+}

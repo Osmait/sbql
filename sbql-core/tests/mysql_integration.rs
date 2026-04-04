@@ -314,3 +314,180 @@ async fn test_mysql_empty_result() {
     assert!(!result.has_next_page);
     assert!(result.columns.is_empty());
 }
+
+#[tokio::test]
+async fn test_mysql_null_handling() {
+    let container = Mysql::default().start().await.unwrap();
+    let host_ip = container.get_host().await.unwrap();
+    let host_port = container.get_host_port_ipv4(3306).await.unwrap();
+    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Mysql(my_pool.clone());
+
+    sqlx::query(
+        "CREATE TABLE null_test (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            int_val INT,
+            varchar_val VARCHAR(100),
+            datetime_val DATETIME,
+            json_val JSON
+        )",
+    )
+    .execute(&my_pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO null_test (int_val, varchar_val, datetime_val, json_val) VALUES (NULL, NULL, NULL, NULL)",
+    )
+    .execute(&my_pool)
+    .await
+    .unwrap();
+
+    let result = execute_page(&pool, "SELECT * FROM null_test ORDER BY id", 0)
+        .await
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    let row = &result.rows[0];
+    let cols = &result.columns;
+
+    for col_name in &["int_val", "varchar_val", "datetime_val", "json_val"] {
+        let idx = cols.iter().position(|c| c == col_name).unwrap();
+        assert_eq!(row[idx], "", "Expected empty string for NULL {col_name}");
+    }
+}
+
+#[tokio::test]
+async fn test_mysql_unicode() {
+    let container = Mysql::default().start().await.unwrap();
+    let host_ip = container.get_host().await.unwrap();
+    let host_port = container.get_host_port_ipv4(3306).await.unwrap();
+    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Mysql(my_pool.clone());
+
+    sqlx::query(
+        "CREATE TABLE unicode_test (id INT AUTO_INCREMENT PRIMARY KEY, val VARCHAR(200)) CHARACTER SET utf8mb4",
+    )
+    .execute(&my_pool)
+    .await
+    .unwrap();
+
+    sqlx::query("INSERT INTO unicode_test (val) VALUES (?)")
+        .bind(String::from("🎉"))
+        .execute(&my_pool)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO unicode_test (val) VALUES (?)")
+        .bind(String::from("日本語テスト"))
+        .execute(&my_pool)
+        .await
+        .unwrap();
+
+    let result = execute_page(&pool, "SELECT * FROM unicode_test ORDER BY id", 0)
+        .await
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 2);
+    let cols = &result.columns;
+    let val_idx = cols.iter().position(|c| c == "val").unwrap();
+    assert_eq!(result.rows[0][val_idx], "🎉");
+    assert_eq!(result.rows[1][val_idx], "日本語テスト");
+}
+
+#[tokio::test]
+async fn test_mysql_json_nested() {
+    let container = Mysql::default().start().await.unwrap();
+    let host_ip = container.get_host().await.unwrap();
+    let host_port = container.get_host_port_ipv4(3306).await.unwrap();
+    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Mysql(my_pool.clone());
+
+    sqlx::query("CREATE TABLE json_test (id INT AUTO_INCREMENT PRIMARY KEY, data JSON)")
+        .execute(&my_pool)
+        .await
+        .unwrap();
+
+    sqlx::query(r#"INSERT INTO json_test (data) VALUES ('{"a":{"b":{"c":1}}}')"#)
+        .execute(&my_pool)
+        .await
+        .unwrap();
+
+    let result = execute_page(&pool, "SELECT * FROM json_test ORDER BY id", 0)
+        .await
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    let cols = &result.columns;
+    let data_idx = cols.iter().position(|c| c == "data").unwrap();
+    // MySQL may format JSON with spaces; check the structure is preserved
+    let json_val = &result.rows[0][data_idx];
+    assert!(json_val.contains("\"a\""), "JSON should contain key 'a': {json_val}");
+    assert!(json_val.contains("\"b\""), "JSON should contain key 'b': {json_val}");
+    assert!(json_val.contains("\"c\""), "JSON should contain key 'c': {json_val}");
+}
+
+#[tokio::test]
+async fn test_mysql_enum_type() {
+    let container = Mysql::default().start().await.unwrap();
+    let host_ip = container.get_host().await.unwrap();
+    let host_port = container.get_host_port_ipv4(3306).await.unwrap();
+    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Mysql(my_pool.clone());
+
+    sqlx::query(
+        "CREATE TABLE enum_test (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            status ENUM('new', 'active', 'closed')
+        )",
+    )
+    .execute(&my_pool)
+    .await
+    .unwrap();
+
+    sqlx::query("INSERT INTO enum_test (status) VALUES ('active')")
+        .execute(&my_pool)
+        .await
+        .unwrap();
+
+    let result = execute_page(&pool, "SELECT * FROM enum_test ORDER BY id", 0)
+        .await
+        .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    let cols = &result.columns;
+    let status_idx = cols.iter().position(|c| c == "status").unwrap();
+    assert_eq!(result.rows[0][status_idx], "active");
+}
+
+#[tokio::test]
+async fn test_mysql_user_limit() {
+    let container = Mysql::default().start().await.unwrap();
+    let host_ip = container.get_host().await.unwrap();
+    let host_port = container.get_host_port_ipv4(3306).await.unwrap();
+    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
+    let pool = DbPool::Mysql(my_pool.clone());
+
+    sqlx::query("CREATE TABLE limit_test (id INT AUTO_INCREMENT PRIMARY KEY, val VARCHAR(50))")
+        .execute(&my_pool)
+        .await
+        .unwrap();
+
+    for i in 0..50 {
+        sqlx::query("INSERT INTO limit_test (val) VALUES (?)")
+            .bind(format!("row_{i}"))
+            .execute(&my_pool)
+            .await
+            .unwrap();
+    }
+
+    let result = execute_page(&pool, "SELECT * FROM limit_test LIMIT 5", 0)
+        .await
+        .unwrap();
+    assert_eq!(result.rows.len(), 5);
+}

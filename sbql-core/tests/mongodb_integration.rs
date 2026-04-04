@@ -211,3 +211,168 @@ async fn test_mongodb_diagram_empty() {
     assert!(diagram.tables.is_empty());
     assert!(diagram.foreign_keys.is_empty());
 }
+
+#[tokio::test]
+async fn test_mongodb_large_collection() {
+    let (db, pool, _container) = setup_mongodb().await;
+
+    let coll = db.collection::<Document>("big");
+    let docs: Vec<Document> = (0..150)
+        .map(|i| doc! { "idx": i as i32, "label": format!("row_{}", i) })
+        .collect();
+    coll.insert_many(docs).await.unwrap();
+
+    let result = execute_page(&pool, "big", 0)
+        .await
+        .expect("execute_page failed");
+
+    // PAGE_SIZE is 100, so page 0 should return exactly 100 rows
+    assert_eq!(result.rows.len(), 100);
+    assert!(result.has_next_page, "Expected has_next_page for >100 docs");
+}
+
+#[tokio::test]
+async fn test_mongodb_nested_documents() {
+    let (db, pool, _container) = setup_mongodb().await;
+
+    let coll = db.collection::<Document>("nested");
+    coll.insert_one(doc! {
+        "a": { "b": { "c": { "d": "deep" } } }
+    })
+    .await
+    .unwrap();
+
+    let result = execute_page(&pool, "nested", 0)
+        .await
+        .expect("execute_page failed");
+
+    assert_eq!(result.rows.len(), 1);
+    let a_idx = result.columns.iter().position(|c| c == "a").unwrap();
+    let val = &result.rows[0][a_idx];
+    assert!(val.contains("deep"), "Expected nested 'deep' in: {val}");
+}
+
+#[tokio::test]
+async fn test_mongodb_null_fields() {
+    use mongodb::bson::Bson;
+
+    let (db, pool, _container) = setup_mongodb().await;
+
+    let coll = db.collection::<Document>("nulls");
+    let mut doc = Document::new();
+    doc.insert("name", "present");
+    doc.insert("missing", Bson::Null);
+    coll.insert_one(doc).await.unwrap();
+
+    let result = execute_page(&pool, "nulls", 0)
+        .await
+        .expect("execute_page failed");
+
+    assert_eq!(result.rows.len(), 1);
+    let null_idx = result.columns.iter().position(|c| c == "missing").unwrap();
+    assert_eq!(result.rows[0][null_idx], "", "Null should be empty string");
+}
+
+#[tokio::test]
+async fn test_mongodb_special_chars_in_values() {
+    let (db, pool, _container) = setup_mongodb().await;
+
+    let coll = db.collection::<Document>("special");
+    coll.insert_one(doc! {
+        "with_quotes": "He said \"hello\"",
+        "with_backslash": "path\\to\\file",
+        "with_newline": "line1\nline2",
+    })
+    .await
+    .unwrap();
+
+    let result = execute_page(&pool, "special", 0)
+        .await
+        .expect("execute_page failed");
+
+    assert_eq!(result.rows.len(), 1);
+    let cols = &result.columns;
+    let row = &result.rows[0];
+
+    let q_idx = cols.iter().position(|c| c == "with_quotes").unwrap();
+    assert!(row[q_idx].contains("hello"), "quotes: {}", row[q_idx]);
+
+    let b_idx = cols.iter().position(|c| c == "with_backslash").unwrap();
+    assert!(row[b_idx].contains("\\"), "backslash: {}", row[b_idx]);
+
+    let n_idx = cols.iter().position(|c| c == "with_newline").unwrap();
+    assert!(row[n_idx].contains("line1"), "newline: {}", row[n_idx]);
+    assert!(row[n_idx].contains("line2"), "newline: {}", row[n_idx]);
+}
+
+#[tokio::test]
+async fn test_mongodb_unicode() {
+    let (db, pool, _container) = setup_mongodb().await;
+
+    let coll = db.collection::<Document>("unicode");
+    coll.insert_one(doc! {
+        "emoji": "\u{1F600}\u{1F680}",
+        "cjk": "\u{4F60}\u{597D}\u{4E16}\u{754C}",
+    })
+    .await
+    .unwrap();
+
+    let result = execute_page(&pool, "unicode", 0)
+        .await
+        .expect("execute_page failed");
+
+    assert_eq!(result.rows.len(), 1);
+    let cols = &result.columns;
+    let row = &result.rows[0];
+
+    let emoji_idx = cols.iter().position(|c| c == "emoji").unwrap();
+    assert_eq!(row[emoji_idx], "\u{1F600}\u{1F680}");
+
+    let cjk_idx = cols.iter().position(|c| c == "cjk").unwrap();
+    assert_eq!(row[cjk_idx], "\u{4F60}\u{597D}\u{4E16}\u{754C}");
+}
+
+#[tokio::test]
+async fn test_mongodb_mixed_schema() {
+    let (db, pool, _container) = setup_mongodb().await;
+
+    let coll = db.collection::<Document>("mixed");
+    coll.insert_many(vec![
+        doc! { "name": "Alice", "age": 30 },
+        doc! { "name": "Bob", "email": "bob@example.com" },
+        doc! { "score": 99.5 },
+    ])
+    .await
+    .unwrap();
+
+    let result = execute_page(&pool, "mixed", 0)
+        .await
+        .expect("execute_page failed");
+
+    assert_eq!(result.rows.len(), 3);
+    // All unique columns across all documents should appear
+    assert!(result.columns.contains(&"_id".to_string()));
+    assert!(result.columns.contains(&"name".to_string()));
+    assert!(result.columns.contains(&"age".to_string()));
+    assert!(result.columns.contains(&"email".to_string()));
+    assert!(result.columns.contains(&"score".to_string()));
+
+    // Documents missing a field should get empty string for that column
+    let email_idx = result.columns.iter().position(|c| c == "email").unwrap();
+    let age_idx = result.columns.iter().position(|c| c == "age").unwrap();
+    let score_idx = result.columns.iter().position(|c| c == "score").unwrap();
+
+    // First doc (Alice) has no email or score
+    assert_eq!(result.rows[0][email_idx], "");
+    assert_eq!(result.rows[0][score_idx], "");
+
+    // Second doc (Bob) has no age or score
+    assert_eq!(result.rows[1][age_idx], "");
+    assert_eq!(result.rows[1][score_idx], "");
+
+    // Third doc (score only) has no name, age, or email
+    let name_idx = result.columns.iter().position(|c| c == "name").unwrap();
+    assert_eq!(result.rows[2][name_idx], "");
+    assert_eq!(result.rows[2][age_idx], "");
+    assert_eq!(result.rows[2][email_idx], "");
+}
