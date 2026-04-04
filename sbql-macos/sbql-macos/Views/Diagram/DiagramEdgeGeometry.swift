@@ -65,22 +65,20 @@ enum DiagramEdgeGeometry {
             ))
         }
 
-        // Group edges that share the same vertical channel region to assign offsets.
-        // Key: a pair of table IDs (sorted) to group edges between the same two tables.
-        var tablePairCount: [String: Int] = [:]
+        // Pre-compute pair counts in one pass to avoid O(N^2) nested filter.
+        var pairCounts: [String: Int] = [:]
+        for raw in rawEdges {
+            let key = [raw.fromId, raw.toId].sorted().joined(separator: "|")
+            pairCounts[key, default: 0] += 1
+        }
+
         var tablePairIndex: [String: Int] = [:]
 
         return rawEdges.map { raw in
             let pairKey = [raw.fromId, raw.toId].sorted().joined(separator: "|")
             let idx = tablePairIndex[pairKey] ?? 0
             tablePairIndex[pairKey] = idx + 1
-            let total = tablePairCount[pairKey] ?? {
-                let count = rawEdges.filter {
-                    [$0.fromId, $0.toId].sorted().joined(separator: "|") == pairKey
-                }.count
-                tablePairCount[pairKey] = count
-                return count
-            }()
+            let total = pairCounts[pairKey] ?? 1
 
             // Spread channels: center them around 0
             let spacing: CGFloat = 8

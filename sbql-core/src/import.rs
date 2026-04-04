@@ -22,7 +22,7 @@ pub enum ImportFormat {
 }
 
 /// Maximum rows per INSERT statement.
-const BATCH_SIZE: usize = 100;
+const BATCH_SIZE: usize = 500;
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -119,15 +119,15 @@ fn read_json(path: &str) -> Result<(Vec<String>, Vec<Vec<String>>)> {
     let data: serde_json::Value =
         serde_json::from_reader(reader).map_err(|e| SbqlError::Import(e.to_string()))?;
 
-    let items = match &data {
-        serde_json::Value::Array(arr) => arr.clone(),
+    let items: &[serde_json::Value] = match &data {
+        serde_json::Value::Array(arr) => arr.as_slice(),
         serde_json::Value::Object(map) => {
             // Find the first key whose value is an array of objects.
-            let mut found = None;
+            let mut found: Option<&[serde_json::Value]> = None;
             for (_key, val) in map {
                 if let serde_json::Value::Array(arr) = val {
                     if arr.first().map_or(false, |v| v.is_object()) {
-                        found = Some(arr.clone());
+                        found = Some(arr.as_slice());
                         break;
                     }
                 }
@@ -151,8 +151,8 @@ fn read_json(path: &str) -> Result<(Vec<String>, Vec<Vec<String>>)> {
         _ => return Err(SbqlError::Import("Expected array of objects".into())),
     };
 
-    let mut rows = Vec::new();
-    for item in &items {
+    let mut rows = Vec::with_capacity(items.len());
+    for item in items {
         if let serde_json::Value::Object(map) = item {
             let row: Vec<String> = columns
                 .iter()

@@ -55,10 +55,22 @@ struct ResultsTableView: NSViewRepresentable {
         scrollView.drawsBackground = false // let SwiftUI island background show through
         scrollView.contentView.drawsBackground = false
 
+        // Cache theme colors once per update cycle
+        context.coordinator.cachedTextPrimary = NSColor(SbqlTheme.Colors.textPrimary)
+        context.coordinator.cachedDanger = NSColor(SbqlTheme.Colors.danger)
+        context.coordinator.cachedWarning = NSColor(SbqlTheme.Colors.warning)
+        context.coordinator.cachedSuccess = NSColor(SbqlTheme.Colors.success)
+
         if let tableView = context.coordinator.tableView {
             tableView.backgroundColor = bg
             tableView.gridColor = NSColor(SbqlTheme.Colors.borderSubtle)
-            context.coordinator.rebuildColumns()
+
+            // Only rebuild columns when they actually change
+            let currentColumns = appVM.results.currentResult.columns
+            if currentColumns != context.coordinator.previousColumns {
+                context.coordinator.rebuildColumns()
+                context.coordinator.previousColumns = currentColumns
+            }
             tableView.reloadData()
             tableView.headerView?.needsDisplay = true
         }
@@ -71,6 +83,13 @@ struct ResultsTableView: NSViewRepresentable {
     class Coordinator: NSObject, NSTableViewDelegate, NSTableViewDataSource, NSMenuDelegate {
         var appVM: AppViewModel
         weak var tableView: NSTableView?
+        var previousColumns: [String] = []
+
+        // Cached theme colors to avoid repeated SbqlTheme lookups per cell
+        var cachedTextPrimary: NSColor = .white
+        var cachedDanger: NSColor = .red
+        var cachedWarning: NSColor = .yellow
+        var cachedSuccess: NSColor = .green
 
         init(appVM: AppViewModel) {
             self.appVM = appVM
@@ -88,7 +107,7 @@ struct ResultsTableView: NSViewRepresentable {
             // Add new columns
             let headerFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
             let cellFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-            let sampleCount = min(result.rows.count, 200)
+            let sampleCount = min(result.rows.count, 50)
 
             for (idx, colName) in result.columns.enumerated() {
                 let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("col_\(idx)"))
@@ -152,22 +171,22 @@ struct ResultsTableView: NSViewRepresentable {
                 // Strikethrough + red for rows pending deletion
                 let attrs: [NSAttributedString.Key: Any] = [
                     .strikethroughStyle: NSUnderlineStyle.single.rawValue,
-                    .foregroundColor: NSColor(SbqlTheme.Colors.danger),
+                    .foregroundColor: cachedDanger,
                     .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
                 ]
                 cellView.attributedStringValue = NSAttributedString(string: value, attributes: attrs)
                 cellView.drawsBackground = true
-                cellView.backgroundColor = NSColor(SbqlTheme.Colors.danger).withAlphaComponent(0.10)
+                cellView.backgroundColor = cachedDanger.withAlphaComponent(0.10)
             } else if isDirty {
                 cellView.attributedStringValue = NSAttributedString(string: value)
                 cellView.stringValue = value
-                cellView.textColor = NSColor(SbqlTheme.Colors.warning)
+                cellView.textColor = cachedWarning
                 cellView.drawsBackground = true
-                cellView.backgroundColor = NSColor(SbqlTheme.Colors.warning).withAlphaComponent(0.15)
+                cellView.backgroundColor = cachedWarning.withAlphaComponent(0.15)
             } else {
                 cellView.attributedStringValue = NSAttributedString(string: value)
                 cellView.stringValue = value
-                cellView.textColor = NSColor(SbqlTheme.Colors.textPrimary)
+                cellView.textColor = cachedTextPrimary
                 cellView.drawsBackground = false
                 cellView.backgroundColor = .clear
             }
@@ -175,13 +194,13 @@ struct ResultsTableView: NSViewRepresentable {
             // Diff mode highlighting
             if appVM.results.isDiffMode, let diff = appVM.results.diffResult {
                 if diff.addedRows.contains(row) {
-                    cellView.textColor = NSColor(SbqlTheme.Colors.success)
+                    cellView.textColor = cachedSuccess
                     cellView.drawsBackground = true
-                    cellView.backgroundColor = NSColor(SbqlTheme.Colors.success).withAlphaComponent(0.12)
+                    cellView.backgroundColor = cachedSuccess.withAlphaComponent(0.12)
                 } else if let change = diff.changedCells[CellKey(row: row, col: colIdx)] {
-                    cellView.textColor = NSColor(SbqlTheme.Colors.warning)
+                    cellView.textColor = cachedWarning
                     cellView.drawsBackground = true
-                    cellView.backgroundColor = NSColor(SbqlTheme.Colors.warning).withAlphaComponent(0.15)
+                    cellView.backgroundColor = cachedWarning.withAlphaComponent(0.15)
                     cellView.toolTip = "Was: \(change.old)"
                 }
             }

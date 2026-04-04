@@ -4,6 +4,7 @@ struct CommandPalette: View {
     @Environment(AppViewModel.self) private var appVM
     @State private var searchText = ""
     @State private var selectedIndex = 0
+    @State private var cachedItems: [CommandItem] = []
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
@@ -51,13 +52,16 @@ struct CommandPalette: View {
         }
         .frame(width: 520, height: 400)
         .background(SbqlTheme.Colors.surface)
-        .onAppear { isSearchFocused = true }
+        .onAppear {
+            isSearchFocused = true
+            cachedItems = buildItems()
+        }
         .onChange(of: searchText) { selectedIndex = 0 }
     }
 
     // MARK: - Commands
 
-    private var allItems: [CommandItem] {
+    private func buildItems() -> [CommandItem] {
         var items: [CommandItem] = []
 
         // Static commands
@@ -111,9 +115,9 @@ struct CommandPalette: View {
     }
 
     private var filteredItems: [CommandItem] {
-        guard !searchText.isEmpty else { return allItems }
+        guard !searchText.isEmpty else { return cachedItems }
         let q = searchText.lowercased()
-        return allItems.filter {
+        return cachedItems.filter {
             $0.title.lowercased().contains(q) ||
             ($0.subtitle?.lowercased().contains(q) ?? false)
         }

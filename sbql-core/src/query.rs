@@ -91,7 +91,13 @@ pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<Query
 }
 
 /// Run `SELECT COUNT(*) FROM (sql)` to get the total row count.
+/// Skips the count for queries that are likely expensive (GROUP BY, HAVING, UNION).
 async fn fetch_total_count(pool: &DbPool, sql: &str) -> Result<u64> {
+    let upper = sql.to_uppercase();
+    if upper.contains("GROUP BY") || upper.contains("UNION") || upper.contains("HAVING") {
+        return Err(SbqlError::Schema("Skipping count for complex query".into()));
+    }
+
     let trimmed = sql.trim_end_matches(';').trim();
     let count_sql = format!("SELECT COUNT(*) AS cnt FROM ({trimmed}) AS _sbql_count");
 
@@ -169,7 +175,22 @@ async fn execute_page_pg(pool: &PgPool, sql: &str, page: usize) -> Result<QueryR
         .map(|r| r.columns().iter().map(|c| c.name().to_owned()).collect())
         .unwrap_or_default();
 
-    let result_rows: Vec<Vec<String>> = rows_to_show.iter().map(pg_row_to_strings).collect();
+    // Precompute type names once — avoids calling type_info().name() per cell per row.
+    let type_names: Vec<String> = rows_to_show
+        .first()
+        .map(|r| r.columns().iter().map(|c| c.type_info().name().to_owned()).collect())
+        .unwrap_or_default();
+
+    let result_rows: Vec<Vec<String>> = rows_to_show
+        .iter()
+        .map(|row| {
+            type_names
+                .iter()
+                .enumerate()
+                .map(|(idx, type_name)| pg_value_to_string(row, idx, type_name))
+                .collect()
+        })
+        .collect();
 
     Ok(QueryResult {
         columns,
@@ -228,7 +249,15 @@ async fn execute_page_sqlite(pool: &SqlitePool, sql: &str, page: usize) -> Resul
         .map(|r| r.columns().iter().map(|c| c.name().to_owned()).collect())
         .unwrap_or_default();
 
-    let result_rows: Vec<Vec<String>> = rows_to_show.iter().map(sqlite_row_to_strings).collect();
+    let col_count = columns.len();
+    let result_rows: Vec<Vec<String>> = rows_to_show
+        .iter()
+        .map(|row| {
+            (0..col_count)
+                .map(|idx| sqlite_value_to_string(row, idx))
+                .collect()
+        })
+        .collect();
 
     Ok(QueryResult {
         columns,
@@ -288,7 +317,22 @@ async fn execute_page_mysql(pool: &MySqlPool, sql: &str, page: usize) -> Result<
         .map(|r| r.columns().iter().map(|c| c.name().to_owned()).collect())
         .unwrap_or_default();
 
-    let result_rows: Vec<Vec<String>> = rows_to_show.iter().map(mysql_row_to_strings).collect();
+    // Precompute type names once — avoids calling type_info().name() per cell per row.
+    let type_names: Vec<String> = rows_to_show
+        .first()
+        .map(|r| r.columns().iter().map(|c| c.type_info().name().to_owned()).collect())
+        .unwrap_or_default();
+
+    let result_rows: Vec<Vec<String>> = rows_to_show
+        .iter()
+        .map(|row| {
+            type_names
+                .iter()
+                .enumerate()
+                .map(|(idx, type_name)| mysql_value_to_string(row, idx, type_name))
+                .collect()
+        })
+        .collect();
 
     Ok(QueryResult {
         columns,

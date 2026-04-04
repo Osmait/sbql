@@ -61,7 +61,7 @@ impl ConnectionManager {
         let pool = match config.backend {
             DbBackend::Postgres => {
                 let pg = PgPoolOptions::new()
-                    .max_connections(5)
+                    .max_connections(10)
                     .acquire_timeout(std::time::Duration::from_secs(10))
                     .connect(&url)
                     .await?;
@@ -69,7 +69,7 @@ impl ConnectionManager {
             }
             DbBackend::Sqlite => {
                 let sq = SqlitePoolOptions::new()
-                    .max_connections(5)
+                    .max_connections(1)
                     .acquire_timeout(std::time::Duration::from_secs(10))
                     .after_connect(|conn, _meta| {
                         Box::pin(async move {
@@ -85,7 +85,7 @@ impl ConnectionManager {
             }
             DbBackend::Mysql => {
                 let my = MySqlPoolOptions::new()
-                    .max_connections(5)
+                    .max_connections(10)
                     .acquire_timeout(std::time::Duration::from_secs(10))
                     .connect(&url)
                     .await?;
@@ -150,7 +150,7 @@ impl ConnectionManager {
                 tib_config.trust_cert();
                 let mgr = bb8_tiberius::ConnectionManager::new(tib_config);
                 let pool = bb8::Pool::builder()
-                    .max_size(5)
+                    .max_size(10)
                     .connection_timeout(std::time::Duration::from_secs(10))
                     .build(mgr)
                     .await
