@@ -31,6 +31,9 @@ tiberius.workspace = true
 bb8.workspace = true
 bb8-tiberius.workspace = true
 tokio-util.workspace = true
+russh.workspace = true
+russh-keys.workspace = true
+async-trait.workspace = true
 
 [features]
 dhat-heap = ["dep:dhat"]
@@ -42,7 +45,7 @@ optional = true
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 testcontainers = "0.23"
-testcontainers-modules = { version = "0.11", features = ["postgres", "redis", "mysql"] }
+testcontainers-modules = { version = "0.11", features = ["postgres", "redis", "mysql", "mssql_server"] }
 tempfile = "3"
 criterion = { workspace = true }
 

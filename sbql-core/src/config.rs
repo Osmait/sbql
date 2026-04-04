@@ -50,6 +50,28 @@ pub struct ConnectionConfig {
     /// File path for SQLite databases (only used when `backend == Sqlite`).
     #[serde(default)]
     pub file_path: Option<String>,
+    /// Whether SSH tunneling is enabled for this connection.
+    #[serde(default)]
+    pub ssh_enabled: bool,
+    /// SSH server hostname.
+    #[serde(default)]
+    pub ssh_host: String,
+    /// SSH server port.
+    #[serde(default = "default_ssh_port")]
+    pub ssh_port: u16,
+    /// SSH username.
+    #[serde(default)]
+    pub ssh_user: String,
+    /// SSH authentication method: "password" or "key".
+    #[serde(default)]
+    pub ssh_auth_method: String,
+    /// Path to SSH private key file (used when `ssh_auth_method == "key"`).
+    #[serde(default)]
+    pub ssh_key_path: Option<String>,
+}
+
+fn default_ssh_port() -> u16 {
+    22
 }
 
 impl ConnectionConfig {
@@ -70,6 +92,12 @@ impl ConnectionConfig {
             database: database.into(),
             ssl_mode: SslMode::Prefer,
             file_path: None,
+            ssh_enabled: false,
+            ssh_host: String::new(),
+            ssh_port: 22,
+            ssh_user: String::new(),
+            ssh_auth_method: String::new(),
+            ssh_key_path: None,
         }
     }
 
@@ -85,6 +113,12 @@ impl ConnectionConfig {
             database: String::new(),
             ssl_mode: SslMode::default(),
             file_path: Some(file_path.into()),
+            ssh_enabled: false,
+            ssh_host: String::new(),
+            ssh_port: 22,
+            ssh_user: String::new(),
+            ssh_auth_method: String::new(),
+            ssh_key_path: None,
         }
     }
 
@@ -106,6 +140,12 @@ impl ConnectionConfig {
             database: database.into(),
             ssl_mode: SslMode::default(),
             file_path: None,
+            ssh_enabled: false,
+            ssh_host: String::new(),
+            ssh_port: 22,
+            ssh_user: String::new(),
+            ssh_auth_method: String::new(),
+            ssh_key_path: None,
         }
     }
 
@@ -130,6 +170,12 @@ impl ConnectionConfig {
             database: region.into(),
             ssl_mode: SslMode::default(),
             file_path: None,
+            ssh_enabled: false,
+            ssh_host: String::new(),
+            ssh_port: 22,
+            ssh_user: String::new(),
+            ssh_auth_method: String::new(),
+            ssh_key_path: None,
         }
     }
 
@@ -150,6 +196,12 @@ impl ConnectionConfig {
             database: database.into(),
             ssl_mode: SslMode::default(),
             file_path: None,
+            ssh_enabled: false,
+            ssh_host: String::new(),
+            ssh_port: 22,
+            ssh_user: String::new(),
+            ssh_auth_method: String::new(),
+            ssh_key_path: None,
         }
     }
 
@@ -171,6 +223,12 @@ impl ConnectionConfig {
             database: database.into(),
             ssl_mode: SslMode::default(),
             file_path: None,
+            ssh_enabled: false,
+            ssh_host: String::new(),
+            ssh_port: 22,
+            ssh_user: String::new(),
+            ssh_auth_method: String::new(),
+            ssh_key_path: None,
         }
     }
 
@@ -186,6 +244,12 @@ impl ConnectionConfig {
             database: "0".to_string(),
             ssl_mode: SslMode::default(),
             file_path: None,
+            ssh_enabled: false,
+            ssh_host: String::new(),
+            ssh_port: 22,
+            ssh_user: String::new(),
+            ssh_auth_method: String::new(),
+            ssh_key_path: None,
         }
     }
 
@@ -306,6 +370,25 @@ impl ConnectionConfig {
         entry
             .delete_credential()
             .map_err(|e| SbqlError::Keyring(e.to_string()))
+    }
+
+    /// Store the SSH password in the OS keyring.
+    pub fn save_ssh_password(&self, password: &str) -> Result<()> {
+        if password.is_empty() {
+            return Ok(());
+        }
+        let entry = Entry::new("sbql-ssh", &self.id.to_string())
+            .map_err(|e| SbqlError::Keyring(e.to_string()))?;
+        entry
+            .set_password(password)
+            .map_err(|e| SbqlError::Keyring(e.to_string()))
+    }
+
+    /// Retrieve the SSH password from the OS keyring.
+    pub fn load_ssh_password(&self) -> String {
+        Entry::new("sbql-ssh", &self.id.to_string())
+            .and_then(|e| e.get_password())
+            .unwrap_or_default()
     }
 }
 

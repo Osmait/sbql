@@ -51,8 +51,8 @@ final class ConnectionsViewModel {
         connections = service.getConnections()
     }
 
-    func saveConnection(_ conn: Connection, password: String?) async throws {
-        let list = try await service.saveConnection(conn, password: password)
+    func saveConnection(_ conn: Connection, password: String?, sshPassword: String? = nil) async throws {
+        let list = try await service.saveConnection(conn, password: password, sshPassword: sshPassword)
         connections = list
     }
 

@@ -73,6 +73,11 @@ tokio-util = { version = "0.7", features = ["compat"] }
 # CSV parsing
 csv = "1"
 
+# SSH tunneling
+russh = "0.48"
+russh-keys = "0.48"
+async-trait = "0.1"
+
 # Benchmarking & profiling
 criterion = { version = "0.5", features = ["async_tokio"] }
 dhat = "0.3"

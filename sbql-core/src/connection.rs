@@ -10,19 +10,26 @@ use uuid::Uuid;
 use crate::config::ConnectionConfig;
 use crate::error::{Result, SbqlError};
 use crate::pool::{DbBackend, DbPool};
+use crate::tunnel::TunnelManager;
 
 /// Manages a map of live [`DbPool`] instances keyed by connection id.
 #[derive(Clone, Default)]
 pub struct ConnectionManager {
     pools: Arc<RwLock<HashMap<Uuid, DbPool>>>,
+    tunnel_manager: Arc<TunnelManager>,
 }
 
 impl ConnectionManager {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            pools: Arc::new(RwLock::new(HashMap::new())),
+            tunnel_manager: Arc::new(TunnelManager::new()),
+        }
     }
 
     /// Open (or reuse) a connection pool with an explicit password.
+    /// If SSH tunneling is enabled on the config, an SSH tunnel is opened first
+    /// and the database connection is routed through `localhost:<tunnel_port>`.
     #[tracing::instrument(skip_all, fields(name = config.name, backend = ?config.backend))]
     pub async fn connect_with_password(
         &self,
@@ -37,7 +44,19 @@ impl ConnectionManager {
             }
         }
 
-        let url = config.connection_string(password);
+        // If SSH tunnel is enabled, open it and reroute through localhost
+        let effective_config = if config.ssh_enabled {
+            let ssh_password = config.load_ssh_password();
+            let local_port = self.tunnel_manager.open(config, &ssh_password).await?;
+            std::borrow::Cow::Owned(ConnectionConfig {
+                host: "127.0.0.1".to_string(),
+                port: local_port,
+                ..config.clone()
+            })
+        } else {
+            std::borrow::Cow::Borrowed(config)
+        };
+        let url = effective_config.connection_string(password);
 
         let pool = match config.backend {
             DbBackend::Postgres => {
@@ -121,8 +140,8 @@ impl ConnectionManager {
             }
             DbBackend::SqlServer => {
                 let mut tib_config = tiberius::Config::new();
-                tib_config.host(&config.host);
-                tib_config.port(config.port);
+                tib_config.host(&effective_config.host);
+                tib_config.port(effective_config.port);
                 tib_config.database(&config.database);
                 tib_config.authentication(tiberius::AuthMethod::sql_server(
                     &config.user,
@@ -200,12 +219,13 @@ impl ConnectionManager {
             .ok_or_else(|| SbqlError::ConnectionNotFound(id.to_string()))
     }
 
-    /// Close and remove a pool.
+    /// Close and remove a pool, and shut down any associated SSH tunnel.
     pub async fn disconnect(&self, id: Uuid) {
         if let Some(pool) = self.pools.write().await.remove(&id) {
             pool.close().await;
             tracing::info!("Disconnected {}", id);
         }
+        self.tunnel_manager.close(id).await;
     }
 
     /// Returns the ids of all currently open connections.

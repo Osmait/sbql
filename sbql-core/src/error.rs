@@ -35,6 +35,9 @@ pub enum SbqlError {
     #[error("SQL Server error: {0}")]
     SqlServer(String),
 
+    #[error("SSH tunnel error: {0}")]
+    SshTunnel(String),
+
     #[error("Import error: {0}")]
     Import(String),
 
@@ -43,6 +46,12 @@ pub enum SbqlError {
 
     #[error("Serialization error: {0}")]
     Serialization(String),
+}
+
+impl From<russh::Error> for SbqlError {
+    fn from(e: russh::Error) -> Self {
+        SbqlError::SshTunnel(e.to_string())
+    }
 }
 
 pub type Result<T> = std::result::Result<T, SbqlError>;

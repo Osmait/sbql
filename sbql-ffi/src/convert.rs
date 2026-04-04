@@ -18,6 +18,12 @@ impl From<sbql_core::ConnectionConfig> for FfiConnectionConfig {
             database: c.database,
             ssl_mode: c.ssl_mode.into(),
             file_path: c.file_path,
+            ssh_enabled: c.ssh_enabled,
+            ssh_host: c.ssh_host,
+            ssh_port: c.ssh_port,
+            ssh_user: c.ssh_user,
+            ssh_auth_method: c.ssh_auth_method,
+            ssh_key_path: c.ssh_key_path,
         }
     }
 }
@@ -39,6 +45,12 @@ impl TryFrom<FfiConnectionConfig> for sbql_core::ConnectionConfig {
             database: c.database,
             ssl_mode: c.ssl_mode.into(),
             file_path: c.file_path,
+            ssh_enabled: c.ssh_enabled,
+            ssh_host: c.ssh_host,
+            ssh_port: c.ssh_port,
+            ssh_user: c.ssh_user,
+            ssh_auth_method: c.ssh_auth_method,
+            ssh_key_path: c.ssh_key_path,
         })
     }
 }
@@ -271,6 +283,12 @@ mod tests {
             database: "mydb".into(),
             ssl_mode: sbql_core::SslMode::Require,
             file_path: Some("/tmp/test.db".into()),
+            ssh_enabled: false,
+            ssh_host: String::new(),
+            ssh_port: 22,
+            ssh_user: String::new(),
+            ssh_auth_method: String::new(),
+            ssh_key_path: None,
         };
         let ffi: FfiConnectionConfig = config.into();
         assert_eq!(ffi.id, id.to_string());
@@ -297,6 +315,12 @@ mod tests {
             database: "".into(),
             ssl_mode: FfiSslMode::Prefer,
             file_path: None,
+            ssh_enabled: false,
+            ssh_host: String::new(),
+            ssh_port: 22,
+            ssh_user: String::new(),
+            ssh_auth_method: String::new(),
+            ssh_key_path: None,
         };
         let config: Result<sbql_core::ConnectionConfig, _> = ffi.try_into();
         assert!(config.is_ok());
@@ -317,6 +341,12 @@ mod tests {
             database: "".into(),
             ssl_mode: FfiSslMode::Prefer,
             file_path: None,
+            ssh_enabled: false,
+            ssh_host: String::new(),
+            ssh_port: 22,
+            ssh_user: String::new(),
+            ssh_auth_method: String::new(),
+            ssh_key_path: None,
         };
         let result: Result<sbql_core::ConnectionConfig, SbqlFfiError> = ffi.try_into();
         assert!(result.is_err());

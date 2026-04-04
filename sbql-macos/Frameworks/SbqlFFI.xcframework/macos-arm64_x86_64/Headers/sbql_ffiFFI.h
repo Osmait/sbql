@@ -349,7 +349,7 @@ uint64_t uniffi_sbql_ffi_fn_method_sbqlengine_load_diagram(void*_Nonnull ptr
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_FN_METHOD_SBQLENGINE_SAVE_CONNECTION
 #define UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_FN_METHOD_SBQLENGINE_SAVE_CONNECTION
-uint64_t uniffi_sbql_ffi_fn_method_sbqlengine_save_connection(void*_Nonnull ptr, RustBuffer config, RustBuffer password
+uint64_t uniffi_sbql_ffi_fn_method_sbqlengine_save_connection(void*_Nonnull ptr, RustBuffer config, RustBuffer password, RustBuffer ssh_password
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_SBQL_FFI_FN_METHOD_SBQLENGINE_SUGGEST_FILTER_VALUES

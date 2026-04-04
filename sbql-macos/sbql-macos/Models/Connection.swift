@@ -13,6 +13,14 @@ struct Connection: Identifiable, Hashable {
     var filePath: String?
     var requiresBiometric: Bool = false
 
+    // SSH Tunnel
+    var sshEnabled: Bool = false
+    var sshHost: String = ""
+    var sshPort: UInt16 = 22
+    var sshUser: String = ""
+    var sshAuthMethod: String = "" // "password" or "key"
+    var sshKeyPath: String? = nil
+
     var isConnected: Bool = false
 
     enum Backend: String, CaseIterable, Hashable {
@@ -154,6 +162,12 @@ extension Connection {
         database = ffi.database
         sslMode = SSLMode(ffi: ffi.sslMode)
         filePath = ffi.filePath
+        sshEnabled = ffi.sshEnabled
+        sshHost = ffi.sshHost
+        sshPort = ffi.sshPort
+        sshUser = ffi.sshUser
+        sshAuthMethod = ffi.sshAuthMethod
+        sshKeyPath = ffi.sshKeyPath
         // Biometric flag persisted in UserDefaults (not in Rust FFI)
         requiresBiometric = UserDefaults.standard.bool(forKey: "biometric_\(ffi.id)")
     }
@@ -168,7 +182,13 @@ extension Connection {
             user: user,
             database: database,
             sslMode: sslMode.ffi,
-            filePath: filePath
+            filePath: filePath,
+            sshEnabled: sshEnabled,
+            sshHost: sshHost,
+            sshPort: sshPort,
+            sshUser: sshUser,
+            sshAuthMethod: sshAuthMethod,
+            sshKeyPath: sshKeyPath
         )
     }
 }

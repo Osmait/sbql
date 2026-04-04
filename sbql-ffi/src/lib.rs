@@ -68,6 +68,12 @@ pub struct FfiConnectionConfig {
     pub database: String,
     pub ssl_mode: FfiSslMode,
     pub file_path: Option<String>,
+    pub ssh_enabled: bool,
+    pub ssh_host: String,
+    pub ssh_port: u16,
+    pub ssh_user: String,
+    pub ssh_auth_method: String,
+    pub ssh_key_path: Option<String>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -200,8 +206,14 @@ impl SbqlEngine {
         &self,
         config: FfiConnectionConfig,
         password: Option<String>,
+        ssh_password: Option<String>,
     ) -> Result<Vec<FfiConnectionConfig>, SbqlFfiError> {
         let core_config: sbql_core::ConnectionConfig = config.try_into()?;
+        if let Some(ref ssh_pass) = ssh_password {
+            if let Err(e) = core_config.save_ssh_password(ssh_pass) {
+                eprintln!("SSH keyring save failed: {e}");
+            }
+        }
         let mut core = self.core.lock().await;
         let events = core
             .handle(sbql_core::CoreCommand::SaveConnection {
@@ -720,8 +732,14 @@ mod tests {
             database: "".into(),
             ssl_mode: FfiSslMode::Prefer,
             file_path: None,
+            ssh_enabled: false,
+            ssh_host: String::new(),
+            ssh_port: 22,
+            ssh_user: String::new(),
+            ssh_auth_method: String::new(),
+            ssh_key_path: None,
         };
-        let result = engine.save_connection(config, None).await;
+        let result = engine.save_connection(config, None, None).await;
         assert!(result.is_err());
         tokio::task::spawn_blocking(move || drop(engine))
             .await
@@ -742,10 +760,16 @@ mod tests {
             database: "".into(),
             ssl_mode: FfiSslMode::Prefer,
             file_path: Some(":memory:".into()),
+            ssh_enabled: false,
+            ssh_host: String::new(),
+            ssh_port: 22,
+            ssh_user: String::new(),
+            ssh_auth_method: String::new(),
+            ssh_key_path: None,
         };
 
         // Save
-        let list = engine.save_connection(config, None).await.unwrap();
+        let list = engine.save_connection(config, None, None).await.unwrap();
         assert!(list.iter().any(|c| c.id == id));
 
         // Connect

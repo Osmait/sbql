@@ -6,6 +6,7 @@ struct ConnectionFormSheet: View {
 
     @State var connection: Connection
     @State private var password: String = ""
+    @State private var sshPassword: String = ""
     @State private var isSaving = false
 
     private let backends: [(Connection.Backend, String, String, Color)] = [
@@ -108,6 +109,59 @@ struct ConnectionFormSheet: View {
                         }
                     }
 
+                    // SSH Tunnel toggle (not for SQLite)
+                    if connection.backend != .sqlite {
+                        Divider().background(SbqlTheme.Colors.border)
+
+                        HStack {
+                            Toggle(isOn: $connection.sshEnabled) {
+                                HStack(spacing: SbqlTheme.Spacing.xs) {
+                                    Image(systemName: "lock.shield")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(connection.sshEnabled ? SbqlTheme.Colors.accent : SbqlTheme.Colors.textTertiary)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text("SSH Tunnel")
+                                            .font(SbqlTheme.Typography.bodyMedium)
+                                            .foregroundStyle(SbqlTheme.Colors.textPrimary)
+                                        Text("Connect through an SSH server")
+                                            .font(SbqlTheme.Typography.caption)
+                                            .foregroundStyle(SbqlTheme.Colors.textTertiary)
+                                    }
+                                }
+                            }
+                            .toggleStyle(.switch)
+                            .tint(SbqlTheme.Colors.accent)
+                        }
+
+                        if connection.sshEnabled {
+                            formField("SSH Host", text: $connection.sshHost, prompt: "bastion.example.com")
+                            formField("SSH Port", value: $connection.sshPort)
+                            formField("SSH User", text: $connection.sshUser, prompt: "ubuntu")
+
+                            // Auth method picker
+                            HStack {
+                                Text("Auth")
+                                    .font(SbqlTheme.Typography.bodyMedium)
+                                    .foregroundStyle(SbqlTheme.Colors.textSecondary)
+                                    .frame(width: 80, alignment: .leading)
+                                Picker("", selection: $connection.sshAuthMethod) {
+                                    Text("Password").tag("password")
+                                    Text("Key File").tag("key")
+                                }
+                                .pickerStyle(.segmented)
+                            }
+
+                            if connection.sshAuthMethod == "key" {
+                                formField("Key Path", text: Binding(
+                                    get: { connection.sshKeyPath ?? "" },
+                                    set: { connection.sshKeyPath = $0.isEmpty ? nil : $0 }
+                                ), prompt: "~/.ssh/id_rsa")
+                            } else {
+                                formField("SSH Password", text: $sshPassword, prompt: "SSH password", isSecure: true)
+                            }
+                        }
+                    }
+
                     // Safe Mode toggle
                     if BiometricService.isAvailable {
                         HStack {
@@ -146,7 +200,7 @@ struct ConnectionFormSheet: View {
             }
             .padding(SbqlTheme.Spacing.lg)
         }
-        .frame(width: 440, height: 520)
+        .frame(width: 440, height: connection.sshEnabled ? 700 : 520)
         .background(SbqlTheme.Colors.surface)
     }
 
@@ -223,7 +277,8 @@ struct ConnectionFormSheet: View {
         Task {
             do {
                 let pw = password.isEmpty ? nil : password
-                try await appVM.connections.saveConnection(connection, password: pw)
+                let sshPw = sshPassword.isEmpty ? nil : sshPassword
+                try await appVM.connections.saveConnection(connection, password: pw, sshPassword: sshPw)
                 // Persist biometric flag in UserDefaults
                 UserDefaults.standard.set(connection.requiresBiometric, forKey: "biometric_\(connection.id)")
                 dismiss()

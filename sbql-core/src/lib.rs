@@ -19,6 +19,7 @@ pub mod pool;
 pub mod query;
 pub mod query_builder;
 pub mod schema;
+pub mod tunnel;
 
 // Re-export the most commonly used types at the crate root.
 pub use config::{

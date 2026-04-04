@@ -17,8 +17,8 @@ actor SbqlService {
         engine.getConnections().map(Connection.init)
     }
 
-    func saveConnection(_ conn: Connection, password: String?) async throws -> [Connection] {
-        let list = try await engine.saveConnection(config: conn.ffi, password: password)
+    func saveConnection(_ conn: Connection, password: String?, sshPassword: String? = nil) async throws -> [Connection] {
+        let list = try await engine.saveConnection(config: conn.ffi, password: password, sshPassword: sshPassword)
         return list.map(Connection.init)
     }
 

@@ -598,7 +598,7 @@ public protocol SbqlEngineProtocol: AnyObject, Sendable {
     /**
      * Save (create or update) a connection config. Returns updated list.
      */
-    func saveConnection(config: FfiConnectionConfig, password: String?) async throws  -> [FfiConnectionConfig]
+    func saveConnection(config: FfiConnectionConfig, password: String?, sshPassword: String?) async throws  -> [FfiConnectionConfig]
     
     /**
      * Suggest distinct values for autocomplete.
@@ -986,13 +986,13 @@ open func loadDiagram()async throws  -> FfiDiagramData  {
     /**
      * Save (create or update) a connection config. Returns updated list.
      */
-open func saveConnection(config: FfiConnectionConfig, password: String?)async throws  -> [FfiConnectionConfig]  {
+open func saveConnection(config: FfiConnectionConfig, password: String?, sshPassword: String?)async throws  -> [FfiConnectionConfig]  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_sbql_ffi_fn_method_sbqlengine_save_connection(
                     self.uniffiClonePointer(),
-                    FfiConverterTypeFfiConnectionConfig_lower(config),FfiConverterOptionString.lower(password)
+                    FfiConverterTypeFfiConnectionConfig_lower(config),FfiConverterOptionString.lower(password),FfiConverterOptionString.lower(sshPassword)
                 )
             },
             pollFunc: ffi_sbql_ffi_rust_future_poll_rust_buffer,
@@ -1195,10 +1195,16 @@ public struct FfiConnectionConfig {
     public var database: String
     public var sslMode: FfiSslMode
     public var filePath: String?
+    public var sshEnabled: Bool
+    public var sshHost: String
+    public var sshPort: UInt16
+    public var sshUser: String
+    public var sshAuthMethod: String
+    public var sshKeyPath: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, name: String, backend: FfiDbBackend, host: String, port: UInt16, user: String, database: String, sslMode: FfiSslMode, filePath: String?) {
+    public init(id: String, name: String, backend: FfiDbBackend, host: String, port: UInt16, user: String, database: String, sslMode: FfiSslMode, filePath: String?, sshEnabled: Bool, sshHost: String, sshPort: UInt16, sshUser: String, sshAuthMethod: String, sshKeyPath: String?) {
         self.id = id
         self.name = name
         self.backend = backend
@@ -1208,6 +1214,12 @@ public struct FfiConnectionConfig {
         self.database = database
         self.sslMode = sslMode
         self.filePath = filePath
+        self.sshEnabled = sshEnabled
+        self.sshHost = sshHost
+        self.sshPort = sshPort
+        self.sshUser = sshUser
+        self.sshAuthMethod = sshAuthMethod
+        self.sshKeyPath = sshKeyPath
     }
 }
 
@@ -1245,6 +1257,24 @@ extension FfiConnectionConfig: Equatable, Hashable {
         if lhs.filePath != rhs.filePath {
             return false
         }
+        if lhs.sshEnabled != rhs.sshEnabled {
+            return false
+        }
+        if lhs.sshHost != rhs.sshHost {
+            return false
+        }
+        if lhs.sshPort != rhs.sshPort {
+            return false
+        }
+        if lhs.sshUser != rhs.sshUser {
+            return false
+        }
+        if lhs.sshAuthMethod != rhs.sshAuthMethod {
+            return false
+        }
+        if lhs.sshKeyPath != rhs.sshKeyPath {
+            return false
+        }
         return true
     }
 
@@ -1258,6 +1288,12 @@ extension FfiConnectionConfig: Equatable, Hashable {
         hasher.combine(database)
         hasher.combine(sslMode)
         hasher.combine(filePath)
+        hasher.combine(sshEnabled)
+        hasher.combine(sshHost)
+        hasher.combine(sshPort)
+        hasher.combine(sshUser)
+        hasher.combine(sshAuthMethod)
+        hasher.combine(sshKeyPath)
     }
 }
 
@@ -1278,7 +1314,13 @@ public struct FfiConverterTypeFfiConnectionConfig: FfiConverterRustBuffer {
                 user: FfiConverterString.read(from: &buf), 
                 database: FfiConverterString.read(from: &buf), 
                 sslMode: FfiConverterTypeFfiSslMode.read(from: &buf), 
-                filePath: FfiConverterOptionString.read(from: &buf)
+                filePath: FfiConverterOptionString.read(from: &buf), 
+                sshEnabled: FfiConverterBool.read(from: &buf), 
+                sshHost: FfiConverterString.read(from: &buf), 
+                sshPort: FfiConverterUInt16.read(from: &buf), 
+                sshUser: FfiConverterString.read(from: &buf), 
+                sshAuthMethod: FfiConverterString.read(from: &buf), 
+                sshKeyPath: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -1292,6 +1334,12 @@ public struct FfiConverterTypeFfiConnectionConfig: FfiConverterRustBuffer {
         FfiConverterString.write(value.database, into: &buf)
         FfiConverterTypeFfiSslMode.write(value.sslMode, into: &buf)
         FfiConverterOptionString.write(value.filePath, into: &buf)
+        FfiConverterBool.write(value.sshEnabled, into: &buf)
+        FfiConverterString.write(value.sshHost, into: &buf)
+        FfiConverterUInt16.write(value.sshPort, into: &buf)
+        FfiConverterString.write(value.sshUser, into: &buf)
+        FfiConverterString.write(value.sshAuthMethod, into: &buf)
+        FfiConverterOptionString.write(value.sshKeyPath, into: &buf)
     }
 }
 
@@ -2633,7 +2681,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_sbql_ffi_checksum_method_sbqlengine_load_diagram() != 51680) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_sbql_ffi_checksum_method_sbqlengine_save_connection() != 41822) {
+    if (uniffi_sbql_ffi_checksum_method_sbqlengine_save_connection() != 56883) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sbql_ffi_checksum_method_sbqlengine_suggest_filter_values() != 23676) {
