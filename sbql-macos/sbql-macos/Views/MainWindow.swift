@@ -60,6 +60,13 @@ struct MainWindow: View {
             window.styleMask.insert(.fullSizeContentView)
         })
         .onAppear { appVM.onAppear() }
+        // Global keyboard shortcuts
+        .background {
+            Button { appVM.isCommandPaletteOpen = true } label: { EmptyView() }
+                .keyboardShortcut("k", modifiers: .command)
+            Button { appVM.isTablePreviewOpen = true } label: { EmptyView() }
+                .keyboardShortcut("p", modifiers: .command)
+        }
         .overlay {
             // History modal overlay — dismisses on background tap
             if appVM.isShowingHistory {
@@ -76,6 +83,24 @@ struct MainWindow: View {
                     appVM.isShowingSavedQueries = false
                 } content: {
                     SavedQueriesModal()
+                        .environment(appVM)
+                }
+            }
+            // Command Palette (Cmd+K)
+            if appVM.isCommandPaletteOpen {
+                modalOverlay {
+                    appVM.isCommandPaletteOpen = false
+                } content: {
+                    CommandPalette()
+                        .environment(appVM)
+                }
+            }
+            // Table Preview (Cmd+P)
+            if appVM.isTablePreviewOpen {
+                modalOverlay {
+                    appVM.isTablePreviewOpen = false
+                } content: {
+                    TablePreviewModal()
                         .environment(appVM)
                 }
             }

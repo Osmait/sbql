@@ -158,6 +158,39 @@ struct ResultsToolbar: View {
                 .fixedSize()
             }
 
+            // Snapshot & Diff
+            if !appVM.results.currentResult.isEmpty {
+                Button {
+                    appVM.results.takeSnapshot()
+                    appVM.showToast("Snapshot taken")
+                } label: {
+                    Image(systemName: "camera")
+                        .font(.system(size: 10))
+                        .foregroundStyle(appVM.results.snapshot != nil ? SbqlTheme.Colors.accent : SbqlTheme.Colors.accent.opacity(0.4))
+                }
+                .buttonStyle(.plain)
+                .help("Take snapshot for diff")
+
+                if appVM.results.snapshot != nil {
+                    Button {
+                        if appVM.results.isDiffMode { appVM.results.clearDiff() }
+                        else { appVM.results.computeDiff() }
+                    } label: {
+                        HStack(spacing: 2) {
+                            Image(systemName: "arrow.left.arrow.right")
+                                .font(.system(size: 10))
+                            if appVM.results.isDiffMode, let diff = appVM.results.diffResult {
+                                Text(diff.summary)
+                                    .font(SbqlTheme.Typography.caption)
+                            }
+                        }
+                        .foregroundStyle(appVM.results.isDiffMode ? SbqlTheme.Colors.warning : SbqlTheme.Colors.accent.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+                    .help(appVM.results.isDiffMode ? "Exit diff" : "Compare with snapshot")
+                }
+            }
+
             // Row count
             HStack(spacing: 2) {
                 Text("\(appVM.results.currentResult.rowCount) rows")

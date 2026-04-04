@@ -172,6 +172,20 @@ struct ResultsTableView: NSViewRepresentable {
                 cellView.backgroundColor = .clear
             }
 
+            // Diff mode highlighting
+            if appVM.results.isDiffMode, let diff = appVM.results.diffResult {
+                if diff.addedRows.contains(row) {
+                    cellView.textColor = NSColor(SbqlTheme.Colors.success)
+                    cellView.drawsBackground = true
+                    cellView.backgroundColor = NSColor(SbqlTheme.Colors.success).withAlphaComponent(0.12)
+                } else if let change = diff.changedCells[CellKey(row: row, col: colIdx)] {
+                    cellView.textColor = NSColor(SbqlTheme.Colors.warning)
+                    cellView.drawsBackground = true
+                    cellView.backgroundColor = NSColor(SbqlTheme.Colors.warning).withAlphaComponent(0.15)
+                    cellView.toolTip = "Was: \(change.old)"
+                }
+            }
+
             return cellView
         }
 
@@ -244,17 +258,92 @@ struct ResultsTableView: NSViewRepresentable {
             guard let tableView else { return }
 
             let row = tableView.clickedRow
+            let col = tableView.clickedColumn
             guard row >= 0 else { return }
 
-            let pks = appVM.results.primaryKeys
-            guard !pks.isEmpty else { return }
+            let result = appVM.results.currentResult
+            guard row < result.rows.count else { return }
 
-            let isMarked = appVM.results.pendingDeletions.contains(row)
-            let title = isMarked ? "Undo Delete" : "Delete Row"
-            let item = NSMenuItem(title: title, action: #selector(toggleDeleteRow(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = row
-            menu.addItem(item)
+            // Copy Cell Value
+            if col >= 0, col < result.columns.count {
+                let cellItem = NSMenuItem(title: "Copy Cell Value", action: #selector(copyCellValue(_:)), keyEquivalent: "")
+                cellItem.target = self
+                cellItem.tag = row
+                cellItem.representedObject = col
+                menu.addItem(cellItem)
+            }
+
+            // Copy Row as JSON
+            let jsonItem = NSMenuItem(title: "Copy Row as JSON", action: #selector(copyRowAsJSON(_:)), keyEquivalent: "")
+            jsonItem.target = self
+            jsonItem.tag = row
+            menu.addItem(jsonItem)
+
+            // Copy Row as INSERT
+            let insertItem = NSMenuItem(title: "Copy Row as INSERT", action: #selector(copyRowAsInsert(_:)), keyEquivalent: "")
+            insertItem.target = self
+            insertItem.tag = row
+            menu.addItem(insertItem)
+
+            // Delete row (requires PKs)
+            let pks = appVM.results.primaryKeys
+            if !pks.isEmpty {
+                menu.addItem(NSMenuItem.separator())
+                let isMarked = appVM.results.pendingDeletions.contains(row)
+                let title = isMarked ? "Undo Delete" : "Delete Row"
+                let item = NSMenuItem(title: title, action: #selector(toggleDeleteRow(_:)), keyEquivalent: "")
+                item.target = self
+                item.tag = row
+                menu.addItem(item)
+            }
+        }
+
+        @objc func copyCellValue(_ sender: NSMenuItem) {
+            let row = sender.tag
+            guard let col = sender.representedObject as? Int else { return }
+            let result = appVM.results.currentResult
+            guard row < result.rows.count, col < result.rows[row].count else { return }
+            let value = appVM.results.dirtyCells[CellKey(row: row, col: col)] ?? result.rows[row][col]
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(value, forType: .string)
+        }
+
+        @objc func copyRowAsJSON(_ sender: NSMenuItem) {
+            let row = sender.tag
+            let result = appVM.results.currentResult
+            guard row < result.rows.count else { return }
+            var obj: [String: Any] = [:]
+            for (i, col) in result.columns.enumerated() {
+                let val = i < result.rows[row].count ? result.rows[row][i] : ""
+                if val.isEmpty { obj[col] = NSNull() }
+                else if let n = Int(val) { obj[col] = n }
+                else if let d = Double(val), val.contains(".") { obj[col] = d }
+                else if val == "true" { obj[col] = true }
+                else if val == "false" { obj[col] = false }
+                else { obj[col] = val }
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]),
+               let json = String(data: data, encoding: .utf8) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(json, forType: .string)
+            }
+        }
+
+        @objc func copyRowAsInsert(_ sender: NSMenuItem) {
+            let row = sender.tag
+            let result = appVM.results.currentResult
+            guard row < result.rows.count else { return }
+            let tableName = appVM.results.activeTable ?? "table"
+            let cols = result.columns.map { "\"\($0)\"" }.joined(separator: ", ")
+            let vals = result.rows[row].map { val -> String in
+                if val.isEmpty { return "NULL" }
+                if Double(val) != nil { return val }
+                if val == "true" || val == "false" { return val.uppercased() }
+                return "'\(val.replacingOccurrences(of: "'", with: "''"))'"
+            }.joined(separator: ", ")
+            let sql = "INSERT INTO \"\(tableName)\" (\(cols)) VALUES (\(vals));"
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(sql, forType: .string)
         }
 
         @objc func toggleDeleteRow(_ sender: NSMenuItem) {

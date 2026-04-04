@@ -16,6 +16,8 @@ final class AppViewModel {
     var isExporting: Bool = false
     var isShowingHistory: Bool = false
     var isShowingSavedQueries: Bool = false
+    var isCommandPaletteOpen: Bool = false
+    var isTablePreviewOpen: Bool = false
     var toastMessage: String?
     var toastIsError: Bool = false
 

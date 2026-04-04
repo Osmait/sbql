@@ -131,7 +131,13 @@ struct ModelTests {
             user: "admin",
             database: "production",
             sslMode: .require,
-            filePath: nil
+            filePath: nil,
+            sshEnabled: false,
+            sshHost: "",
+            sshPort: 22,
+            sshUser: "",
+            sshAuthMethod: "",
+            sshKeyPath: nil
         )
         let conn = Connection(ffi: ffi)
         #expect(conn.id == "abc-123")
@@ -188,7 +194,8 @@ struct ModelTests {
             columns: ["id", "name", "email"],
             rows: [["1", "Alice", "a@b.com"], ["2", "Bob", "b@c.com"]],
             page: 3,
-            hasNextPage: true
+            hasNextPage: true,
+            totalCount: 100
         )
         let result = QueryResultData(ffi: ffi)
         #expect(result.columns == ["id", "name", "email"])

@@ -36,7 +36,7 @@ struct ResultsViewModelTests {
             columns: ["id"],
             rows: [["1"]],
             page: 0,
-            hasNextPage: true
+            hasNextPage: true, totalCount: nil
         )
         #expect(vm.pageDisplay == "Page 1")
     }
@@ -47,7 +47,8 @@ struct ResultsViewModelTests {
             columns: ["id"],
             rows: [["1"]],
             page: 2,
-            hasNextPage: false
+            hasNextPage: false,
+            totalCount: nil
         )
         #expect(vm.pageDisplay == "Page 3 (last)")
     }
@@ -82,7 +83,7 @@ struct ResultsViewModelTests {
     @Test func switchToTabSavesAndRestores() {
         let vm = ResultsViewModel()
         vm.openTab(schema: "s", tableName: "t1", sql: "SQL1", currentSql: "")
-        vm.currentResult = QueryResultData(columns: ["a"], rows: [["1"]], page: 0, hasNextPage: false)
+        vm.currentResult = QueryResultData(columns: ["a"], rows: [["1"]], page: 0, hasNextPage: false, totalCount: nil)
 
         vm.openTab(schema: "s", tableName: "t2", sql: "SQL2", currentSql: "SQL1")
         #expect(vm.activeTabId == "s.t2")
@@ -135,7 +136,7 @@ struct ResultsViewModelTests {
         vm.dirtyCells[CellKey(row: 0, col: 0)] = "dirty"
         vm.pendingDeletions.insert(1)
 
-        let result = QueryResultData(columns: ["id"], rows: [["1"]], page: 0, hasNextPage: false)
+        let result = QueryResultData(columns: ["id"], rows: [["1"]], page: 0, hasNextPage: false, totalCount: nil)
         vm.applyResult(result)
 
         #expect(vm.dirtyCells.isEmpty)
@@ -148,7 +149,7 @@ struct ResultsViewModelTests {
     @Test func clearResetsEverything() {
         let vm = ResultsViewModel()
         vm.openTab(schema: "s", tableName: "t", sql: "SQL", currentSql: "")
-        vm.currentResult = QueryResultData(columns: ["a"], rows: [["1"]], page: 0, hasNextPage: false)
+        vm.currentResult = QueryResultData(columns: ["a"], rows: [["1"]], page: 0, hasNextPage: false, totalCount: nil)
         vm.sortedColumn = "a"
         vm.filterText = "filter"
 

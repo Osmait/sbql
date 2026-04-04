@@ -27,6 +27,11 @@ final class ResultsViewModel {
     /// Row indices marked for deletion but not yet committed.
     var pendingDeletions: Set<Int> = []
 
+    /// Snapshot for data diff comparison.
+    var snapshot: QueryResultData?
+    var diffResult: DiffResult?
+    var isDiffMode: Bool = false
+
     /// Whether there are pending edits awaiting commit.
     var hasPendingEdits: Bool {
         !dirtyCells.isEmpty || !pendingDeletions.isEmpty
@@ -235,6 +240,57 @@ final class ResultsViewModel {
             return "Page \(page) (last)"
         }
     }
+
+    // MARK: - Snapshot & Diff
+
+    func takeSnapshot() {
+        snapshot = currentResult
+    }
+
+    func computeDiff() {
+        guard let snapshot else { return }
+        let current = currentResult
+        var added = Set<Int>()
+        var removed = [[String]]()
+        var changed = [CellKey: (old: String, new: String)]()
+
+        // PK-based diff if available
+        if let pkCol = primaryKeys.first,
+           let pkIdxSnap = snapshot.columns.firstIndex(of: pkCol),
+           let pkIdxCurr = current.columns.firstIndex(of: pkCol) {
+            let snapByPK = Dictionary(uniqueKeysWithValues: snapshot.rows.enumerated().map { ($1[pkIdxSnap], ($0, $1)) })
+            let currByPK = Dictionary(uniqueKeysWithValues: current.rows.enumerated().map { ($1[pkIdxCurr], ($0, $1)) })
+
+            for (pk, (rowIdx, row)) in currByPK {
+                if let (_, oldRow) = snapByPK[pk] {
+                    for (colIdx, col) in current.columns.enumerated() {
+                        if let snapColIdx = snapshot.columns.firstIndex(of: col),
+                           oldRow[snapColIdx] != row[colIdx] {
+                            changed[CellKey(row: rowIdx, col: colIdx)] = (old: oldRow[snapColIdx], new: row[colIdx])
+                        }
+                    }
+                } else { added.insert(rowIdx) }
+            }
+            for (pk, (_, row)) in snapByPK where currByPK[pk] == nil { removed.append(row) }
+        } else {
+            // Index-based fallback
+            let minRows = min(snapshot.rows.count, current.rows.count)
+            for rowIdx in 0..<minRows {
+                for colIdx in 0..<min(snapshot.columns.count, current.columns.count) {
+                    if snapshot.rows[rowIdx][colIdx] != current.rows[rowIdx][colIdx] {
+                        changed[CellKey(row: rowIdx, col: colIdx)] = (old: snapshot.rows[rowIdx][colIdx], new: current.rows[rowIdx][colIdx])
+                    }
+                }
+            }
+            for rowIdx in minRows..<current.rows.count { added.insert(rowIdx) }
+            for rowIdx in minRows..<snapshot.rows.count { removed.append(snapshot.rows[rowIdx]) }
+        }
+
+        diffResult = DiffResult(addedRows: added, removedRows: removed, changedCells: changed)
+        isDiffMode = true
+    }
+
+    func clearDiff() { diffResult = nil; isDiffMode = false }
 
     // MARK: - Private
 
