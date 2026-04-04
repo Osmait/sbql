@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TableRow: View {
     let table: TableEntryModel
+    var showSchema: Bool = true
     @Environment(AppViewModel.self) private var appVM
 
     private var isSelected: Bool {
@@ -21,9 +22,11 @@ struct TableRow: View {
 
             Spacer()
 
-            Text(table.schema)
-                .font(SbqlTheme.Typography.caption)
-                .foregroundStyle(SbqlTheme.Colors.textTertiary)
+            if showSchema {
+                Text(table.schema)
+                    .font(SbqlTheme.Typography.caption)
+                    .foregroundStyle(SbqlTheme.Colors.textTertiary)
+            }
         }
         .padding(.horizontal, SbqlTheme.Spacing.sm)
         .padding(.vertical, SbqlTheme.Spacing.xs)

@@ -106,6 +106,10 @@ struct ResultsToolbar: View {
             Text("\(appVM.results.currentResult.rowCount) rows")
                 .font(SbqlTheme.Typography.caption)
                 .foregroundStyle(SbqlTheme.Colors.textTertiary)
+                .padding(.horizontal, SbqlTheme.Spacing.sm)
+                .padding(.vertical, SbqlTheme.Spacing.xxs)
+                .background(SbqlTheme.Colors.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
 
             // Pagination
             HStack(spacing: SbqlTheme.Spacing.xs) {
@@ -116,21 +120,39 @@ struct ResultsToolbar: View {
                     }
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 10))
+                        .font(.system(size: 12))
+                        .foregroundStyle(
+                            appVM.results.currentResult.page == 0
+                                ? SbqlTheme.Colors.textTertiary
+                                : SbqlTheme.Colors.accent
+                        )
+                        .padding(.horizontal, SbqlTheme.Spacing.xs)
+                        .padding(.vertical, SbqlTheme.Spacing.xxs)
+                        .background(SbqlTheme.Colors.surfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
                 }
                 .buttonStyle(.plain)
                 .disabled(appVM.results.currentResult.page == 0)
 
                 Text(appVM.results.pageDisplay)
-                    .font(SbqlTheme.Typography.caption)
-                    .foregroundStyle(SbqlTheme.Colors.textSecondary)
+                    .font(SbqlTheme.Typography.captionBold)
+                    .foregroundStyle(SbqlTheme.Colors.textPrimary)
 
                 Button {
                     let page = appVM.results.currentResult.page
                     Task { await appVM.fetchPage(page + 1) }
                 } label: {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10))
+                        .font(.system(size: 12))
+                        .foregroundStyle(
+                            !appVM.results.currentResult.hasNextPage
+                                ? SbqlTheme.Colors.textTertiary
+                                : SbqlTheme.Colors.accent
+                        )
+                        .padding(.horizontal, SbqlTheme.Spacing.xs)
+                        .padding(.vertical, SbqlTheme.Spacing.xxs)
+                        .background(SbqlTheme.Colors.surfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
                 }
                 .buttonStyle(.plain)
                 .disabled(!appVM.results.currentResult.hasNextPage)

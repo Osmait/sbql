@@ -119,6 +119,7 @@ final class AppViewModel {
             let result = try await service.executeQuery(sql: sql)
             editor.lastQueryDuration = ContinuousClock.now - start
             results.applyResult(result)
+            results.updateActiveTabName(forSQL: sql)
         } catch {
             editor.lastQueryDuration = ContinuousClock.now - start
             showError(error)

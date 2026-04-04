@@ -176,6 +176,26 @@ final class ResultsViewModel {
         }
     }
 
+    /// Updates the active tab's display name based on the table referenced in the SQL.
+    func updateActiveTabName(forSQL sql: String) {
+        guard let activeId = activeTabId,
+              let index = tabs.firstIndex(where: { $0.id == activeId }) else { return }
+
+        let pattern = #"(?i)\bFROM\s+(\w+)"#
+        guard let range = sql.range(of: pattern, options: .regularExpression) else { return }
+        let matched = sql[range]
+        // Extract just the table name (after FROM + whitespace)
+        let parts = matched.split(separator: " ", maxSplits: 1)
+        guard parts.count == 2 else { return }
+        let extractedName = String(parts[1]).trimmingCharacters(in: .whitespaces)
+
+        if extractedName.lowercased() != (tabs[index].tableName ?? "").lowercased() {
+            tabs[index].displayNameOverride = extractedName
+        } else {
+            tabs[index].displayNameOverride = nil
+        }
+    }
+
     func clear() {
         clearState()
         tabs.removeAll()

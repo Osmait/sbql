@@ -72,11 +72,29 @@ struct ResultsTableView: NSViewRepresentable {
             }
 
             // Add new columns
+            let headerFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
+            let cellFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+            let sampleCount = min(result.rows.count, 200)
+
             for (idx, colName) in result.columns.enumerated() {
                 let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("col_\(idx)"))
                 col.title = colName
-                col.minWidth = 60
-                col.width = max(100, CGFloat(colName.count * 10 + 20))
+                col.minWidth = 100
+
+                // Measure header width (+ sort indicator space)
+                let headerWidth = (colName as NSString).size(withAttributes: [.font: headerFont]).width + 26
+
+                // Sample cell content to find max width
+                var maxCellWidth: CGFloat = 0
+                for rowIdx in 0 ..< sampleCount {
+                    if idx < result.rows[rowIdx].count {
+                        let cellWidth = (result.rows[rowIdx][idx] as NSString)
+                            .size(withAttributes: [.font: cellFont]).width
+                        maxCellWidth = max(maxCellWidth, cellWidth)
+                    }
+                }
+
+                col.width = max(100, max(headerWidth, maxCellWidth) + 24)
                 col.headerCell = SbqlHeaderCell(colName, coordinator: self, colIndex: idx)
                 tableView.addTableColumn(col)
             }
@@ -143,8 +161,8 @@ struct ResultsTableView: NSViewRepresentable {
             return cellView
         }
 
-        func tableView(_: NSTableView, rowViewForRow _: Int) -> NSTableRowView? {
-            SbqlTableRowView()
+        func tableView(_: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+            SbqlTableRowView(rowIndex: row)
         }
 
         // MARK: - Double-click editing
@@ -261,13 +279,34 @@ struct ResultsTableView: NSViewRepresentable {
 // MARK: - Custom Row View
 
 private class SbqlTableRowView: NSTableRowView {
+    private static let evenColor = NSColor(red: 0x11 / 255.0, green: 0x11 / 255.0, blue: 0x1B / 255.0, alpha: 1) // Crust
+    private static let oddColor = NSColor(red: 0x18 / 255.0, green: 0x18 / 255.0, blue: 0x25 / 255.0, alpha: 1) // Mantle
+
+    private let rowIndex: Int
+
+    init(rowIndex: Int) {
+        self.rowIndex = rowIndex
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func drawSelection(in dirtyRect: NSRect) {
         NSColor(SbqlTheme.Colors.selection).setFill()
         dirtyRect.fill()
     }
 
+    override func drawBackground(in dirtyRect: NSRect) {
+        let color = rowIndex % 2 == 0 ? Self.evenColor : Self.oddColor
+        color.setFill()
+        dirtyRect.fill()
+    }
+
     override var backgroundColor: NSColor {
-        get { NSColor(SbqlTheme.Colors.background) }
+        get { rowIndex % 2 == 0 ? Self.evenColor : Self.oddColor }
         set { _ = newValue }
     }
 }

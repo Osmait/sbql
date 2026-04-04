@@ -151,11 +151,10 @@ struct MainWindow: View {
                 // Backend badge
                 Text(conn.backend == .postgres ? "PG" : "SQLite")
                     .font(SbqlTheme.Typography.captionBold)
-                    .foregroundStyle(SbqlTheme.Colors.accent)
+                    .foregroundStyle(SbqlTheme.Colors.textSecondary)
                     .padding(.horizontal, SbqlTheme.Spacing.sm)
                     .padding(.vertical, 2)
-                    .background(SbqlTheme.Colors.accent.opacity(0.15))
-                    .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
+                    .background(SbqlTheme.Colors.surfaceElevated)
 
                 // Database name
                 badgePill(
@@ -186,11 +185,10 @@ struct MainWindow: View {
             Text(text)
                 .font(SbqlTheme.Typography.captionBold)
         }
-        .foregroundStyle(SbqlTheme.Colors.textTertiary)
+        .foregroundStyle(SbqlTheme.Colors.textSecondary)
         .padding(.horizontal, SbqlTheme.Spacing.sm)
         .padding(.vertical, 2)
         .background(SbqlTheme.Colors.surfaceElevated)
-        .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
     }
 
     private func formatDuration(_ d: Duration) -> String {

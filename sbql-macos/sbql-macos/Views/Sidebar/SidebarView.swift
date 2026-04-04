@@ -3,6 +3,15 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(AppViewModel.self) private var appVM
 
+    private var allSameSchema: Bool {
+        let schemas = Set(appVM.connections.tables.map { $0.schema })
+        return schemas.count <= 1
+    }
+
+    private var commonSchema: String {
+        appVM.connections.tables.first?.schema ?? "public"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Padding for traffic lights
@@ -27,7 +36,14 @@ struct SidebarView: View {
                         .background(SbqlTheme.Colors.border)
                         .padding(.vertical, SbqlTheme.Spacing.sm)
 
-                    sectionHeader("TABLES", action: nil)
+                    if allSameSchema {
+                        sectionHeader(
+                            "\(commonSchema.uppercased()) (\(appVM.connections.tables.count) tables)",
+                            action: nil
+                        )
+                    } else {
+                        sectionHeader("TABLES", action: nil)
+                    }
 
                     // Table filter
                     HStack(spacing: SbqlTheme.Spacing.xs) {
@@ -50,7 +66,7 @@ struct SidebarView: View {
 
                     LazyVStack(spacing: 2) {
                         ForEach(appVM.connections.filteredTables) { table in
-                            TableRow(table: table)
+                            TableRow(table: table, showSchema: !allSameSchema)
                         }
                     }
                     .padding(.horizontal, SbqlTheme.Spacing.sm)

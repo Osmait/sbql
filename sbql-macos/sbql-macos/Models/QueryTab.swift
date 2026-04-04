@@ -15,8 +15,11 @@ struct QueryTab: Identifiable {
     var dirtyCells: [CellKey: String]
     var pendingDeletions: Set<Int>
 
+    /// Override set when the executed query targets a different table than the tab was opened for.
+    var displayNameOverride: String?
+
     /// Display label for the tab.
     var displayName: String {
-        tableName ?? "Query"
+        displayNameOverride ?? tableName ?? "Query"
     }
 }
