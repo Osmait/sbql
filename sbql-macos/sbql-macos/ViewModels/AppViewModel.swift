@@ -276,6 +276,7 @@ final class AppViewModel {
     func discardEdits() {
         results.dirtyCells.removeAll()
         results.pendingDeletions.removeAll()
+        results.editRevision += 1
     }
 
     // MARK: - Mutations

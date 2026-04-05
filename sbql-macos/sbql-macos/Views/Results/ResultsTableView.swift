@@ -14,7 +14,7 @@ struct ResultsTableView: NSViewRepresentable {
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = false
 
-        let tableView = NSTableView()
+        let tableView = FillableTableView()
         tableView.style = .plain
         tableView.backgroundColor = NSColor(SbqlTheme.Colors.surface)
         tableView.rowHeight = SbqlTheme.Size.rowHeight
@@ -25,12 +25,13 @@ struct ResultsTableView: NSViewRepresentable {
         tableView.headerView = SbqlTableHeaderView()
         tableView.allowsColumnResizing = true
         tableView.columnAutoresizingStyle = .noColumnAutoresizing
-        tableView.allowsMultipleSelection = false
+        tableView.allowsMultipleSelection = true
 
         tableView.delegate = context.coordinator
         tableView.dataSource = context.coordinator
         tableView.doubleAction = #selector(Coordinator.handleDoubleClick(_:))
         tableView.target = context.coordinator
+        tableView.fillCoordinator = context.coordinator
         context.coordinator.tableView = tableView
 
         // Context menu for row actions (delete)
@@ -49,6 +50,7 @@ struct ResultsTableView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.appVM = appVM
         let _ = activeTheme // SwiftUI triggers updateNSView when this changes
+        let _ = appVM.results.editRevision // triggers updateNSView on discard/commit
 
         // Update theme colors on all layers
         let bg = NSColor(SbqlTheme.Colors.surface)
@@ -90,6 +92,9 @@ struct ResultsTableView: NSViewRepresentable {
         var cachedDanger: NSColor = .red
         var cachedWarning: NSColor = .yellow
         var cachedSuccess: NSColor = .green
+
+        // Fill handle — data operations called by FillableTableView
+        private var lastClickedCol: Int = -1
 
         init(appVM: AppViewModel) {
             self.appVM = appVM
@@ -213,6 +218,10 @@ struct ResultsTableView: NSViewRepresentable {
 
         // MARK: - Double-click inline editing
 
+        /// Rows being edited in multi-edit mode (double-click with multiple selection)
+        var multiEditRows: [Int] = []
+        var multiEditCol: Int = -1
+
         @objc func handleDoubleClick(_ sender: NSTableView) {
             let row = sender.clickedRow
             let col = sender.clickedColumn
@@ -237,6 +246,18 @@ struct ResultsTableView: NSViewRepresentable {
                 return
             }
 
+            // Determine which rows to edit
+            let selectedRows = sender.selectedRowIndexes
+            if selectedRows.count > 1 && selectedRows.contains(row) {
+                // Multi-row edit: all selected rows in this column
+                multiEditRows = Array(selectedRows).filter { $0 < result.rows.count }
+                multiEditCol = col
+            } else {
+                // Single row edit
+                multiEditRows = [row]
+                multiEditCol = col
+            }
+
             let currentVal: String = if let dirtyVal = appVM.results.dirtyCells[CellKey(row: row, col: col)] {
                 dirtyVal
             } else {
@@ -256,6 +277,11 @@ struct ResultsTableView: NSViewRepresentable {
             cellView.currentEditor()?.selectedRange = NSRange(location: 0, length: currentVal.count)
             cellView.delegate = self
             cellView.tag = row * 10000 + col // encode row+col in tag
+
+            // Show hint for multi-edit
+            if multiEditRows.count > 1 {
+                cellView.placeholderString = "Edit \(multiEditRows.count) rows…"
+            }
             cellView.window?.makeFirstResponder(cellView)
         }
 
@@ -269,12 +295,28 @@ struct ResultsTableView: NSViewRepresentable {
             let newVal = textField.stringValue
             let result = appVM.results.currentResult
 
-            // Check if value actually changed
-            let oldVal = appVM.results.dirtyCells[CellKey(row: row, col: col)]
-                ?? (row < result.rows.count && col < result.rows[row].count ? result.rows[row][col] : "")
-
-            if newVal != oldVal {
-                appVM.results.dirtyCells[CellKey(row: row, col: col)] = newVal
+            if multiEditRows.count > 1 && col == multiEditCol {
+                // Apply to ALL selected rows
+                for editRow in multiEditRows {
+                    let oldVal = appVM.results.dirtyCells[CellKey(row: editRow, col: col)]
+                        ?? (editRow < result.rows.count && col < result.rows[editRow].count ? result.rows[editRow][col] : "")
+                    if newVal != oldVal {
+                        appVM.results.dirtyCells[CellKey(row: editRow, col: col)] = newVal
+                    }
+                }
+                // Reload all edited rows
+                let indexSet = IndexSet(multiEditRows)
+                tableView?.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(integer: col))
+                multiEditRows.removeAll()
+            } else {
+                // Single row edit
+                let oldVal = appVM.results.dirtyCells[CellKey(row: row, col: col)]
+                    ?? (row < result.rows.count && col < result.rows[row].count ? result.rows[row][col] : "")
+                if newVal != oldVal {
+                    appVM.results.dirtyCells[CellKey(row: row, col: col)] = newVal
+                }
+                tableView?.reloadData(forRowIndexes: IndexSet(integer: row),
+                                      columnIndexes: IndexSet(integer: col))
             }
 
             // Reset cell to non-editable label style
@@ -283,10 +325,7 @@ struct ResultsTableView: NSViewRepresentable {
             textField.isBordered = false
             textField.bezelStyle = .squareBezel
             textField.drawsBackground = false
-
-            // Reload the row to apply dirty styling
-            tableView?.reloadData(forRowIndexes: IndexSet(integer: row),
-                                  columnIndexes: IndexSet(integer: col))
+            textField.placeholderString = nil
         }
 
         // MARK: - Context menu (NSMenuDelegate)
@@ -393,6 +432,35 @@ struct ResultsTableView: NSViewRepresentable {
             }
             tableView?.reloadData(forRowIndexes: IndexSet(integer: row),
                                   columnIndexes: IndexSet(0 ..< (tableView?.numberOfColumns ?? 0)))
+        }
+
+        // MARK: - Fill Handle
+
+        /// Called by FillableTableView when a fill-drag completes
+        func applyFill(sourceRow: Int, sourceCol: Int, targetRows: Set<Int>) {
+            let result = appVM.results.currentResult
+            guard sourceCol < result.columns.count,
+                  sourceRow < result.rows.count,
+                  !targetRows.isEmpty
+            else { return }
+
+            let sourceVal = appVM.results.dirtyCells[CellKey(row: sourceRow, col: sourceCol)]
+                ?? result.rows[sourceRow][sourceCol]
+
+            for row in targetRows {
+                guard row < result.rows.count else { continue }
+                let oldVal = appVM.results.dirtyCells[CellKey(row: row, col: sourceCol)]
+                    ?? (sourceCol < result.rows[row].count ? result.rows[row][sourceCol] : "")
+                if sourceVal != oldVal {
+                    appVM.results.dirtyCells[CellKey(row: row, col: sourceCol)] = sourceVal
+                }
+            }
+
+            let indexSet = IndexSet(targetRows)
+            tableView?.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(integer: sourceCol))
+
+            let count = targetRows.count
+            appVM.showToast("Filled \(count) cell\(count == 1 ? "" : "s")")
         }
 
         // MARK: - Sort
@@ -573,5 +641,272 @@ private class SbqlHeaderCell: NSTableHeaderCell {
         let borderRect = NSRect(x: cellFrame.maxX - 1, y: cellFrame.minY, width: 1, height: cellFrame.height)
         NSColor(SbqlTheme.Colors.borderSubtle).setFill()
         borderRect.fill()
+    }
+}
+
+// MARK: - FillableTableView (Excel-style drag-to-fill)
+
+/// NSTableView subclass that draws a fill handle on the selected cell
+/// and supports drag-to-fill to copy the value downward.
+/// Visual feedback is drawn via a sibling overlay on the scroll view's clip view.
+private class FillableTableView: NSTableView {
+    weak var fillCoordinator: ResultsTableView.Coordinator?
+
+    /// The cell the user clicked
+    fileprivate var activeRow: Int = -1
+    fileprivate var activeCol: Int = -1
+
+    /// Drag state
+    fileprivate var isDraggingFill = false
+    fileprivate var fillHighlightRows: Set<Int> = []
+
+    fileprivate let handleSize: CGFloat = 8
+    private let handleHitMargin: CGFloat = 8
+
+    /// Overlay added to the enclosing clip view so it renders above all row/cell views
+    private var overlay: FillOverlayView?
+
+    private func ensureOverlay() {
+        guard overlay == nil, let clipView = enclosingScrollView?.contentView else { return }
+        let ov = FillOverlayView(frame: clipView.bounds)
+        ov.autoresizingMask = [.width, .height]
+        ov.tableView = self
+        clipView.addSubview(ov, positioned: .above, relativeTo: self)
+        overlay = ov
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        ensureOverlay()
+    }
+
+    func refreshOverlay() {
+        ensureOverlay()
+        overlay?.frame = enclosingScrollView?.contentView.bounds ?? bounds
+        overlay?.needsDisplay = true
+        overlay?.displayIfNeeded()
+    }
+
+    // MARK: - Mouse handling
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+
+        // Check if clicking on the fill handle → enter tracking loop
+        if activeRow >= 0, activeCol >= 0, isPointOnFillHandle(point) {
+            trackFillDrag()
+            return
+        }
+
+        // Normal click — track the clicked cell
+        let clickedRow = row(at: point)
+        let clickedCol = column(at: point)
+
+        super.mouseDown(with: event)
+
+        if clickedRow >= 0, clickedCol >= 0 {
+            activeRow = clickedRow
+            activeCol = clickedCol
+        } else {
+            activeRow = -1
+            activeCol = -1
+        }
+        refreshOverlay()
+        window?.invalidateCursorRects(for: self)
+    }
+
+    /// Manual event tracking loop for fill-drag — standard Cocoa drag pattern.
+    /// Runs a tight loop that captures all mouse events until mouseUp.
+    private func trackFillDrag() {
+        fillHighlightRows.removeAll()
+        isDraggingFill = true
+        refreshOverlay()
+
+        while true {
+            guard let event = window?.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) else { break }
+
+            let point = convert(event.locationInWindow, from: nil)
+
+            if event.type == .leftMouseUp {
+                // Commit the fill
+                isDraggingFill = false
+                if !fillHighlightRows.isEmpty {
+                    fillCoordinator?.applyFill(
+                        sourceRow: activeRow,
+                        sourceCol: activeCol,
+                        targetRows: fillHighlightRows
+                    )
+                    fillHighlightRows.removeAll()
+                }
+                refreshOverlay()
+                break
+            }
+
+            // Mouse dragged — update highlight
+            let targetRow = row(at: point)
+
+            let newHighlight: Set<Int>
+            if targetRow >= 0, targetRow > activeRow {
+                newHighlight = Set((activeRow + 1) ... targetRow)
+            } else {
+                newHighlight = []
+            }
+
+            if newHighlight != fillHighlightRows {
+                fillHighlightRows = newHighlight
+                refreshOverlay()
+            }
+        }
+    }
+
+    // MARK: - Cursor
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+
+        guard activeRow >= 0, activeCol >= 0,
+              selectedRowIndexes.contains(activeRow)
+        else { return }
+
+        if let hitRect = fillHandleHitRect() {
+            addCursorRect(hitRect, cursor: .crosshair)
+        }
+    }
+
+    private func fillHandleHitRect() -> NSRect? {
+        let cellRect = frameOfCell(atColumn: activeCol, row: activeRow)
+        guard !cellRect.isEmpty else { return nil }
+        return NSRect(
+            x: cellRect.maxX - handleSize - handleHitMargin,
+            y: cellRect.maxY - handleSize - handleHitMargin,
+            width: handleSize + handleHitMargin * 2,
+            height: handleSize + handleHitMargin * 2
+        )
+    }
+
+    private func isPointOnFillHandle(_ point: NSPoint) -> Bool {
+        fillHandleHitRect()?.contains(point) ?? false
+    }
+
+    /// Convert a table cell rect to the overlay's coordinate system for drawing.
+    fileprivate func cellRectInOverlay(atColumn col: Int, row: Int) -> NSRect {
+        let cellRect = frameOfCell(atColumn: col, row: row)
+        guard let ov = overlay else { return cellRect }
+        return convert(cellRect, to: ov)
+    }
+}
+
+// MARK: - Fill Overlay (draws on top of all cells)
+
+/// Transparent overlay placed on the scroll view's clip view,
+/// above NSTableView's row/cell views, to draw fill handle visuals.
+private class FillOverlayView: NSView {
+    weak var tableView: FillableTableView?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.backgroundColor = .clear
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var isFlipped: Bool { true }
+
+    // Pass all mouse events through to the table view underneath
+    override func hitTest(_: NSPoint) -> NSView? { nil }
+    override var acceptsFirstResponder: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let tv = tableView else { return }
+
+        let activeRow = tv.activeRow
+        let activeCol = tv.activeCol
+        let isDragging = tv.isDraggingFill
+        let highlightRows = tv.fillHighlightRows
+
+        guard activeRow >= 0, activeCol >= 0,
+              tv.selectedRowIndexes.contains(activeRow) || isDragging
+        else { return }
+
+        let accentColor = NSColor(SbqlTheme.Colors.accent)
+        let sourceCellRect = tv.cellRectInOverlay(atColumn: activeCol, row: activeRow)
+        guard !sourceCellRect.isEmpty else { return }
+
+        // 1. Source cell border — solid accent
+        let borderPath = NSBezierPath(rect: sourceCellRect.insetBy(dx: 0.5, dy: 0.5))
+        accentColor.setStroke()
+        borderPath.lineWidth = 2
+        borderPath.stroke()
+
+        // 2. Fill handle — solid square at bottom-right corner
+        let hs: CGFloat = tv.handleSize
+        let handleRect = NSRect(
+            x: sourceCellRect.maxX - hs - 1,
+            y: sourceCellRect.maxY - hs - 1,
+            width: hs,
+            height: hs
+        )
+        accentColor.setFill()
+        let handlePath = NSBezierPath(roundedRect: handleRect, xRadius: 2, yRadius: 2)
+        handlePath.fill()
+        NSColor.white.withAlphaComponent(0.9).setStroke()
+        handlePath.lineWidth = 1
+        handlePath.stroke()
+
+        // 3. Drag highlight on target rows
+        guard !highlightRows.isEmpty else { return }
+
+        let sortedRows = highlightRows.sorted()
+
+        for row in sortedRows {
+            let cellRect = tv.cellRectInOverlay(atColumn: activeCol, row: row)
+            guard dirtyRect.intersects(cellRect) else { continue }
+            accentColor.withAlphaComponent(0.15).setFill()
+            cellRect.fill()
+        }
+
+        // 4. Dashed border around entire fill range
+        if let lastTarget = sortedRows.last {
+            let bottomRect = tv.cellRectInOverlay(atColumn: activeCol, row: lastTarget)
+            let rangeRect = sourceCellRect.union(bottomRect)
+
+            let dashPath = NSBezierPath(rect: rangeRect.insetBy(dx: 0.5, dy: 0.5))
+            accentColor.withAlphaComponent(0.7).setStroke()
+            dashPath.lineWidth = 1.5
+            dashPath.setLineDash([4, 3], count: 2, phase: 0)
+            dashPath.stroke()
+
+            // 5. Count badge next to the range
+            let count = highlightRows.count
+            let badge = "\(count)"
+            let badgeAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .bold),
+                .foregroundColor: NSColor.white,
+            ]
+            let badgeSize = badge.size(withAttributes: badgeAttrs)
+            let pad: CGFloat = 5
+            let badgeBgRect = NSRect(
+                x: rangeRect.maxX + 6,
+                y: bottomRect.midY - (badgeSize.height + pad) / 2,
+                width: badgeSize.width + pad * 2,
+                height: badgeSize.height + pad
+            )
+            let badgeBg = NSBezierPath(roundedRect: badgeBgRect, xRadius: 5, yRadius: 5)
+            accentColor.setFill()
+            badgeBg.fill()
+            badge.draw(
+                in: NSRect(
+                    x: badgeBgRect.origin.x + pad,
+                    y: badgeBgRect.origin.y + pad / 2,
+                    width: badgeSize.width,
+                    height: badgeSize.height
+                ),
+                withAttributes: badgeAttrs
+            )
+        }
     }
 }

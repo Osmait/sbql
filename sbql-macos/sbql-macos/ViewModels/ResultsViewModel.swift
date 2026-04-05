@@ -27,6 +27,9 @@ final class ResultsViewModel {
     /// Row indices marked for deletion but not yet committed.
     var pendingDeletions: Set<Int> = []
 
+    /// Bumped on discard/commit to force NSViewRepresentable refresh.
+    var editRevision: Int = 0
+
     /// Snapshot for data diff comparison.
     var snapshot: QueryResultData?
     var diffResult: DiffResult?
