@@ -16,10 +16,6 @@ struct QueryResultData: Equatable {
         rows.count
     }
 
-    var columnCount: Int {
-        columns.count
-    }
-
     static let empty = QueryResultData(columns: [], rows: [], page: 0, hasNextPage: false, totalCount: nil)
 }
 

@@ -76,7 +76,7 @@ struct ModelTests {
         let empty = QueryResultData.empty
         #expect(empty.isEmpty == true)
         #expect(empty.rowCount == 0)
-        #expect(empty.columnCount == 0)
+        #expect(empty.columns.count == 0)
         #expect(empty.page == 0)
         #expect(empty.hasNextPage == false)
     }

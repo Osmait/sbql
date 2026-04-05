@@ -38,9 +38,6 @@ final class ConnectionsViewModel {
         }
     }
 
-    var activeConnectionName: String {
-        activeConnection?.name ?? "sbql"
-    }
 
     var filteredTables: [TableEntryModel] {
         guard !tableFilter.isEmpty else { return tables }

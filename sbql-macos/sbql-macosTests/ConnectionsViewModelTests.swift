@@ -35,19 +35,6 @@ struct ConnectionsViewModelTests {
         #expect(vm.activeConnection?.id == "b")
     }
 
-    @Test func activeConnectionNameDefaultsToSbql() {
-        let vm = ConnectionsViewModel()
-        #expect(vm.activeConnectionName == "sbql")
-    }
-
-    @Test func activeConnectionNameReturnsConnectedName() {
-        let vm = ConnectionsViewModel()
-        vm.connections = [
-            makeConnection(id: "a", name: "MyDB", isConnected: true),
-        ]
-        #expect(vm.activeConnectionName == "MyDB")
-    }
-
     @Test func filteredTablesReturnsAllWhenFilterEmpty() {
         let vm = ConnectionsViewModel()
         vm.tables = [
