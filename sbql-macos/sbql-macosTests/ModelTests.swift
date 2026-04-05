@@ -17,12 +17,12 @@ struct ModelTests {
         #expect(!conn.id.isEmpty)
     }
 
-    @Test func connectionNewSqliteDefaults() {
-        let conn = Connection.newSqlite()
-        #expect(conn.backend == .sqlite)
-        #expect(conn.host == "")
-        #expect(conn.port == 0)
-        #expect(conn.filePath == "")
+    @Test func connectionNewPostgresIsDefault() {
+        let conn = Connection.newPostgres()
+        #expect(conn.backend == .postgres)
+        #expect(conn.host == "localhost")
+        #expect(conn.port == 5432)
+        #expect(conn.user == "postgres")
         #expect(conn.isConnected == false)
     }
 

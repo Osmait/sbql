@@ -6,7 +6,6 @@ final class DiagramViewModel {
     var diagramData: DiagramModel = .empty
     var isLoading: Bool = false
     var scale: CGFloat = 1.0
-    var offset: CGSize = .zero
 
     /// Per-table positions (enables drag)
     var tablePositions: [String: CGPoint] = [:]
