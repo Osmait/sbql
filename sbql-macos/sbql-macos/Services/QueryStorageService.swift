@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 final class QueryStorageService {
     static let shared = QueryStorageService()
@@ -21,7 +22,12 @@ final class QueryStorageService {
         guard let data = try? Data(contentsOf: historyURL) else { return [] }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([QueryHistoryEntry].self, from: data)) ?? []
+        do {
+            return try decoder.decode([QueryHistoryEntry].self, from: data)
+        } catch {
+            os_log(.error, "Failed to decode history: %{public}@", error.localizedDescription)
+            return []
+        }
     }
 
     func saveHistory(_ entries: [QueryHistoryEntry]) {
@@ -30,7 +36,11 @@ final class QueryStorageService {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(trimmed) else { return }
-        try? data.write(to: historyURL, options: .atomic)
+        do {
+            try data.write(to: historyURL, options: .atomic)
+        } catch {
+            os_log(.error, "Failed to save history: %{public}@", error.localizedDescription)
+        }
     }
 
     // MARK: - Saved Queries
@@ -39,7 +49,12 @@ final class QueryStorageService {
         guard let data = try? Data(contentsOf: queriesURL) else { return [] }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([SavedQuery].self, from: data)) ?? []
+        do {
+            return try decoder.decode([SavedQuery].self, from: data)
+        } catch {
+            os_log(.error, "Failed to decode saved queries: %{public}@", error.localizedDescription)
+            return []
+        }
     }
 
     func saveSavedQueries(_ queries: [SavedQuery]) {
@@ -47,6 +62,10 @@ final class QueryStorageService {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(queries) else { return }
-        try? data.write(to: queriesURL, options: .atomic)
+        do {
+            try data.write(to: queriesURL, options: .atomic)
+        } catch {
+            os_log(.error, "Failed to save queries: %{public}@", error.localizedDescription)
+        }
     }
 }

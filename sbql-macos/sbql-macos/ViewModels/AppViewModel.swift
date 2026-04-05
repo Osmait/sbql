@@ -41,6 +41,7 @@ final class AppViewModel {
         if let lastId = UserDefaults.standard.string(forKey: Self.lastConnectionKey),
            connections.connections.contains(where: { $0.id == lastId })
         {
+            // connect() handles its own errors via showError()
             Task { await connect(id: lastId) }
         }
     }
@@ -73,7 +74,7 @@ final class AppViewModel {
         // Load tables separately so a connect success is always reported.
         await refreshTables()
 
-        // Load schema metadata for autocomplete
+        // Load schema metadata for autocomplete; loadDiagram() handles its own errors via showError()
         Task { await loadDiagram() }
     }
 

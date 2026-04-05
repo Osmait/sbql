@@ -111,7 +111,7 @@ struct ResultsToolbar: View {
             if !appVM.results.currentResult.isEmpty {
                 Menu {
                     Section("Current Page (\(appVM.results.currentResult.rowCount) rows)") {
-                        ForEach(ExportFormat.allCases, id: \.self) { format in
+                        ForEach(ExportFormat.allCases) { format in
                             Button {
                                 ResultsExporter.export(
                                     format: format,
@@ -125,7 +125,7 @@ struct ResultsToolbar: View {
                         }
                     }
                     Section("All Results (streaming)") {
-                        ForEach(ExportFormat.allCases, id: \.self) { format in
+                        ForEach(ExportFormat.allCases) { format in
                             Button {
                                 Task {
                                     await appVM.exportAll(

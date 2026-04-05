@@ -5,6 +5,8 @@ private enum Island {
     static let gap: CGFloat = 8
     static let radius: CGFloat = 10
     static let outerPadding: CGFloat = 8
+    static let trafficLightsWidth: CGFloat = 56
+    static let headerTopPadding: CGFloat = 4
 }
 
 /// Top-level layout using IntelliJ-style "island" design.
@@ -68,41 +70,32 @@ struct MainWindow: View {
                 .keyboardShortcut("p", modifiers: .command)
         }
         .overlay {
-            // History modal overlay — dismisses on background tap
-            if appVM.isShowingHistory {
-                modalOverlay {
-                    appVM.isShowingHistory = false
-                } content: {
-                    QueryHistoryModal()
-                        .environment(appVM)
-                }
+            ModalPresenter(isPresented: Binding(
+                get: { appVM.isShowingHistory },
+                set: { appVM.isShowingHistory = $0 }
+            )) {
+                QueryHistoryModal().environment(appVM)
             }
-            // Saved queries modal overlay
-            if appVM.isShowingSavedQueries {
-                modalOverlay {
-                    appVM.isShowingSavedQueries = false
-                } content: {
-                    SavedQueriesModal()
-                        .environment(appVM)
-                }
+
+            ModalPresenter(isPresented: Binding(
+                get: { appVM.isShowingSavedQueries },
+                set: { appVM.isShowingSavedQueries = $0 }
+            )) {
+                SavedQueriesModal().environment(appVM)
             }
-            // Command Palette (Cmd+K)
-            if appVM.isCommandPaletteOpen {
-                modalOverlay {
-                    appVM.isCommandPaletteOpen = false
-                } content: {
-                    CommandPalette()
-                        .environment(appVM)
-                }
+
+            ModalPresenter(isPresented: Binding(
+                get: { appVM.isCommandPaletteOpen },
+                set: { appVM.isCommandPaletteOpen = $0 }
+            )) {
+                CommandPalette().environment(appVM)
             }
-            // Table Preview (Cmd+P)
-            if appVM.isTablePreviewOpen {
-                modalOverlay {
-                    appVM.isTablePreviewOpen = false
-                } content: {
-                    TablePreviewModal()
-                        .environment(appVM)
-                }
+
+            ModalPresenter(isPresented: Binding(
+                get: { appVM.isTablePreviewOpen },
+                set: { appVM.isTablePreviewOpen = $0 }
+            )) {
+                TablePreviewModal().environment(appVM)
             }
         }
         .sheet(isPresented: Binding(
@@ -134,7 +127,7 @@ struct MainWindow: View {
     private var unifiedHeader: some View {
         HStack(spacing: SbqlTheme.Spacing.sm) {
             // Space for macOS traffic lights
-            Spacer().frame(width: 56)
+            Spacer().frame(width: Island.trafficLightsWidth)
 
             // Sidebar toggle
             Button {
@@ -165,6 +158,7 @@ struct MainWindow: View {
                         appVM.activeTab = tab
                     }
                     if tab == .diagram {
+                        // loadDiagram() handles its own errors via showError()
                         Task { await appVM.loadDiagram() }
                     }
                 } label: {
@@ -247,7 +241,7 @@ struct MainWindow: View {
             headerActions
         }
         .padding(.horizontal, SbqlTheme.Spacing.lg)
-        .padding(.top, 4) // align content with macOS traffic lights
+        .padding(.top, Island.headerTopPadding) // align content with macOS traffic lights
         .padding(.bottom, SbqlTheme.Spacing.sm)
         .background(SbqlTheme.Colors.surface)
         .clipShape(
@@ -431,23 +425,4 @@ struct MainWindow: View {
         .animation(SbqlTheme.Animations.quick, value: appVM.editor.isVisible)
     }
 
-    // MARK: - Modal Overlay
-
-    /// A dimmed overlay that dismisses on background tap and centers the content.
-    private func modalOverlay<Content: View>(
-        onDismiss: @escaping () -> Void,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        ZStack {
-            Color.black.opacity(0.4)
-                .ignoresSafeArea()
-                .onTapGesture { withAnimation(SbqlTheme.Animations.quick) { onDismiss() } }
-
-            content()
-                .clipShape(RoundedRectangle(cornerRadius: Island.radius))
-                .shadow(color: .black.opacity(0.4), radius: 20, y: 8)
-        }
-        .transition(.opacity)
-        .animation(SbqlTheme.Animations.gentle, value: true)
-    }
 }

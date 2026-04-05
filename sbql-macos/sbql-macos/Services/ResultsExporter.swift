@@ -2,7 +2,9 @@ import AppKit
 import UniformTypeIdentifiers
 
 /// Exports query result data to CSV, JSON, or SQL INSERT formats.
-enum ExportFormat: String, CaseIterable {
+enum ExportFormat: String, CaseIterable, Identifiable {
+    var id: String { rawValue }
+
     case csv = "CSV"
     case json = "JSON"
     case sql = "SQL INSERT"

@@ -1,4 +1,5 @@
 import LocalAuthentication
+import os
 
 /// Wrapper for Touch ID / system password authentication.
 enum BiometricService {
@@ -21,6 +22,7 @@ enum BiometricService {
                 localizedReason: reason
             )
         } catch {
+            os_log(.error, "Biometric auth failed: %{public}@", error.localizedDescription)
             return false
         }
     }
