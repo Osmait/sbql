@@ -264,13 +264,17 @@ final class AppViewModel {
 
         results.dirtyCells.removeAll()
         results.pendingDeletions.removeAll()
+        results.editRevision += 1
 
         let count = deletions.count
         if count > 0 {
             showToast("\(count) row\(count == 1 ? "" : "s") deleted")
         }
 
-        await fetchPage(results.currentResult.page)
+        // Re-execute the current query to refresh data from the database.
+        // Using runQuery (not fetchPage) ensures the Rust engine uses
+        // this tab's SQL, not a stale cached query from another tab.
+        await runQuery()
     }
 
     func discardEdits() {

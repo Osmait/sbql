@@ -10,6 +10,8 @@ struct CellKey: Hashable {
 @Observable
 final class ResultsViewModel {
     var currentResult: QueryResultData = .empty
+    /// Bumped each time applyResult is called, to force table reload.
+    var resultRevision: Int = 0
     var sortedColumn: String?
     var sortDirection: FfiSortDirection = .ascending
     var filterText: String = ""
@@ -179,6 +181,7 @@ final class ResultsViewModel {
         }
         dirtyCells.removeAll()
         pendingDeletions.removeAll()
+        resultRevision += 1
         // Keep the active tab in sync
         if let activeId = activeTabId,
            let index = tabs.firstIndex(where: { $0.id == activeId })

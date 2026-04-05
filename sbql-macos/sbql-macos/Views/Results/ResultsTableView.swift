@@ -80,17 +80,17 @@ struct ResultsTableView: NSViewRepresentable {
             }
 
             // Only reload data when content actually changed
-            let dataId = appVM.results.currentResult.rows.count * 1000 + Int(appVM.results.currentResult.page)
-            let rev = appVM.results.editRevision
+            let resultRev = appVM.results.resultRevision
+            let editRev = appVM.results.editRevision
             let needsReload = columnsChanged
-                || dataId != context.coordinator.previousDataId
-                || rev != context.coordinator.previousEditRevision
+                || resultRev != context.coordinator.previousResultRevision
+                || editRev != context.coordinator.previousEditRevision
                 || themeChanged
 
             if needsReload {
                 tableView.reloadData()
-                context.coordinator.previousDataId = dataId
-                context.coordinator.previousEditRevision = rev
+                context.coordinator.previousResultRevision = resultRev
+                context.coordinator.previousEditRevision = editRev
             }
             tableView.headerView?.needsDisplay = true
         }
@@ -104,7 +104,7 @@ struct ResultsTableView: NSViewRepresentable {
         var appVM: AppViewModel
         weak var tableView: NSTableView?
         var previousColumns: [String] = []
-        var previousDataId: Int = -1
+        var previousResultRevision: Int = -1
         var previousEditRevision: Int = -1
 
         // Cached theme colors to avoid repeated SbqlTheme lookups per cell
