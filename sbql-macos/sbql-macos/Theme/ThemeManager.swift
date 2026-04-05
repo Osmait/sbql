@@ -81,16 +81,58 @@ struct ThemePalette {
     let fkLinePalette: [Color]
 }
 
+/// Animation style for tab switching transitions.
+enum TabAnimation: String, CaseIterable, Identifiable {
+    case none = "None"
+    case fade = "Fade"
+    case slide = "Slide"
+    case scaleBlur = "Scale + Blur"
+    case flip = "Card Flip"
+    case dissolve = "Dissolve"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .none: "minus"
+        case .fade: "circle.dotted"
+        case .slide: "arrow.left.arrow.right"
+        case .scaleBlur: "arrow.up.left.and.arrow.down.right"
+        case .flip: "rectangle.portrait.rotate"
+        case .dissolve: "drop.fill"
+        }
+    }
+
+    /// Returns the Animation timing for a given style.
+    static func timingFor(_ style: TabAnimation) -> Animation? {
+        switch style {
+        case .none: return nil
+        case .fade: return .easeInOut(duration: 0.25)
+        case .slide: return .spring(duration: 0.3, bounce: 0.1)
+        case .scaleBlur: return .spring(duration: 0.3, bounce: 0.08)
+        case .flip: return .spring(duration: 0.4, bounce: 0.05)
+        case .dissolve: return .easeInOut(duration: 0.3)
+        }
+    }
+}
+
 /// Global observable that provides the active color palette.
 @Observable
 final class ThemeManager {
     static let shared = ThemeManager()
 
     private static let storageKey = "selectedTheme"
+    private static let animationKey = "tabAnimation"
 
     var activeThemeName: ThemeName {
         didSet {
             UserDefaults.standard.set(activeThemeName.rawValue, forKey: Self.storageKey)
+        }
+    }
+
+    var tabAnimation: TabAnimation {
+        didSet {
+            UserDefaults.standard.set(tabAnimation.rawValue, forKey: Self.animationKey)
         }
     }
 
@@ -105,6 +147,14 @@ final class ThemeManager {
             activeThemeName = name
         } else {
             activeThemeName = .mocha
+        }
+
+        if let stored = UserDefaults.standard.string(forKey: Self.animationKey),
+           let anim = TabAnimation(rawValue: stored)
+        {
+            tabAnimation = anim
+        } else {
+            tabAnimation = .slide
         }
     }
 

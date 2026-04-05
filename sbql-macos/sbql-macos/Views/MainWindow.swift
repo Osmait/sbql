@@ -17,6 +17,7 @@ struct MainWindow: View {
 
     var body: some View {
         let _ = theme.activeThemeName
+        let _ = theme.tabAnimation
 
         ZStack {
             // "Sea" background — darker than islands
@@ -399,7 +400,7 @@ struct MainWindow: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            // Results island
+            // Results island — animated on tab switch
             VStack(spacing: 0) {
                 ResultsToolbar()
                 if appVM.results.isFilterBarVisible {
@@ -409,6 +410,11 @@ struct MainWindow: View {
             }
             .background(SbqlTheme.Colors.surface)
             .clipShape(RoundedRectangle(cornerRadius: Island.radius))
+            .modifier(TabSwitchModifier(
+                tabId: appVM.results.activeTabId ?? "none",
+                direction: appVM.results.tabSwitchDirection,
+                animation: theme.tabAnimation
+            ))
         }
         .animation(SbqlTheme.Animations.quick, value: appVM.editor.isVisible)
     }

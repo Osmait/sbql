@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 /// Key identifying a single cell by row and column index.
 struct CellKey: Hashable {
@@ -31,6 +31,9 @@ final class ResultsViewModel {
 
     /// Bumped on discard/commit to force NSViewRepresentable refresh.
     var editRevision: Int = 0
+
+    /// Direction of the last tab switch (for slide animation).
+    var tabSwitchDirection: Edge = .trailing
 
     /// Snapshot for data diff comparison.
     var snapshot: QueryResultData?
@@ -90,6 +93,10 @@ final class ResultsViewModel {
     func switchToTab(id: String, currentSql: String) -> String? {
         guard id != activeTabId,
               let targetIndex = tabs.firstIndex(where: { $0.id == id }) else { return nil }
+
+        // Determine slide direction based on tab position
+        let currentIndex = activeTabId.flatMap { id in tabs.firstIndex(where: { $0.id == id }) } ?? 0
+        tabSwitchDirection = targetIndex > currentIndex ? .trailing : .leading
 
         saveCurrentTabState(sqlText: currentSql)
 

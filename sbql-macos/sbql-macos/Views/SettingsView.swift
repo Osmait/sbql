@@ -48,9 +48,15 @@ struct SettingsView: View {
 
             Divider()
 
-            // Theme grid in scroll view
+            // Settings content
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 24) {
+                    // Tab animation picker
+                    animationSection
+
+                    Divider()
+
+                    // Theme grid
                     if !darkThemes.isEmpty {
                         themeSection("Dark Themes", themes: darkThemes)
                     }
@@ -61,8 +67,33 @@ struct SettingsView: View {
                 .padding(20)
             }
         }
-        .frame(width: 520, height: 560)
+        .frame(width: 520, height: 600)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    // MARK: - Animation Section
+
+    private var animationSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Tab Animation")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+
+            HStack(spacing: 8) {
+                ForEach(TabAnimation.allCases) { anim in
+                    AnimationOptionView(
+                        animation: anim,
+                        isSelected: theme.tabAnimation == anim,
+                        onSelect: {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                theme.tabAnimation = anim
+                            }
+                        }
+                    )
+                }
+            }
+        }
     }
 
     private func themeSection(_ title: String, themes: [ThemeName]) -> some View {
@@ -198,6 +229,50 @@ private struct ThemeCardView: View {
 }
 
 // MARK: - ThemeName helpers
+
+// MARK: - Animation Option Card
+
+private struct AnimationOptionView: View {
+    let animation: TabAnimation
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(spacing: 6) {
+                Image(systemName: animation.icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(isSelected
+                                ? Color.accentColor.opacity(0.15)
+                                : Color.primary.opacity(isHovered ? 0.06 : 0.03))
+                    )
+
+                Text(animation.rawValue)
+                    .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.primary.opacity(isHovered ? 0.04 : 0))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(isSelected ? Color.accentColor : .clear, lineWidth: 1.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+}
 
 extension ThemeName {
     var isDark: Bool {
