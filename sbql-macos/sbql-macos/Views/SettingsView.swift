@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Settings window with theme selector organized by category.
 struct SettingsView: View {
+    // Settings window runs in separate scene — uses singleton since @Environment is not available
     private var theme: ThemeManager { ThemeManager.shared }
     @State private var searchText: String = ""
 

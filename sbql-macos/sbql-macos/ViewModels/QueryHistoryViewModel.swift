@@ -5,7 +5,7 @@ final class QueryHistoryViewModel {
     var entries: [QueryHistoryEntry] = []
     var searchText: String = ""
 
-    private let storage = QueryStorageService.shared
+    private var storage: QueryStorageService { QueryStorageService.shared }
 
     var filteredEntries: [QueryHistoryEntry] {
         guard !searchText.isEmpty else { return entries }

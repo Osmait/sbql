@@ -7,7 +7,7 @@ final class SavedQueriesViewModel {
     var isShowingSaveSheet: Bool = false
     var saveSheetSQL: String = ""
 
-    private let storage = QueryStorageService.shared
+    private var storage: QueryStorageService { QueryStorageService.shared }
 
     var filteredQueries: [SavedQuery] {
         guard !searchText.isEmpty else { return queries }
