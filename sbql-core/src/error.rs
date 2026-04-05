@@ -14,6 +14,9 @@ pub enum SbqlError {
     #[error("SQL parse error: {0}")]
     SqlParse(String),
 
+    #[error("Connection error: {0}")]
+    Connection(String),
+
     #[error("Connection not found: {0}")]
     ConnectionNotFound(String),
 
