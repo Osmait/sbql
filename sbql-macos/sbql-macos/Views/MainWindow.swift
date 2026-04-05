@@ -68,6 +68,9 @@ struct MainWindow: View {
                 .keyboardShortcut("k", modifiers: .command)
             Button { appVM.isTablePreviewOpen = true } label: { EmptyView() }
                 .keyboardShortcut("p", modifiers: .command)
+            Button { appVM.formatSQL() } label: { EmptyView() }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .keyboardShortcut("p", modifiers: .command)
         }
         .overlay {
             ModalPresenter(isPresented: Binding(

@@ -310,6 +310,17 @@ final class AppViewModel {
         diagram.isLoading = false
     }
 
+    // MARK: - Format SQL
+
+    func formatSQL() {
+        let sql = editor.sqlText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sql.isEmpty else { return }
+        let formatted = service.formatSQL(sql)
+        if formatted != sql {
+            editor.sqlText = formatted
+        }
+    }
+
     // MARK: - Toast
 
     // MARK: - Export

@@ -525,6 +525,12 @@ impl SbqlEngine {
             .await;
         check_for_error(events)
     }
+
+    /// Format SQL by parsing into AST and re-serializing with consistent style.
+    #[uniffi::method]
+    pub fn format_sql(&self, sql: String) -> String {
+        sbql_core::format_sql(&sql)
+    }
 }
 
 // ---------------------------------------------------------------------------

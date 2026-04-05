@@ -30,7 +30,7 @@ pub use error::{Result, SbqlError};
 pub use pool::{DbBackend, DbPool};
 pub use import::ImportFormat;
 pub use query::{ExportFormat, QueryResult, PAGE_SIZE};
-pub use query_builder::SortDirection;
+pub use query_builder::{SortDirection, format_sql};
 pub use schema::{ColumnInfo, DiagramData, ForeignKey, TableEntry, TableSchema};
 
 use std::collections::HashMap;

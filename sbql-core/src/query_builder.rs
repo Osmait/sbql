@@ -156,6 +156,36 @@ pub fn apply_filter(
     }
 }
 
+/// Format SQL by parsing into AST and re-serializing with consistent style.
+/// Returns the formatted SQL, or the original if parsing fails.
+pub fn format_sql(sql: &str) -> String {
+    let trimmed = sql.trim_end_matches(';').trim();
+    let dialect = PostgreSqlDialect {};
+    match Parser::parse_sql(&dialect, trimmed) {
+        Ok(stmts) if !stmts.is_empty() => {
+            stmts
+                .iter()
+                .map(|s| format!("{s}"))
+                .collect::<Vec<_>>()
+                .join(";\n")
+        }
+        _ => {
+            // Try generic dialect as fallback
+            let dialect = sqlparser::dialect::GenericDialect {};
+            match Parser::parse_sql(&dialect, trimmed) {
+                Ok(stmts) if !stmts.is_empty() => {
+                    stmts
+                        .iter()
+                        .map(|s| format!("{s}"))
+                        .collect::<Vec<_>>()
+                        .join(";\n")
+                }
+                _ => sql.to_owned(),
+            }
+        }
+    }
+}
+
 /// Build a minimal `SELECT * FROM <table>` query.
 /// For PG: `SELECT * FROM "schema"."table"`
 /// For SQLite: `SELECT * FROM "table"` (no schema prefix)

@@ -138,4 +138,10 @@ actor SbqlService {
     func exportAll(path: String, format: FfiExportFormat, tableName: String) async throws -> UInt64 {
         try await engine.exportAll(path: path, format: format, tableName: tableName)
     }
+
+    // MARK: - Format
+
+    nonisolated func formatSQL(_ sql: String) -> String {
+        engine.formatSql(sql: sql)
+    }
 }

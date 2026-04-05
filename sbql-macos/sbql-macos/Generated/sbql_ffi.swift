@@ -571,6 +571,11 @@ public protocol SbqlEngineProtocol: AnyObject, Sendable {
     func fetchPage(page: UInt32) async throws  -> FfiQueryResult
     
     /**
+     * Format SQL by parsing into AST and re-serializing with consistent style.
+     */
+    func formatSql(sql: String)  -> String
+    
+    /**
      * Return the list of saved connections.
      */
     func getConnections()  -> [FfiConnectionConfig]
@@ -891,6 +896,17 @@ open func fetchPage(page: UInt32)async throws  -> FfiQueryResult  {
             liftFunc: FfiConverterTypeFfiQueryResult_lift,
             errorHandler: FfiConverterTypeSbqlFfiError_lift
         )
+}
+    
+    /**
+     * Format SQL by parsing into AST and re-serializing with consistent style.
+     */
+open func formatSql(sql: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_sbql_ffi_fn_method_sbqlengine_format_sql(self.uniffiClonePointer(),
+        FfiConverterString.lower(sql),$0
+    )
+})
 }
     
     /**
@@ -2664,6 +2680,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sbql_ffi_checksum_method_sbqlengine_fetch_page() != 47962) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_sbql_ffi_checksum_method_sbqlengine_format_sql() != 27437) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_sbql_ffi_checksum_method_sbqlengine_get_connections() != 9134) {

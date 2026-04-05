@@ -7,10 +7,13 @@ struct SQLEditorView: NSViewRepresentable {
     @Environment(AppViewModel.self) private var appVM
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSTextView.scrollableTextView()
-        guard let textView = scrollView.documentView as? NSTextView else {
-            return scrollView
-        }
+        let scrollView = NSScrollView()
+        let textView = MultiCursorTextView()
+        textView.autoresizingMask = [.width, .height]
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        scrollView.documentView = textView
 
         context.coordinator.textView = textView
         textView.delegate = context.coordinator
@@ -213,5 +216,65 @@ struct SQLEditorView: NSViewRepresentable {
             suppressCompletions = false
             completionPanel.dismiss()
         }
+    }
+}
+
+// MARK: - Multi-Cursor NSTextView
+
+/// Custom NSTextView that supports Option+Click to add multiple insertion points.
+class MultiCursorTextView: NSTextView {
+    private var extraCursors: [Int] = [] // character indices of additional cursors
+
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.option) && !event.modifierFlags.contains(.shift) {
+            // Option+Click: add a cursor at clicked position
+            let point = convert(event.locationInWindow, from: nil)
+            let index = characterIndexForInsertion(at: point)
+
+            if !extraCursors.contains(index) {
+                extraCursors.append(index)
+            }
+
+            // Build multiple selection ranges (zero-length = insertion point)
+            var ranges = [NSValue(range: selectedRange())]
+            for cursor in extraCursors {
+                let safeIndex = min(cursor, string.count)
+                ranges.append(NSValue(range: NSRange(location: safeIndex, length: 0)))
+            }
+            setSelectedRanges(ranges, affinity: .downstream, stillSelecting: false)
+            return
+        }
+
+        // Normal click: reset extra cursors
+        extraCursors.removeAll()
+        super.mouseDown(with: event)
+    }
+
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        if selectedRanges.count > 1, let text = insertString as? String {
+            // Insert at all cursor positions (reverse order to preserve indices)
+            let ranges = selectedRanges.map(\.rangeValue).sorted { $0.location > $1.location }
+            for range in ranges {
+                super.insertText(text, replacementRange: range)
+            }
+            extraCursors.removeAll()
+            return
+        }
+        super.insertText(insertString, replacementRange: replacementRange)
+    }
+
+    override func deleteBackward(_ sender: Any?) {
+        if selectedRanges.count > 1 {
+            let ranges = selectedRanges.map(\.rangeValue).sorted { $0.location > $1.location }
+            for range in ranges {
+                let deleteRange = range.length > 0 ? range : NSRange(location: max(0, range.location - 1), length: 1)
+                if deleteRange.location >= 0 && NSMaxRange(deleteRange) <= string.count {
+                    replaceCharacters(in: deleteRange, with: "")
+                }
+            }
+            extraCursors.removeAll()
+            return
+        }
+        super.deleteBackward(sender)
     }
 }
