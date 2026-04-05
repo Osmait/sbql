@@ -33,21 +33,15 @@ struct QueryHistoryModal: View {
             .padding(SbqlTheme.Spacing.lg)
 
             // Search
-            HStack(spacing: SbqlTheme.Spacing.xs) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
-                    .foregroundStyle(SbqlTheme.Colors.textTertiary)
-                TextField("Search history…", text: Binding(
+            SearchFieldView(
+                text: Binding(
                     get: { appVM.queryHistory.searchText },
                     set: { appVM.queryHistory.searchText = $0 }
-                ))
-                .textFieldStyle(.plain)
-                .font(SbqlTheme.Typography.body)
-            }
-            .padding(.horizontal, SbqlTheme.Spacing.md)
-            .padding(.vertical, SbqlTheme.Spacing.sm)
-            .background(SbqlTheme.Colors.surfaceElevated)
-            .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
+                ),
+                placeholder: "Search history…",
+                font: SbqlTheme.Typography.body,
+                iconSize: 11
+            )
             .padding(.horizontal, SbqlTheme.Spacing.lg)
             .padding(.bottom, SbqlTheme.Spacing.sm)
 
@@ -55,15 +49,7 @@ struct QueryHistoryModal: View {
 
             // List
             if appVM.queryHistory.filteredEntries.isEmpty {
-                VStack(spacing: SbqlTheme.Spacing.sm) {
-                    Image(systemName: "clock")
-                        .font(.system(size: 28))
-                        .foregroundStyle(SbqlTheme.Colors.textTertiary)
-                    Text("No history yet")
-                        .font(SbqlTheme.Typography.body)
-                        .foregroundStyle(SbqlTheme.Colors.textSecondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "clock", title: "No history yet")
             } else {
                 ScrollView {
                     LazyVStack(spacing: 2) {
@@ -93,13 +79,7 @@ struct QueryHistoryModal: View {
 
                 HStack(spacing: SbqlTheme.Spacing.sm) {
                     // Connection badge
-                    Text(entry.connectionName)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(SbqlTheme.Colors.accent)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(SbqlTheme.Colors.accent.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    BadgePillView(text: entry.connectionName, color: SbqlTheme.Colors.accent)
 
                     // Duration
                     Text("\(entry.durationMs)ms")

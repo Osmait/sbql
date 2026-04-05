@@ -18,40 +18,20 @@ struct SidebarView: View {
             Color.clear.frame(height: SbqlTheme.Spacing.sm)
 
             // Connections section header + search
-            sectionHeader("CONNECTIONS") {
+            SectionHeaderView(title: "CONNECTIONS") {
                 appVM.connections.editingConnection = Connection.newPostgres()
                 appVM.connections.isShowingConnectionForm = true
             }
 
             // Connection search (show when 4+ connections)
             if appVM.connections.connections.count >= 4 {
-                HStack(spacing: SbqlTheme.Spacing.xs) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 10))
-                        .foregroundStyle(SbqlTheme.Colors.textTertiary)
-                    TextField("Search connections…", text: Binding(
+                SearchFieldView(
+                    text: Binding(
                         get: { appVM.connections.connectionFilter },
                         set: { appVM.connections.connectionFilter = $0 }
-                    ))
-                    .textFieldStyle(.plain)
-                    .font(SbqlTheme.Typography.caption)
-                    .foregroundStyle(SbqlTheme.Colors.textPrimary)
-
-                    if !appVM.connections.connectionFilter.isEmpty {
-                        Button {
-                            appVM.connections.connectionFilter = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 10))
-                                .foregroundStyle(SbqlTheme.Colors.textTertiary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, SbqlTheme.Spacing.sm)
-                .padding(.vertical, SbqlTheme.Spacing.xs)
-                .background(SbqlTheme.Colors.surfaceElevated)
-                .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
+                    ),
+                    placeholder: "Search connections…"
+                )
                 .padding(.horizontal, SbqlTheme.Spacing.sm)
             }
 
@@ -74,31 +54,21 @@ struct SidebarView: View {
                         .padding(.vertical, SbqlTheme.Spacing.sm)
 
                     if allSameSchema {
-                        sectionHeader(
-                            "\(commonSchema.uppercased()) (\(appVM.connections.tables.count) tables)",
-                            action: nil
+                        SectionHeaderView(
+                            title: "\(commonSchema.uppercased()) (\(appVM.connections.tables.count) tables)"
                         )
                     } else {
-                        sectionHeader("TABLES", action: nil)
+                        SectionHeaderView(title: "TABLES")
                     }
 
                     // Table filter
-                    HStack(spacing: SbqlTheme.Spacing.xs) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 10))
-                            .foregroundStyle(SbqlTheme.Colors.textTertiary)
-                        TextField("Filter tables…", text: Binding(
+                    SearchFieldView(
+                        text: Binding(
                             get: { appVM.connections.tableFilter },
                             set: { appVM.connections.tableFilter = $0 }
-                        ))
-                        .textFieldStyle(.plain)
-                        .font(SbqlTheme.Typography.caption)
-                        .foregroundStyle(SbqlTheme.Colors.textPrimary)
-                    }
-                    .padding(.horizontal, SbqlTheme.Spacing.sm)
-                    .padding(.vertical, SbqlTheme.Spacing.xs)
-                    .background(SbqlTheme.Colors.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
+                        ),
+                        placeholder: "Filter tables…"
+                    )
                     .padding(.horizontal, SbqlTheme.Spacing.sm)
 
                     LazyVStack(spacing: 2) {
@@ -140,24 +110,4 @@ struct SidebarView: View {
         .padding(.bottom, SbqlTheme.Spacing.xxs)
     }
 
-    private func sectionHeader(_ title: String, action: (() -> Void)?) -> some View {
-        HStack {
-            Text(title)
-                .font(SbqlTheme.Typography.captionBold)
-                .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.7))
-
-            Spacer()
-
-            if let action {
-                Button(action: action) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(SbqlTheme.Colors.accent)
-                }
-                .buttonStyle(.hoverIcon)
-            }
-        }
-        .padding(.horizontal, SbqlTheme.Spacing.lg)
-        .padding(.vertical, SbqlTheme.Spacing.xs)
-    }
 }

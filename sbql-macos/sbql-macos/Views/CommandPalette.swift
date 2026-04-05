@@ -10,29 +10,23 @@ struct CommandPalette: View {
     var body: some View {
         VStack(spacing: 0) {
             // Search
-            HStack(spacing: SbqlTheme.Spacing.sm) {
-                Image(systemName: "command")
-                    .font(.system(size: 14))
-                    .foregroundStyle(SbqlTheme.Colors.accent)
-                TextField("Type a command, table, or query…", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(SbqlTheme.Typography.body)
-                    .foregroundStyle(SbqlTheme.Colors.textPrimary)
-                    .focused($isSearchFocused)
-                    .onSubmit { executeSelected() }
-            }
+            SearchFieldView(
+                text: $searchText,
+                placeholder: "Type a command, table, or query…",
+                font: SbqlTheme.Typography.body,
+                iconSize: 14,
+                icon: "command",
+                iconColor: SbqlTheme.Colors.accent
+            )
+            .focused($isSearchFocused)
+            .onSubmit { executeSelected() }
             .padding(SbqlTheme.Spacing.lg)
 
             Divider().background(SbqlTheme.Colors.border)
 
             // Results
             if filteredItems.isEmpty {
-                VStack(spacing: SbqlTheme.Spacing.sm) {
-                    Text("No results")
-                        .font(SbqlTheme.Typography.body)
-                        .foregroundStyle(SbqlTheme.Colors.textTertiary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "magnifyingglass", title: "No results")
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -168,13 +162,11 @@ struct CommandPalette: View {
                 .foregroundStyle(SbqlTheme.Colors.textTertiary)
 
             if let shortcut = item.shortcut {
-                Text(shortcut)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.5))
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(SbqlTheme.Colors.accent.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                BadgePillView(
+                    text: shortcut,
+                    color: SbqlTheme.Colors.accent.opacity(0.5),
+                    fontDesign: .monospaced
+                )
             }
         }
         .padding(.horizontal, SbqlTheme.Spacing.lg)

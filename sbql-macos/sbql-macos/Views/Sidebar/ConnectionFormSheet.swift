@@ -133,11 +133,7 @@ struct ConnectionFormSheet: View {
                             formField("SSH User", text: $connection.sshUser, prompt: "ubuntu")
 
                             // Auth method picker
-                            HStack {
-                                Text("Auth")
-                                    .font(SbqlTheme.Typography.bodyMedium)
-                                    .foregroundStyle(SbqlTheme.Colors.textSecondary)
-                                    .frame(width: 80, alignment: .leading)
+                            FormFieldRow(label: "Auth") {
                                 Picker("", selection: $connection.sshAuthMethod) {
                                     Text("Password").tag("password")
                                     Text("Key File").tag("key")
@@ -209,11 +205,7 @@ struct ConnectionFormSheet: View {
         formField("Password", text: $password, prompt: "Enter password", isSecure: true)
 
         if showSSL {
-            HStack {
-                Text("SSL Mode")
-                    .font(SbqlTheme.Typography.bodyMedium)
-                    .foregroundStyle(SbqlTheme.Colors.textSecondary)
-                    .frame(width: 80, alignment: .leading)
+            FormFieldRow(label: "SSL Mode") {
                 Picker("", selection: $connection.sslMode) {
                     ForEach(Connection.SSLMode.allCases, id: \.self) { mode in
                         Text(mode.displayName).tag(mode)
@@ -226,37 +218,13 @@ struct ConnectionFormSheet: View {
     // MARK: - Form Fields
 
     private func formField(_ label: String, text: Binding<String>, prompt: String, isSecure: Bool = false) -> some View {
-        HStack {
-            Text(label)
-                .font(SbqlTheme.Typography.bodyMedium)
-                .foregroundStyle(SbqlTheme.Colors.textSecondary)
-                .frame(width: 80, alignment: .leading)
-
-            if isSecure {
-                SecureField(prompt, text: text)
-                    .textFieldStyle(.plain)
-                    .font(SbqlTheme.Typography.body)
-                    .padding(SbqlTheme.Spacing.sm)
-                    .background(SbqlTheme.Colors.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
-            } else {
-                TextField(prompt, text: text)
-                    .textFieldStyle(.plain)
-                    .font(SbqlTheme.Typography.body)
-                    .padding(SbqlTheme.Spacing.sm)
-                    .background(SbqlTheme.Colors.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
-            }
+        FormFieldRow(label: label) {
+            FormTextField(placeholder: prompt, text: text, isSecure: isSecure)
         }
     }
 
     private func formField(_ label: String, value: Binding<UInt16>) -> some View {
-        HStack {
-            Text(label)
-                .font(SbqlTheme.Typography.bodyMedium)
-                .foregroundStyle(SbqlTheme.Colors.textSecondary)
-                .frame(width: 80, alignment: .leading)
-
+        FormFieldRow(label: label) {
             TextField("", value: value, format: .number)
                 .textFieldStyle(.plain)
                 .font(SbqlTheme.Typography.body)

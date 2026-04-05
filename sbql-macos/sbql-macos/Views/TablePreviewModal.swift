@@ -26,16 +26,15 @@ struct TablePreviewModal: View {
     var body: some View {
         VStack(spacing: 0) {
             // Search
-            HStack(spacing: SbqlTheme.Spacing.sm) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14))
-                    .foregroundStyle(SbqlTheme.Colors.accent)
-                TextField("Search tables…", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(SbqlTheme.Typography.body)
-                    .focused($isSearchFocused)
-                    .onSubmit { openSelectedTable() }
-            }
+            SearchFieldView(
+                text: $searchText,
+                placeholder: "Search tables…",
+                font: SbqlTheme.Typography.body,
+                iconSize: 14,
+                iconColor: SbqlTheme.Colors.accent
+            )
+            .focused($isSearchFocused)
+            .onSubmit { openSelectedTable() }
             .padding(SbqlTheme.Spacing.lg)
 
             Divider().background(SbqlTheme.Colors.border)

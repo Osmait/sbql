@@ -46,21 +46,15 @@ struct SavedQueriesModal: View {
             .padding(SbqlTheme.Spacing.lg)
 
             // Search
-            HStack(spacing: SbqlTheme.Spacing.xs) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
-                    .foregroundStyle(SbqlTheme.Colors.textTertiary)
-                TextField("Search saved queries…", text: Binding(
+            SearchFieldView(
+                text: Binding(
                     get: { appVM.savedQueries.searchText },
                     set: { appVM.savedQueries.searchText = $0 }
-                ))
-                .textFieldStyle(.plain)
-                .font(SbqlTheme.Typography.body)
-            }
-            .padding(.horizontal, SbqlTheme.Spacing.md)
-            .padding(.vertical, SbqlTheme.Spacing.sm)
-            .background(SbqlTheme.Colors.surfaceElevated)
-            .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
+                ),
+                placeholder: "Search saved queries…",
+                font: SbqlTheme.Typography.body,
+                iconSize: 11
+            )
             .padding(.horizontal, SbqlTheme.Spacing.lg)
             .padding(.bottom, SbqlTheme.Spacing.sm)
 
@@ -68,15 +62,7 @@ struct SavedQueriesModal: View {
 
             // List
             if appVM.savedQueries.filteredQueries.isEmpty {
-                VStack(spacing: SbqlTheme.Spacing.sm) {
-                    Image(systemName: "bookmark")
-                        .font(.system(size: 28))
-                        .foregroundStyle(SbqlTheme.Colors.textTertiary)
-                    Text("No saved queries")
-                        .font(SbqlTheme.Typography.body)
-                        .foregroundStyle(SbqlTheme.Colors.textSecondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyStateView(icon: "bookmark", title: "No saved queries")
             } else {
                 ScrollView {
                     LazyVStack(spacing: 2) {
