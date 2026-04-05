@@ -742,12 +742,14 @@ private class FillableTableView: NSTableView {
                 break
             }
 
-            // Mouse dragged — update highlight
+            // Mouse dragged — update highlight (supports both down and up)
             let targetRow = row(at: point)
 
             let newHighlight: Set<Int>
             if targetRow >= 0, targetRow > activeRow {
                 newHighlight = Set((activeRow + 1) ... targetRow)
+            } else if targetRow >= 0, targetRow < activeRow {
+                newHighlight = Set(targetRow ... (activeRow - 1))
             } else {
                 newHighlight = []
             }
@@ -869,10 +871,11 @@ private class FillOverlayView: NSView {
             cellRect.fill()
         }
 
-        // 4. Dashed border around entire fill range
-        if let lastTarget = sortedRows.last {
-            let bottomRect = tv.cellRectInOverlay(atColumn: activeCol, row: lastTarget)
-            let rangeRect = sourceCellRect.union(bottomRect)
+        // 4. Dashed border around entire fill range (works for both up and down)
+        if let firstTarget = sortedRows.first, let lastTarget = sortedRows.last {
+            let firstRect = tv.cellRectInOverlay(atColumn: activeCol, row: firstTarget)
+            let lastRect = tv.cellRectInOverlay(atColumn: activeCol, row: lastTarget)
+            let rangeRect = sourceCellRect.union(firstRect).union(lastRect)
 
             let dashPath = NSBezierPath(rect: rangeRect.insetBy(dx: 0.5, dy: 0.5))
             accentColor.withAlphaComponent(0.7).setStroke()
@@ -880,7 +883,9 @@ private class FillOverlayView: NSView {
             dashPath.setLineDash([4, 3], count: 2, phase: 0)
             dashPath.stroke()
 
-            // 5. Count badge next to the range
+            // 5. Count badge — positioned at the farthest edge from the source
+            let isUpward = firstTarget < activeRow
+            let edgeRect = isUpward ? firstRect : lastRect
             let count = highlightRows.count
             let badge = "\(count)"
             let badgeAttrs: [NSAttributedString.Key: Any] = [
@@ -891,7 +896,7 @@ private class FillOverlayView: NSView {
             let pad: CGFloat = 5
             let badgeBgRect = NSRect(
                 x: rangeRect.maxX + 6,
-                y: bottomRect.midY - (badgeSize.height + pad) / 2,
+                y: edgeRect.midY - (badgeSize.height + pad) / 2,
                 width: badgeSize.width + pad * 2,
                 height: badgeSize.height + pad
             )
