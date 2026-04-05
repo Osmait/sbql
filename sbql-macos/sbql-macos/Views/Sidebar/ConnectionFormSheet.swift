@@ -22,7 +22,7 @@ struct ConnectionFormSheet: View {
                     .foregroundStyle(SbqlTheme.Colors.textPrimary)
                 Spacer()
                 Button("Cancel") { dismiss() }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.hover)
                     .foregroundStyle(SbqlTheme.Colors.textSecondary)
             }
             .padding(SbqlTheme.Spacing.lg)

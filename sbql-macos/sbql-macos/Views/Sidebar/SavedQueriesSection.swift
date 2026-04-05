@@ -66,7 +66,7 @@ struct SavedQueriesSection: View {
             .background(SbqlTheme.Colors.surface)
             .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hover)
         .contextMenu {
             Button("Rename") {
                 renameText = query.name

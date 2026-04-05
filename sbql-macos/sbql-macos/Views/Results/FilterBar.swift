@@ -24,7 +24,7 @@ struct FilterBar: View {
                         .font(.system(size: 12))
                         .foregroundStyle(SbqlTheme.Colors.textTertiary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverIcon)
             }
         }
         .padding(.horizontal, SbqlTheme.Spacing.lg)

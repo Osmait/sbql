@@ -33,7 +33,7 @@ struct SavedQueriesModal: View {
                     .background(SbqlTheme.Colors.accent.opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hover)
                 .disabled(appVM.editor.sqlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Button { appVM.isShowingSavedQueries = false } label: {
@@ -41,7 +41,7 @@ struct SavedQueriesModal: View {
                         .font(.system(size: 16))
                         .foregroundStyle(SbqlTheme.Colors.textTertiary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverIcon)
             }
             .padding(SbqlTheme.Spacing.lg)
 
@@ -113,7 +113,7 @@ struct SavedQueriesModal: View {
             .background(SbqlTheme.Colors.surfaceElevated.opacity(0.5))
             .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hover)
         .contextMenu {
             Button("Rename") {
                 editingId = query.id

@@ -65,7 +65,7 @@ struct QueryHistorySection: View {
             .background(SbqlTheme.Colors.surface)
             .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hover)
         .contextMenu {
             Button("Copy SQL") {
                 NSPasteboard.general.clearContents()

@@ -24,7 +24,7 @@ struct SearchFieldView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(SbqlTheme.Colors.textTertiary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverIcon)
             }
         }
         .padding(.horizontal, SbqlTheme.Spacing.sm)

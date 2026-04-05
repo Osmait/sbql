@@ -33,7 +33,7 @@ struct CellEditor: View {
 
             HStack {
                 Button("Cancel") { dismiss() }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.hover)
                     .foregroundStyle(SbqlTheme.Colors.textSecondary)
 
                 Spacer()

@@ -19,7 +19,7 @@ struct QueryHistoryModal: View {
                     Button("Clear All") {
                         appVM.queryHistory.clearHistory()
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.hover)
                     .foregroundStyle(SbqlTheme.Colors.danger)
                     .font(SbqlTheme.Typography.caption)
                 }
@@ -28,7 +28,7 @@ struct QueryHistoryModal: View {
                         .font(.system(size: 16))
                         .foregroundStyle(SbqlTheme.Colors.textTertiary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.hoverIcon)
             }
             .padding(SbqlTheme.Spacing.lg)
 
@@ -103,7 +103,7 @@ struct QueryHistoryModal: View {
             .background(SbqlTheme.Colors.surfaceElevated.opacity(0.5))
             .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.hover)
         .contextMenu {
             Button("Copy SQL") {
                 NSPasteboard.general.clearContents()
