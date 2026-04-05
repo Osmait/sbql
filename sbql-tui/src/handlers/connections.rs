@@ -86,7 +86,7 @@ mod tests {
 
     fn state_with_conns(n: usize) -> AppState {
         let conns: Vec<ConnectionConfig> = (0..n)
-            .map(|i| ConnectionConfig::new(format!("c{i}"), "host", 5432, "user", "db"))
+            .map(|i| ConnectionConfig::new_postgres(format!("c{i}"), "host", 5432, "user", "db"))
             .collect();
         AppState::new(conns)
     }

@@ -631,7 +631,7 @@ mod tests {
 
     #[test]
     fn extract_connection_list_with_list() {
-        let config = sbql_core::ConnectionConfig::new("test", "localhost", 5432, "user", "db");
+        let config = sbql_core::ConnectionConfig::new_postgres("test", "localhost", 5432, "user", "db");
         let events = vec![sbql_core::CoreEvent::ConnectionList(vec![config.clone()])];
         let result = extract_connection_list(events).unwrap();
         assert_eq!(result.len(), 1);

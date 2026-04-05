@@ -70,7 +70,6 @@ struct MainWindow: View {
                 .keyboardShortcut("p", modifiers: .command)
             Button { appVM.formatSQL() } label: { EmptyView() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
-                .keyboardShortcut("p", modifiers: .command)
         }
         .overlay {
             ModalPresenter(isPresented: Binding(
@@ -284,7 +283,7 @@ struct MainWindow: View {
                     .foregroundStyle(SbqlTheme.Colors.textPrimary)
 
                 // Backend badge
-                backendBadge(for: conn.backend)
+                BackendBadgeView(backend: conn.backend)
 
                 // Database name
                 HStack(spacing: 3) {
@@ -304,7 +303,7 @@ struct MainWindow: View {
 
                 // Query duration
                 if let d = appVM.editor.lastQueryDuration {
-                    let ms = d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000
+                    let ms = d.totalMilliseconds
                     let durationColor = ms < 500
                         ? SbqlTheme.Colors.success
                         : ms < 2000
@@ -331,22 +330,8 @@ struct MainWindow: View {
         }
     }
 
-    private func backendBadge(for backend: Connection.Backend) -> some View {
-        Text(backend.displayLabel)
-            .font(SbqlTheme.Typography.captionBold)
-            .foregroundStyle(backend.color)
-            .padding(.horizontal, SbqlTheme.Spacing.sm)
-            .padding(.vertical, 2)
-            .background(backend.color.opacity(0.15))
-            .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
-    }
-
     private func formatDuration(_ d: Duration) -> String {
-        let ms = d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000
-        if ms < 1 { return "<1ms" }
-        if ms < 1000 { return "\(ms)ms" }
-        let seconds = Double(ms) / 1000.0
-        return String(format: "%.1fs", seconds)
+        d.formattedQueryDuration
     }
 
     // MARK: - Query Tab

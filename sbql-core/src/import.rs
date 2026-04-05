@@ -13,6 +13,7 @@ use sqlx::{MySqlPool, PgPool, SqlitePool};
 
 use crate::error::{Result, SbqlError};
 use crate::pool::DbPool;
+use crate::sql_util::{quote_ident, quote_ident_mysql};
 
 /// The file format to import from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,15 +72,6 @@ fn escape_value(s: &str) -> String {
     }
 }
 
-/// Quote an identifier with double-quotes (PG, SQLite).
-fn quote_double(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
-}
-
-/// Quote an identifier with backticks (MySQL).
-fn quote_backtick(name: &str) -> String {
-    format!("`{}`", name.replace('`', "``"))
-}
 
 // ---------------------------------------------------------------------------
 // Row parsing helpers
@@ -193,8 +185,8 @@ async fn flush_batch_pg(
     columns: &[String],
     batch: &[Vec<String>],
 ) -> Result<u64> {
-    let col_list = columns.iter().map(|c| quote_double(c)).collect::<Vec<_>>().join(", ");
-    let table_ref = format!("{}.{}", quote_double(schema), quote_double(table));
+    let col_list = columns.iter().map(|c| quote_ident(c)).collect::<Vec<_>>().join(", ");
+    let table_ref = format!("{}.{}", quote_ident(schema), quote_ident(table));
     let sql = format!(
         "INSERT INTO {} ({}) VALUES {}",
         table_ref,
@@ -214,10 +206,10 @@ async fn flush_batch_sqlite(
     columns: &[String],
     batch: &[Vec<String>],
 ) -> Result<u64> {
-    let col_list = columns.iter().map(|c| quote_double(c)).collect::<Vec<_>>().join(", ");
+    let col_list = columns.iter().map(|c| quote_ident(c)).collect::<Vec<_>>().join(", ");
     let sql = format!(
         "INSERT INTO {} ({}) VALUES {}",
-        quote_double(table),
+        quote_ident(table),
         col_list,
         build_values_clause(batch)
     );
@@ -235,8 +227,8 @@ async fn flush_batch_mysql(
     columns: &[String],
     batch: &[Vec<String>],
 ) -> Result<u64> {
-    let col_list = columns.iter().map(|c| quote_backtick(c)).collect::<Vec<_>>().join(", ");
-    let table_ref = format!("{}.{}", quote_backtick(schema), quote_backtick(table));
+    let col_list = columns.iter().map(|c| quote_ident_mysql(c)).collect::<Vec<_>>().join(", ");
+    let table_ref = format!("{}.{}", quote_ident_mysql(schema), quote_ident_mysql(table));
     let sql = format!(
         "INSERT INTO {} ({}) VALUES {}",
         table_ref,
@@ -372,15 +364,15 @@ mod tests {
     }
 
     #[test]
-    fn test_quote_double() {
-        assert_eq!(quote_double("col"), "\"col\"");
-        assert_eq!(quote_double("col\"x"), "\"col\"\"x\"");
+    fn test_quote_ident() {
+        assert_eq!(quote_ident("col"), "\"col\"");
+        assert_eq!(quote_ident("col\"x"), "\"col\"\"x\"");
     }
 
     #[test]
-    fn test_quote_backtick() {
-        assert_eq!(quote_backtick("col"), "`col`");
-        assert_eq!(quote_backtick("col`x"), "`col``x`");
+    fn test_quote_ident_mysql() {
+        assert_eq!(quote_ident_mysql("col"), "`col`");
+        assert_eq!(quote_ident_mysql("col`x"), "`col``x`");
     }
 
     #[test]

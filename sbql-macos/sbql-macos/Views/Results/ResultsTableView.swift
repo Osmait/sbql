@@ -57,7 +57,11 @@ struct ResultsTableView: NSViewRepresentable {
         scrollView.drawsBackground = false // let SwiftUI island background show through
         scrollView.contentView.drawsBackground = false
 
+        // Detect theme change by comparing cached surface color
+        let themeChanged = context.coordinator.cachedSurface != bg
+
         // Cache theme colors once per update cycle
+        context.coordinator.cachedSurface = bg
         context.coordinator.cachedTextPrimary = NSColor(SbqlTheme.Colors.textPrimary)
         context.coordinator.cachedDanger = NSColor(SbqlTheme.Colors.danger)
         context.coordinator.cachedWarning = NSColor(SbqlTheme.Colors.warning)
@@ -69,11 +73,25 @@ struct ResultsTableView: NSViewRepresentable {
 
             // Only rebuild columns when they actually change
             let currentColumns = appVM.results.currentResult.columns
-            if currentColumns != context.coordinator.previousColumns {
+            let columnsChanged = currentColumns != context.coordinator.previousColumns
+            if columnsChanged {
                 context.coordinator.rebuildColumns()
                 context.coordinator.previousColumns = currentColumns
             }
-            tableView.reloadData()
+
+            // Only reload data when content actually changed
+            let dataId = appVM.results.currentResult.rows.count * 1000 + Int(appVM.results.currentResult.page)
+            let rev = appVM.results.editRevision
+            let needsReload = columnsChanged
+                || dataId != context.coordinator.previousDataId
+                || rev != context.coordinator.previousEditRevision
+                || themeChanged
+
+            if needsReload {
+                tableView.reloadData()
+                context.coordinator.previousDataId = dataId
+                context.coordinator.previousEditRevision = rev
+            }
             tableView.headerView?.needsDisplay = true
         }
     }
@@ -86,8 +104,11 @@ struct ResultsTableView: NSViewRepresentable {
         var appVM: AppViewModel
         weak var tableView: NSTableView?
         var previousColumns: [String] = []
+        var previousDataId: Int = -1
+        var previousEditRevision: Int = -1
 
         // Cached theme colors to avoid repeated SbqlTheme lookups per cell
+        var cachedSurface: NSColor = .clear
         var cachedTextPrimary: NSColor = .white
         var cachedDanger: NSColor = .red
         var cachedWarning: NSColor = .yellow

@@ -75,7 +75,8 @@ fn default_ssh_port() -> u16 {
 }
 
 impl ConnectionConfig {
-    pub fn new(
+    /// Create a new PostgreSQL connection config.
+    pub fn new_postgres(
         name: impl Into<String>,
         host: impl Into<String>,
         port: u16,
@@ -481,7 +482,7 @@ mod tests {
 
     #[test]
     fn test_connection_config_new() {
-        let conn = ConnectionConfig::new("local", "localhost", 5432, "postgres", "postgres");
+        let conn = ConnectionConfig::new_postgres("local", "localhost", 5432, "postgres", "postgres");
         assert_eq!(conn.name, "local");
         assert_eq!(conn.host, "localhost");
         assert_eq!(conn.port, 5432);
@@ -492,7 +493,7 @@ mod tests {
 
     #[test]
     fn test_connection_string() {
-        let conn = ConnectionConfig::new("local", "localhost", 5432, "postgres", "mydb");
+        let conn = ConnectionConfig::new_postgres("local", "localhost", 5432, "postgres", "mydb");
         let dsn = conn.connection_string("p@ssw/rd");
         assert_eq!(
             dsn,
@@ -516,8 +517,8 @@ mod tests {
         let path = dir.path().join("connections.toml");
 
         let conns = vec![
-            ConnectionConfig::new("test1", "host1", 5432, "user1", "db1"),
-            ConnectionConfig::new("test2", "host2", 3333, "user2", "db2"),
+            ConnectionConfig::new_postgres("test1", "host1", 5432, "user1", "db1"),
+            ConnectionConfig::new_postgres("test2", "host2", 3333, "user2", "db2"),
         ];
 
         save_connections_to(&path, &conns).unwrap();
@@ -552,7 +553,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ssl_test.toml");
 
-        let mut conn = ConnectionConfig::new("ssl_test", "h", 5432, "u", "d");
+        let mut conn = ConnectionConfig::new_postgres("ssl_test", "h", 5432, "u", "d");
         conn.ssl_mode = SslMode::VerifyFull;
         save_connections_to(&path, &[conn]).unwrap();
 
@@ -567,7 +568,7 @@ mod tests {
 
         let conns = vec![
             ConnectionConfig::new_sqlite("my_sqlite", "/tmp/test.db"),
-            ConnectionConfig::new("pg_conn", "localhost", 5432, "user", "db"),
+            ConnectionConfig::new_postgres("pg_conn", "localhost", 5432, "user", "db"),
         ];
         save_connections_to(&path, &conns).unwrap();
         let loaded = load_connections_from(&path).unwrap();

@@ -17,6 +17,7 @@ use sqlparser::parser::Parser;
 
 use crate::error::{Result, SbqlError};
 use crate::pool::DbBackend;
+use crate::sql_util::{quote_ident, quote_ident_mysql, quote_ident_sqlserver};
 
 /// Direction for column ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,10 +192,10 @@ pub fn format_sql(sql: &str) -> String {
 /// For SQLite: `SELECT * FROM "table"` (no schema prefix)
 pub fn table_select_sql(schema: &str, table: &str, backend: DbBackend) -> String {
     match backend {
-        DbBackend::Postgres => format!("SELECT * FROM \"{schema}\".\"{table}\""),
-        DbBackend::Sqlite => format!("SELECT * FROM \"{table}\""),
-        DbBackend::Mysql => format!("SELECT * FROM `{schema}`.`{table}`"),
-        DbBackend::SqlServer => format!("SELECT * FROM [{schema}].[{table}]"),
+        DbBackend::Postgres => format!("SELECT * FROM {}.{}", quote_ident(schema), quote_ident(table)),
+        DbBackend::Sqlite => format!("SELECT * FROM {}", quote_ident(table)),
+        DbBackend::Mysql => format!("SELECT * FROM {}.{}", quote_ident_mysql(schema), quote_ident_mysql(table)),
+        DbBackend::SqlServer => format!("SELECT * FROM {}.{}", quote_ident_sqlserver(schema), quote_ident_sqlserver(table)),
         DbBackend::Redis | DbBackend::DynamoDb | DbBackend::MongoDb => String::new(),
     }
 }
@@ -254,10 +255,6 @@ fn parse_filter_query(q: &str) -> (Option<String>, &str) {
         }
     }
     (None, q)
-}
-
-fn quote_ident(ident: &str) -> String {
-    format!("\"{}\"", ident.replace('"', "\"\""))
 }
 
 // ---------------------------------------------------------------------------
@@ -433,10 +430,9 @@ mod tests {
 
     #[test]
     fn test_table_select_sql_with_double_quote_chars() {
-        // Schema and table containing double-quote characters
+        // Schema and table containing double-quote characters — now properly escaped
         let result = table_select_sql("my\"schema", "my\"table", DbBackend::Postgres);
-        // Double-quotes inside identifiers should be present (escaped by the format! macro)
-        assert_eq!(result, "SELECT * FROM \"my\"schema\".\"my\"table\"");
+        assert_eq!(result, "SELECT * FROM \"my\"\"schema\".\"my\"\"table\"");
     }
 
     // --- MySQL tests ---

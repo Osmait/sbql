@@ -36,7 +36,7 @@ struct ConnectionRow: View {
                     .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.5))
             }
 
-            backendBadge
+            BackendBadgeView(backend: connection.backend)
         }
         .padding(.horizontal, SbqlTheme.Spacing.sm)
         .padding(.vertical, SbqlTheme.Spacing.xs)
@@ -85,19 +85,13 @@ struct ConnectionRow: View {
 
             Button("Delete", role: .destructive) {
                 Task {
-                    try? await appVM.connections.deleteConnection(id: connection.id)
+                    do {
+                        try await appVM.connections.deleteConnection(id: connection.id)
+                    } catch {
+                        appVM.showError(error)
+                    }
                 }
             }
         }
-    }
-
-    private var backendBadge: some View {
-        Text(connection.backend.abbreviation)
-            .font(.system(size: 9, weight: .bold, design: .monospaced))
-            .foregroundStyle(connection.backend.color)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .background(connection.backend.color.opacity(0.15))
-            .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
     }
 }

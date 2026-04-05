@@ -829,7 +829,7 @@ fn apply_form_submit(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCo
                 return;
             }
 
-            let mut config = sbql_core::ConnectionConfig::new(
+            let mut config = sbql_core::ConnectionConfig::new_postgres(
                 form.name.trim(),
                 form.host.trim(),
                 port,
@@ -1717,8 +1717,8 @@ mod tests {
     #[test]
     fn select_connection() {
         let mut state = AppState::new(vec![
-            sbql_core::ConnectionConfig::new("a", "h", 5432, "u", "d"),
-            sbql_core::ConnectionConfig::new("b", "h", 5432, "u", "d"),
+            sbql_core::ConnectionConfig::new_postgres("a", "h", 5432, "u", "d"),
+            sbql_core::ConnectionConfig::new_postgres("b", "h", 5432, "u", "d"),
         ]);
         let (tx, _rx) = cmd_channel();
         apply(Action::SelectConnection(1), &mut state, &tx);
@@ -1727,7 +1727,7 @@ mod tests {
 
     #[test]
     fn select_connection_clamped() {
-        let mut state = AppState::new(vec![sbql_core::ConnectionConfig::new(
+        let mut state = AppState::new(vec![sbql_core::ConnectionConfig::new_postgres(
             "a", "h", 5432, "u", "d",
         )]);
         let (tx, _rx) = cmd_channel();
@@ -1737,7 +1737,7 @@ mod tests {
 
     #[test]
     fn connect_selected_sends_command() {
-        let cfg = sbql_core::ConnectionConfig::new("a", "h", 5432, "u", "d");
+        let cfg = sbql_core::ConnectionConfig::new_postgres("a", "h", 5432, "u", "d");
         let id = cfg.id;
         let mut state = AppState::new(vec![cfg]);
         let (tx, mut rx) = cmd_channel();
@@ -1756,7 +1756,7 @@ mod tests {
 
     #[test]
     fn open_edit_form() {
-        let mut state = AppState::new(vec![sbql_core::ConnectionConfig::new(
+        let mut state = AppState::new(vec![sbql_core::ConnectionConfig::new_postgres(
             "a",
             "localhost",
             5432,
@@ -1771,7 +1771,7 @@ mod tests {
 
     #[test]
     fn init_delete_connection() {
-        let mut state = AppState::new(vec![sbql_core::ConnectionConfig::new(
+        let mut state = AppState::new(vec![sbql_core::ConnectionConfig::new_postgres(
             "myconn", "h", 5432, "u", "d",
         )]);
         let (tx, _rx) = cmd_channel();

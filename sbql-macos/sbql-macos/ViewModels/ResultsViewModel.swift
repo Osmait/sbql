@@ -77,16 +77,7 @@ final class ResultsViewModel {
         activeTabId = tabId
 
         // Apply new tab state to view
-        activeSchema = schema
-        activeTable = tableName
-        currentResult = .empty
-        sortedColumn = nil
-        sortDirection = .ascending
-        filterText = ""
-        isFilterBarVisible = false
-        primaryKeys = []
-        dirtyCells = [:]
-        pendingDeletions = []
+        applyTabState(tab)
 
         return true
     }
@@ -102,16 +93,7 @@ final class ResultsViewModel {
 
         let tab = tabs[targetIndex]
         activeTabId = tab.id
-        activeSchema = tab.schema
-        activeTable = tab.tableName
-        currentResult = tab.result
-        sortedColumn = tab.sortedColumn
-        sortDirection = tab.sortDirection
-        filterText = tab.filterText
-        isFilterBarVisible = tab.isFilterBarVisible
-        primaryKeys = tab.primaryKeys
-        dirtyCells = tab.dirtyCells
-        pendingDeletions = tab.pendingDeletions
+        applyTabState(tab)
 
         return tab.sqlText
     }
@@ -134,16 +116,7 @@ final class ResultsViewModel {
                 let newIndex = min(index, tabs.count - 1)
                 let newTab = tabs[newIndex]
                 activeTabId = newTab.id
-                activeSchema = newTab.schema
-                activeTable = newTab.tableName
-                currentResult = newTab.result
-                sortedColumn = newTab.sortedColumn
-                sortDirection = newTab.sortDirection
-                filterText = newTab.filterText
-                isFilterBarVisible = newTab.isFilterBarVisible
-                primaryKeys = newTab.primaryKeys
-                dirtyCells = newTab.dirtyCells
-                pendingDeletions = newTab.pendingDeletions
+                applyTabState(newTab)
                 return newTab.sqlText
             }
         }
@@ -173,6 +146,20 @@ final class ResultsViewModel {
         tabs[index].primaryKeys = primaryKeys
         tabs[index].dirtyCells = dirtyCells
         tabs[index].pendingDeletions = pendingDeletions
+    }
+
+    /// Applies the state from a tab to the view-level properties.
+    private func applyTabState(_ tab: QueryTab) {
+        activeSchema = tab.schema
+        activeTable = tab.tableName
+        currentResult = tab.result
+        sortedColumn = tab.sortedColumn
+        sortDirection = tab.sortDirection
+        filterText = tab.filterText
+        isFilterBarVisible = tab.isFilterBarVisible
+        primaryKeys = tab.primaryKeys
+        dirtyCells = tab.dirtyCells
+        pendingDeletions = tab.pendingDeletions
     }
 
     // MARK: - Existing API

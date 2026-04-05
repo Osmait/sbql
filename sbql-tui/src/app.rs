@@ -1084,8 +1084,8 @@ mod tests {
     fn core_event_connection_list() {
         let mut state = AppState::new(vec![]);
         let conns = vec![
-            ConnectionConfig::new("a", "h", 5432, "u", "d"),
-            ConnectionConfig::new("b", "h", 5432, "u", "d"),
+            ConnectionConfig::new_postgres("a", "h", 5432, "u", "d"),
+            ConnectionConfig::new_postgres("b", "h", 5432, "u", "d"),
         ];
         state.apply_core_event(CoreEvent::ConnectionList(conns));
         assert_eq!(state.conn.connections.len(), 2);
@@ -1094,12 +1094,12 @@ mod tests {
     #[test]
     fn core_event_connection_list_clamps_selected() {
         let mut state = AppState::new(vec![
-            ConnectionConfig::new("a", "h", 5432, "u", "d"),
-            ConnectionConfig::new("b", "h", 5432, "u", "d"),
+            ConnectionConfig::new_postgres("a", "h", 5432, "u", "d"),
+            ConnectionConfig::new_postgres("b", "h", 5432, "u", "d"),
         ]);
         state.conn.selected = 1;
         // Now replace with just 1 connection
-        state.apply_core_event(CoreEvent::ConnectionList(vec![ConnectionConfig::new(
+        state.apply_core_event(CoreEvent::ConnectionList(vec![ConnectionConfig::new_postgres(
             "a", "h", 5432, "u", "d",
         )]));
         assert_eq!(state.conn.selected, 0);
@@ -1483,7 +1483,7 @@ mod tests {
 
     #[test]
     fn connection_form_open_edit() {
-        let cfg = ConnectionConfig::new("myconn", "myhost", 3333, "myuser", "mydb");
+        let cfg = ConnectionConfig::new_postgres("myconn", "myhost", 3333, "myuser", "mydb");
         let form = ConnectionForm::open_edit(&cfg);
         assert!(form.visible);
         assert_eq!(form.name, "myconn");

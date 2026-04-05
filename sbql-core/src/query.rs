@@ -9,6 +9,7 @@ use sqlx::{Column, Decode, MySqlPool, PgPool, Postgres, Row, SqlitePool, TypeInf
 
 use crate::error::{Result, SbqlError};
 use crate::pool::DbPool;
+use crate::sql_util::{quote_ident, quote_ident_mysql};
 
 pub const PAGE_SIZE: usize = 100;
 
@@ -87,7 +88,7 @@ pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<Query
 
     // Fetch total count on page 0 for SQL backends.
     // Timeout after COUNT_TIMEOUT to prevent hanging on huge tables.
-    if page == 0 && !matches!(pool, DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_) | DbPool::SqlServer(_)) {
+    if page == 0 && !matches!(pool, DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_)) {
         result.total_count = match tokio::time::timeout(
             COUNT_TIMEOUT,
             fetch_total_count(pool, sql),
@@ -540,10 +541,6 @@ fn mysql_value_to_string(row: &MySqlRow, idx: usize, type_name: &str) -> String 
     format!("<{}>", type_name)
 }
 
-/// Quote an identifier for MySQL using backticks.
-fn quote_ident_mysql(ident: &str) -> String {
-    format!("`{}`", ident.replace('`', "``"))
-}
 
 // ---------------------------------------------------------------------------
 // SQL Server implementation
@@ -605,32 +602,12 @@ async fn execute_page_sqlserver(
         })
         .collect();
 
-    // Fetch total count for SQL Server on page 0
-    let total_count = if page == 0 {
-        let count_sql = format!(
-            "SELECT COUNT(*) AS cnt FROM ({trimmed}) AS _sbql_count"
-        );
-        let count_stream = conn
-            .query(&count_sql, &[])
-            .await
-            .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
-        let count_row = count_stream
-            .into_row()
-            .await
-            .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
-        count_row
-            .and_then(|r| r.try_get::<i32, _>("cnt").ok().flatten())
-            .map(|c| c as u64)
-    } else {
-        None
-    };
-
     Ok(QueryResult {
         columns,
         rows: result_rows,
         page,
         has_next_page,
-        total_count,
+        total_count: None, // Count is handled by the shared timeout-guarded path in execute_page
     })
 }
 
@@ -1489,10 +1466,6 @@ fn hex_encode(bytes: &[u8]) -> String {
     buf
 }
 
-fn quote_ident(ident: &str) -> String {
-    format!("\"{}\"", ident.replace('"', "\"\""))
-}
-
 // ---------------------------------------------------------------------------
 // Streaming export implementations
 // ---------------------------------------------------------------------------
@@ -1624,9 +1597,9 @@ fn write_row(
             write!(w, "}}")
         }
         ExportFormat::SqlInsert => {
-            let col_list = cols.iter().map(|c| format!("\"{}\"", c)).collect::<Vec<_>>().join(", ");
+            let col_list = cols.iter().map(|c| quote_ident(c)).collect::<Vec<_>>().join(", ");
             let val_list = values.iter().map(|v| escape_sql_export_value(v)).collect::<Vec<_>>().join(", ");
-            writeln!(w, "INSERT INTO \"{}\" ({}) VALUES ({});", table, col_list, val_list)
+            writeln!(w, "INSERT INTO {} ({}) VALUES ({});", quote_ident(table), col_list, val_list)
         }
     }
 }

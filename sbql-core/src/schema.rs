@@ -4,6 +4,7 @@ use sqlx::{MySqlPool, PgPool, Row, SqlitePool};
 
 use crate::error::{Result, SbqlError};
 use crate::pool::DbPool;
+use crate::sql_util::{quote_ident, quote_ident_mysql, quote_ident_sqlserver};
 
 /// A table entry returned by schema introspection.
 #[derive(Debug, Clone)]
@@ -405,7 +406,13 @@ fn is_safe_pg_type(t: &str) -> bool {
         "name", "regclass", "regtype",
     ];
     let lower = t.to_lowercase();
-    SAFE.iter().any(|s| lower.starts_with(s))
+    SAFE.iter().any(|prefix| {
+        if let Some(rest) = lower.strip_prefix(prefix) {
+            rest.is_empty() || rest.starts_with('(') || rest.starts_with('[') || rest.starts_with(' ')
+        } else {
+            false
+        }
+    })
 }
 
 async fn execute_cell_update_pg(
@@ -422,7 +429,8 @@ async fn execute_cell_update_pg(
         return Err(SbqlError::Schema(format!("Unsafe column type: {target_type}")));
     }
     let sql = format!(
-        r#"UPDATE "{schema}"."{table}" SET "{target_col}" = $1::{target_type} WHERE "{pk_col}"::text = $2"#
+        "UPDATE {}.{} SET {} = $1::{} WHERE {}::text = $2",
+        quote_ident(schema), quote_ident(table), quote_ident(target_col), target_type, quote_ident(pk_col)
     );
     sqlx::query(&sql)
         .bind(new_val)
@@ -439,7 +447,10 @@ async fn execute_row_delete_pg(
     pk_col: &str,
     pk_val: &str,
 ) -> Result<()> {
-    let sql = format!(r#"DELETE FROM "{schema}"."{table}" WHERE "{pk_col}"::text = $1"#);
+    let sql = format!(
+        "DELETE FROM {}.{} WHERE {}::text = $1",
+        quote_ident(schema), quote_ident(table), quote_ident(pk_col)
+    );
     sqlx::query(&sql).bind(pk_val).execute(pool).await?;
     Ok(())
 }
@@ -606,7 +617,10 @@ async fn execute_cell_update_sqlite(
     target_col: &str,
     new_val: &str,
 ) -> Result<()> {
-    let sql = format!(r#"UPDATE "{table}" SET "{target_col}" = $1 WHERE "{pk_col}" = $2"#);
+    let sql = format!(
+        "UPDATE {} SET {} = $1 WHERE {} = $2",
+        quote_ident(table), quote_ident(target_col), quote_ident(pk_col)
+    );
     sqlx::query(&sql)
         .bind(new_val)
         .bind(pk_val)
@@ -621,7 +635,10 @@ async fn execute_row_delete_sqlite(
     pk_col: &str,
     pk_val: &str,
 ) -> Result<()> {
-    let sql = format!(r#"DELETE FROM "{table}" WHERE "{pk_col}" = $1"#);
+    let sql = format!(
+        "DELETE FROM {} WHERE {} = $1",
+        quote_ident(table), quote_ident(pk_col)
+    );
     sqlx::query(&sql).bind(pk_val).execute(pool).await?;
     Ok(())
 }
@@ -819,11 +836,6 @@ async fn execute_row_delete_mysql(
     );
     sqlx::query(&sql).bind(pk_val).execute(pool).await?;
     Ok(())
-}
-
-/// Quote an identifier for MySQL using backticks.
-fn quote_ident_mysql(ident: &str) -> String {
-    format!("`{}`", ident.replace('`', "``"))
 }
 
 // ---------------------------------------------------------------------------
@@ -1120,11 +1132,6 @@ async fn execute_row_delete_sqlserver(
         .await
         .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
     Ok(())
-}
-
-/// Quote an identifier for SQL Server using brackets.
-fn quote_ident_sqlserver(ident: &str) -> String {
-    format!("[{}]", ident.replace(']', "]]"))
 }
 
 // ---------------------------------------------------------------------------

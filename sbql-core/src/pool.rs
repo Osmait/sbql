@@ -17,7 +17,7 @@ pub enum DbBackend {
     SqlServer,
 }
 
-/// A pool that wraps either PostgreSQL, SQLite, or Redis.
+/// A pool that wraps one of the supported backends: PostgreSQL, SQLite, MySQL, Redis, DynamoDB, MongoDB, or SQL Server.
 #[derive(Clone)]
 pub enum DbPool {
     Postgres(PgPool),

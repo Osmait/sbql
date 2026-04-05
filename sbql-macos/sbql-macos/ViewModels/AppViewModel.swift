@@ -22,6 +22,7 @@ final class AppViewModel {
     var toastIsError: Bool = false
 
     private var service: SbqlService { SbqlService.shared }
+    private var toastDismissTask: Task<Void, Never>?
 
     enum ActiveTab: String, CaseIterable {
         case query = "Query"
@@ -148,8 +149,7 @@ final class AppViewModel {
 
             // Record in query history
             if let conn = connections.activeConnection {
-                let ms = Int64(elapsed.components.seconds * 1_000)
-                    + Int64(elapsed.components.attoseconds / 1_000_000_000_000_000)
+                let ms = elapsed.totalMilliseconds
                 queryHistory.addEntry(
                     sql: sql,
                     connectionName: conn.name,
@@ -355,7 +355,8 @@ final class AppViewModel {
     func showToast(_ message: String) {
         toastIsError = false
         toastMessage = message
-        Task { @MainActor in
+        toastDismissTask?.cancel()
+        toastDismissTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(2.5))
             if self.toastMessage == message {
                 self.toastMessage = nil
@@ -366,7 +367,8 @@ final class AppViewModel {
     func showError(_ error: Error) {
         toastIsError = true
         toastMessage = error.localizedDescription
-        Task { @MainActor in
+        toastDismissTask?.cancel()
+        toastDismissTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(4))
             if self.toastMessage == error.localizedDescription {
                 self.toastMessage = nil
