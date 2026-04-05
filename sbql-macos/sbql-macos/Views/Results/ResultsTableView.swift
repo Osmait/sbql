@@ -179,13 +179,11 @@ struct ResultsTableView: NSViewRepresentable {
                 cellView.drawsBackground = true
                 cellView.backgroundColor = cachedDanger.withAlphaComponent(0.10)
             } else if isDirty {
-                cellView.attributedStringValue = NSAttributedString(string: value)
                 cellView.stringValue = value
                 cellView.textColor = cachedWarning
                 cellView.drawsBackground = true
                 cellView.backgroundColor = cachedWarning.withAlphaComponent(0.15)
             } else {
-                cellView.attributedStringValue = NSAttributedString(string: value)
                 cellView.stringValue = value
                 cellView.textColor = cachedTextPrimary
                 cellView.drawsBackground = false

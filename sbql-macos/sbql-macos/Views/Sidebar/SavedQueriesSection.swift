@@ -7,14 +7,20 @@ struct SavedQueriesSection: View {
     @State private var renameText: String = ""
 
     var body: some View {
-        sectionHeader("SAVED QUERIES") {
+        SectionHeaderView(title: "SAVED QUERIES", action: {
             appVM.savedQueries.saveSheetSQL = appVM.editor.sqlText
             appVM.savedQueries.isShowingSaveSheet = true
-        }
+        })
 
-        // Search field (show when 3+ queries)
         if appVM.savedQueries.queries.count >= 3 {
-            searchField
+            SearchFieldView(
+                text: Binding(
+                    get: { appVM.savedQueries.searchText },
+                    set: { appVM.savedQueries.searchText = $0 }
+                ),
+                placeholder: "Filter saved queries…"
+            )
+            .padding(.horizontal, SbqlTheme.Spacing.sm)
         }
 
         LazyVStack(spacing: 2) {
@@ -25,8 +31,6 @@ struct SavedQueriesSection: View {
         .padding(.horizontal, SbqlTheme.Spacing.sm)
         .animation(SbqlTheme.Animations.gentle, value: appVM.savedQueries.filteredQueries.count)
     }
-
-    // MARK: - Row
 
     private func queryRow(_ query: SavedQuery) -> some View {
         Button {
@@ -80,59 +84,5 @@ struct SavedQueriesSection: View {
                 appVM.savedQueries.delete(id: query.id)
             }
         }
-    }
-
-    // MARK: - Search
-
-    private var searchField: some View {
-        HStack(spacing: SbqlTheme.Spacing.xs) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 10))
-                .foregroundStyle(SbqlTheme.Colors.textTertiary)
-            TextField("Filter saved queries…", text: Binding(
-                get: { appVM.savedQueries.searchText },
-                set: { appVM.savedQueries.searchText = $0 }
-            ))
-            .textFieldStyle(.plain)
-            .font(SbqlTheme.Typography.caption)
-            .foregroundStyle(SbqlTheme.Colors.textPrimary)
-
-            if !appVM.savedQueries.searchText.isEmpty {
-                Button {
-                    appVM.savedQueries.searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(SbqlTheme.Colors.textTertiary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, SbqlTheme.Spacing.sm)
-        .padding(.vertical, SbqlTheme.Spacing.xs)
-        .background(SbqlTheme.Colors.surfaceElevated)
-        .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
-        .padding(.horizontal, SbqlTheme.Spacing.sm)
-    }
-
-    // MARK: - Section Header
-
-    private func sectionHeader(_ title: String, action: @escaping () -> Void) -> some View {
-        HStack {
-            Text(title)
-                .font(SbqlTheme.Typography.captionBold)
-                .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.7))
-
-            Spacer()
-
-            Button(action: action) {
-                Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(SbqlTheme.Colors.accent)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, SbqlTheme.Spacing.lg)
-        .padding(.vertical, SbqlTheme.Spacing.xs)
     }
 }
