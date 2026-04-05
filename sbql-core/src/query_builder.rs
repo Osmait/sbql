@@ -66,8 +66,9 @@ pub fn apply_order(
                 "DESC"
             };
             let trimmed = sql.trim_end_matches(';').trim();
+            let safe_col = quote_ident(column);
             Ok(format!(
-                "SELECT * FROM ({trimmed}) AS _sbql_order ORDER BY {column} {dir}"
+                "SELECT * FROM ({trimmed}) AS _sbql_order ORDER BY {safe_col} {dir}"
             ))
         }
     }
@@ -320,7 +321,7 @@ mod tests {
             apply_order(sql, "col", SortDirection::Ascending, DbBackend::Postgres).unwrap();
         assert_eq!(
             result,
-            "SELECT * FROM (INVALID SQL STATEMENT) AS _sbql_order ORDER BY col ASC"
+            "SELECT * FROM (INVALID SQL STATEMENT) AS _sbql_order ORDER BY \"col\" ASC"
         );
     }
 

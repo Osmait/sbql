@@ -64,7 +64,10 @@ impl ConnectionManager {
                     .max_connections(10)
                     .acquire_timeout(std::time::Duration::from_secs(10))
                     .connect(&url)
-                    .await?;
+                    .await
+                    .map_err(|e| SbqlError::Connection(format!(
+                        "Failed to connect to '{}': {e}", config.name
+                    )))?;
                 DbPool::Postgres(pg)
             }
             DbBackend::Sqlite => {
@@ -80,7 +83,10 @@ impl ConnectionManager {
                         })
                     })
                     .connect(&url)
-                    .await?;
+                    .await
+                    .map_err(|e| SbqlError::Connection(format!(
+                        "Failed to connect to '{}': {e}", config.name
+                    )))?;
                 DbPool::Sqlite(sq)
             }
             DbBackend::Mysql => {
@@ -88,12 +94,21 @@ impl ConnectionManager {
                     .max_connections(10)
                     .acquire_timeout(std::time::Duration::from_secs(10))
                     .connect(&url)
-                    .await?;
+                    .await
+                    .map_err(|e| SbqlError::Connection(format!(
+                        "Failed to connect to '{}': {e}", config.name
+                    )))?;
                 DbPool::Mysql(my)
             }
             DbBackend::Redis => {
-                let client = redis::Client::open(url.as_str())?;
-                let cm = redis::aio::ConnectionManager::new(client).await?;
+                let client = redis::Client::open(url.as_str())
+                    .map_err(|e| SbqlError::Connection(format!(
+                        "Failed to connect to '{}': {e}", config.name
+                    )))?;
+                let cm = redis::aio::ConnectionManager::new(client).await
+                    .map_err(|e| SbqlError::Connection(format!(
+                        "Failed to connect to '{}': {e}", config.name
+                    )))?;
                 DbPool::Redis(Box::new(cm))
             }
             DbBackend::DynamoDb => {
@@ -132,9 +147,13 @@ impl ConnectionManager {
             DbBackend::MongoDb => {
                 let client_options = mongodb::options::ClientOptions::parse(&url)
                     .await
-                    .map_err(|e| SbqlError::MongoDb(e.to_string()))?;
+                    .map_err(|e| SbqlError::Connection(format!(
+                        "Failed to connect to '{}': {e}", config.name
+                    )))?;
                 let client = mongodb::Client::with_options(client_options)
-                    .map_err(|e| SbqlError::MongoDb(e.to_string()))?;
+                    .map_err(|e| SbqlError::Connection(format!(
+                        "Failed to connect to '{}': {e}", config.name
+                    )))?;
                 let db = client.database(&config.database);
                 DbPool::MongoDb(Box::new(db))
             }
@@ -154,7 +173,9 @@ impl ConnectionManager {
                     .connection_timeout(std::time::Duration::from_secs(10))
                     .build(mgr)
                     .await
-                    .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+                    .map_err(|e| SbqlError::Connection(format!(
+                        "Failed to connect to '{}': {e}", config.name
+                    )))?;
                 DbPool::SqlServer(Box::new(pool))
             }
         };

@@ -386,6 +386,28 @@ async fn load_diagram_pg(pool: &PgPool) -> Result<DiagramData> {
     })
 }
 
+/// Validate that a PostgreSQL type name is safe to interpolate into SQL.
+/// Uses a starts_with check so that parameterised types like `varchar(255)`
+/// or `numeric(10,2)` are accepted.
+fn is_safe_pg_type(t: &str) -> bool {
+    const SAFE: &[&str] = &[
+        "text", "varchar", "character varying", "char", "character",
+        "integer", "int", "int2", "int4", "int8", "smallint", "bigint",
+        "real", "float4", "float8", "double precision", "numeric", "decimal",
+        "boolean", "bool", "uuid", "json", "jsonb",
+        "timestamp", "timestamp with time zone", "timestamp without time zone",
+        "timestamptz", "date", "time", "time with time zone", "timetz",
+        "bytea", "inet", "cidr", "macaddr", "macaddr8",
+        "money", "oid", "interval", "bit", "bit varying", "varbit",
+        "point", "line", "lseg", "box", "path", "polygon", "circle",
+        "tsquery", "tsvector", "xml",
+        "smallserial", "serial", "bigserial",
+        "name", "regclass", "regtype",
+    ];
+    let lower = t.to_lowercase();
+    SAFE.iter().any(|s| lower.starts_with(s))
+}
+
 async fn execute_cell_update_pg(
     pool: &PgPool,
     schema: &str,
@@ -396,6 +418,9 @@ async fn execute_cell_update_pg(
     new_val: &str,
 ) -> Result<()> {
     let target_type = resolve_column_type(pool, schema, table, target_col).await?;
+    if !is_safe_pg_type(&target_type) {
+        return Err(SbqlError::Schema(format!("Unsafe column type: {target_type}")));
+    }
     let sql = format!(
         r#"UPDATE "{schema}"."{table}" SET "{target_col}" = $1::{target_type} WHERE "{pk_col}"::text = $2"#
     );

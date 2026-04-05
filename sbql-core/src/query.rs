@@ -12,6 +12,9 @@ use crate::pool::DbPool;
 
 pub const PAGE_SIZE: usize = 100;
 
+/// Maximum time to wait for `COUNT(*)` before giving up and returning `None`.
+const COUNT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Return the backend name for a `DbPool` (used in tracing spans).
 pub fn pool_backend_name(pool: &DbPool) -> &'static str {
     match pool {
@@ -82,9 +85,16 @@ pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<Query
         DbPool::SqlServer(pool) => execute_page_sqlserver(pool, sql, page).await,
     }?;
 
-    // Fetch total count on page 0 for SQL backends (cheap enough for most queries)
+    // Fetch total count on page 0 for SQL backends.
+    // Timeout after COUNT_TIMEOUT to prevent hanging on huge tables.
     if page == 0 && !matches!(pool, DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_) | DbPool::SqlServer(_)) {
-        result.total_count = fetch_total_count(pool, sql).await.ok();
+        result.total_count = match tokio::time::timeout(
+            COUNT_TIMEOUT,
+            fetch_total_count(pool, sql),
+        ).await {
+            Ok(Ok(count)) => Some(count),
+            _ => None, // Timeout or error — skip count
+        };
     }
 
     Ok(result)
