@@ -128,22 +128,11 @@ struct SidebarView: View {
     }
 
     private func backendGroupHeader(_ backend: Connection.Backend, count: Int) -> some View {
-        let (label, color): (String, Color) = switch backend {
-        case .postgres: ("PostgreSQL", Color(hex: 0x336791))
-        case .mysql: ("MySQL", Color(hex: 0x00758F))
-        case .sqlite: ("SQLite", Color(hex: 0x44A8D6))
-        case .redis: ("Redis", Color(hex: 0xD82C20))
-        case .dynamodb: ("DynamoDB", Color(hex: 0x4053D6))
-        case .mongodb: ("MongoDB", Color(hex: 0x47A248))
-        case .sqlserver: ("SQL Server", Color(hex: 0xCC2927))
-        }
-        return HStack(spacing: SbqlTheme.Spacing.xs) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
-            Text("\(label) (\(count))")
+        HStack(spacing: SbqlTheme.Spacing.xs) {
+            Circle().fill(backend.color).frame(width: 6, height: 6)
+            Text("\(backend.displayLabel) (\(count))")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(color)
+                .foregroundStyle(backend.color)
             Spacer()
         }
         .padding(.horizontal, SbqlTheme.Spacing.lg)

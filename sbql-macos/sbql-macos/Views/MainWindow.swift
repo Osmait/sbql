@@ -152,6 +152,7 @@ struct MainWindow: View {
             }
             .buttonStyle(.hoverIcon)
             .keyboardShortcut("s", modifiers: [.command, .control])
+            .accessibilityLabel("Toggle Sidebar")
 
             SbqlTheme.Colors.border
                 .frame(width: 1, height: 16)
@@ -210,6 +211,7 @@ struct MainWindow: View {
                 }
                 .buttonStyle(.hoverIcon)
                 .help("Close all tabs")
+                .accessibilityLabel("Close All Tabs")
             }
 
             Spacer()
@@ -224,6 +226,7 @@ struct MainWindow: View {
             }
             .buttonStyle(.hoverIcon)
             .help("Query History")
+            .accessibilityLabel("Query History")
 
             Button {
                 appVM.isShowingSavedQueries = true
@@ -234,6 +237,7 @@ struct MainWindow: View {
             }
             .buttonStyle(.hoverIcon)
             .help("Saved Queries")
+            .accessibilityLabel("Saved Queries")
 
             SbqlTheme.Colors.border
                 .frame(width: 1, height: 16)
@@ -268,6 +272,7 @@ struct MainWindow: View {
                     .foregroundStyle(SbqlTheme.Colors.accent.opacity(0.6))
             }
             .buttonStyle(.hoverIcon)
+            .accessibilityLabel("Refresh Tables")
         }
     }
 
@@ -330,30 +335,12 @@ struct MainWindow: View {
     }
 
     private func backendBadge(for backend: Connection.Backend) -> some View {
-        let label: String = switch backend {
-        case .postgres: "PG"
-        case .mysql: "MySQL"
-        case .sqlite: "SQLite"
-        case .redis: "Redis"
-        case .dynamodb: "DynamoDB"
-        case .mongodb: "MongoDB"
-        case .sqlserver: "SQL Server"
-        }
-        let color: Color = switch backend {
-        case .postgres: Color(hex: 0x336791)
-        case .mysql: Color(hex: 0x00758F)
-        case .sqlite: Color(hex: 0x44A8D6)
-        case .redis: Color(hex: 0xD82C20)
-        case .dynamodb: Color(hex: 0x4053D6)
-        case .mongodb: Color(hex: 0x47A248)
-        case .sqlserver: Color(hex: 0xCC2927)
-        }
-        return Text(label)
+        Text(backend.displayLabel)
             .font(SbqlTheme.Typography.captionBold)
-            .foregroundStyle(color)
+            .foregroundStyle(backend.color)
             .padding(.horizontal, SbqlTheme.Spacing.sm)
             .padding(.vertical, 2)
-            .background(color.opacity(0.15))
+            .background(backend.color.opacity(0.15))
             .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
     }
 

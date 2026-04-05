@@ -162,8 +162,9 @@ struct ResultsTableView: NSViewRepresentable {
 
             let key = CellKey(row: row, col: colIdx)
             let isMarkedForDeletion = appVM.results.pendingDeletions.contains(row)
-            let isDirty = appVM.results.dirtyCells[key] != nil
-            let value = isDirty ? appVM.results.dirtyCells[key]! : result.rows[row][colIdx]
+            let dirtyValue = appVM.results.dirtyCells[key]
+            let isDirty = dirtyValue != nil
+            let value = dirtyValue ?? result.rows[row][colIdx]
 
             cellView.toolTip = value
 

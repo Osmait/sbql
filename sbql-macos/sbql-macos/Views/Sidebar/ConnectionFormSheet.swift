@@ -9,14 +9,8 @@ struct ConnectionFormSheet: View {
     @State private var sshPassword: String = ""
     @State private var isSaving = false
 
-    private let backends: [(Connection.Backend, String, String, Color)] = [
-        (.postgres, "PG", "PostgreSQL", Color(hex: 0x336791)),
-        (.mysql, "MY", "MySQL", Color(hex: 0x00758F)),
-        (.sqlite, "SQ", "SQLite", Color(hex: 0x44A8D6)),
-        (.mongodb, "MG", "MongoDB", Color(hex: 0x47A248)),
-        (.redis, "RD", "Redis", Color(hex: 0xD82C20)),
-        (.dynamodb, "DB", "DynamoDB", Color(hex: 0x4053D6)),
-        (.sqlserver, "MS", "SQL Server", Color(hex: 0xCC2927)),
+    private let formBackends: [Connection.Backend] = [
+        .postgres, .mysql, .sqlite, .mongodb, .redis, .dynamodb, .sqlserver,
     ]
 
     var body: some View {
@@ -46,15 +40,15 @@ struct ConnectionFormSheet: View {
                             .foregroundStyle(SbqlTheme.Colors.textSecondary)
 
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 6)], spacing: 6) {
-                            ForEach(backends, id: \.0) { backend, abbr, label, color in
+                            ForEach(formBackends, id: \.self) { backend in
                                 Button {
                                     connection.backend = backend
                                 } label: {
                                     VStack(spacing: 3) {
-                                        Text(abbr)
+                                        Text(backend.abbreviation)
                                             .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                            .foregroundStyle(connection.backend == backend ? .white : color)
-                                        Text(label)
+                                            .foregroundStyle(connection.backend == backend ? .white : backend.color)
+                                        Text(backend.displayLabel)
                                             .font(.system(size: 9))
                                             .foregroundStyle(connection.backend == backend ? .white.opacity(0.9) : SbqlTheme.Colors.textSecondary)
                                     }
@@ -62,13 +56,13 @@ struct ConnectionFormSheet: View {
                                     .padding(.vertical, 6)
                                     .background(
                                         connection.backend == backend
-                                            ? color
+                                            ? backend.color
                                             : SbqlTheme.Colors.surfaceElevated
                                     )
                                     .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: SbqlTheme.Radius.medium)
-                                            .stroke(connection.backend == backend ? color : Color.clear, lineWidth: 1)
+                                            .stroke(connection.backend == backend ? backend.color : Color.clear, lineWidth: 1)
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -275,6 +269,11 @@ struct ConnectionFormSheet: View {
     private func save() {
         isSaving = true
         Task {
+            defer {
+                password = ""
+                sshPassword = ""
+                isSaving = false
+            }
             do {
                 let pw = password.isEmpty ? nil : password
                 let sshPw = sshPassword.isEmpty ? nil : sshPassword
@@ -285,7 +284,6 @@ struct ConnectionFormSheet: View {
             } catch {
                 appVM.showError(error)
             }
-            isSaving = false
         }
     }
 }

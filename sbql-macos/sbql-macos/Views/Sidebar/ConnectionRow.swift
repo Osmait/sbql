@@ -92,21 +92,12 @@ struct ConnectionRow: View {
     }
 
     private var backendBadge: some View {
-        let (label, color): (String, Color) = switch connection.backend {
-        case .postgres: ("PG", Color(hex: 0x336791))
-        case .mysql: ("MY", Color(hex: 0x00758F))
-        case .sqlite: ("SQ", Color(hex: 0x44A8D6))
-        case .redis: ("RD", Color(hex: 0xD82C20))
-        case .dynamodb: ("DB", Color(hex: 0x4053D6))
-        case .mongodb: ("MG", Color(hex: 0x47A248))
-        case .sqlserver: ("MS", Color(hex: 0xCC2927))
-        }
-        return Text(label)
+        Text(connection.backend.abbreviation)
             .font(.system(size: 9, weight: .bold, design: .monospaced))
-            .foregroundStyle(color)
+            .foregroundStyle(connection.backend.color)
             .padding(.horizontal, 4)
             .padding(.vertical, 2)
-            .background(color.opacity(0.15))
+            .background(connection.backend.color.opacity(0.15))
             .clipShape(RoundedRectangle(cornerRadius: SbqlTheme.Radius.small))
     }
 }

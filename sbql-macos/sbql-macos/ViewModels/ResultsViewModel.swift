@@ -199,19 +199,22 @@ final class ResultsViewModel {
         }
     }
 
+    // Cached regex for extracting table name from SQL (avoids recompilation per call)
+    private static let fromTableRegex = try! NSRegularExpression(
+        pattern: #"(?i)\bFROM\s+([\w]+(?:\.[\w]+)?)"#
+    )
+
     /// Updates the active tab's display name based on the table referenced in the SQL.
     func updateActiveTabName(forSQL sql: String) {
         guard let activeId = activeTabId,
               let index = tabs.firstIndex(where: { $0.id == activeId }) else { return }
 
         // Match FROM schema.table or FROM table (handles qualified names)
-        let pattern = #"(?i)\bFROM\s+([\w]+(?:\.[\w]+)?)"#
-        guard let range = sql.range(of: pattern, options: .regularExpression) else { return }
-        let matched = String(sql[range])
-        // Extract everything after FROM
-        let parts = matched.split(separator: " ", maxSplits: 1)
-        guard parts.count == 2 else { return }
-        let qualified = String(parts[1]).trimmingCharacters(in: .whitespaces)
+        let nsSQL = sql as NSString
+        guard let match = Self.fromTableRegex.firstMatch(
+            in: sql, range: NSRange(location: 0, length: nsSQL.length)
+        ), match.numberOfRanges >= 2 else { return }
+        let qualified = nsSQL.substring(with: match.range(at: 1))
         // Take just the table name (last component after dot)
         let extractedName = qualified.contains(".")
             ? String(qualified.split(separator: ".").last ?? Substring(qualified))
