@@ -10,12 +10,12 @@
 //! draws the result. Nothing here decides *what* a key means or *how* anything
 //! looks.
 
-use anyhow::Result;
 use sbql_core::{CoreCommand, CoreEvent};
 use tokio::sync::mpsc;
 
 use crate::action;
 use crate::app::AppState;
+use crate::error::{Result, TuiError};
 use crate::events::{spawn_event_reader, AppEvent};
 use crate::handlers;
 use crate::renderer::Renderer;
@@ -107,10 +107,11 @@ impl Sbql {
                     self.dispatch(action);
                 }
                 AppEvent::Resize => self.state.layout.needs_redraw = true,
-                AppEvent::IoError(e) => {
-                    self.state.error_msg = Some(format!("IO error: {e}"));
-                    self.state.layout.needs_redraw = true;
-                }
+                // Nothing to paint this on: without a reader there are no more
+                // keys, so a status-bar message would be the last thing the app
+                // ever did and the user could not even quit. End the run and
+                // let `main` print it to a terminal that works again.
+                AppEvent::InputDied(e) => return Err(TuiError::Input(e)),
                 AppEvent::Tick => self.on_tick(),
             }
 
@@ -204,7 +205,6 @@ mod tests {
 
     use crate::events::AppEvent;
     use crate::renderer::test_support::RecordingRenderer;
-    use crate::renderer::Renderer;
     use crate::tui::Tui;
 
     /// Drive the real loop over a scripted event stream.
@@ -313,6 +313,38 @@ mod tests {
             .frames
             .iter()
             .all(|m| *m == crate::app::Mode::Browsing));
+    }
+
+    /// Losing the reader thread ends the run instead of leaving a window the
+    /// user cannot type into and cannot close.
+    #[tokio::test]
+    async fn a_dead_input_stream_ends_the_run() {
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        event_tx
+            .send(AppEvent::InputDied(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "stdin closed",
+            )))
+            .unwrap();
+        // Queued behind it, and must never be reached.
+        event_tx
+            .send(AppEvent::Key(key(KeyCode::Char('D'))))
+            .unwrap();
+
+        let mut tui = Tui::with_backend(TestBackend::new(80, 24)).expect("test backend");
+        let mut app = Sbql::with_channels(cmd_tx, event_rx, None);
+        let err = app.run(&mut tui).await.expect_err("should have given up");
+
+        assert!(
+            matches!(err, TuiError::Input(_)),
+            "expected an input failure, got {err:?}"
+        );
+        assert_ne!(
+            app.state.mode(),
+            crate::app::Mode::Diagram,
+            "events after the input died must not be processed"
+        );
     }
 
     /// Quitting ends the loop rather than relying on the stream closing.

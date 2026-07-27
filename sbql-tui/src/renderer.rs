@@ -20,6 +20,7 @@
 //! `sbql-core` instead, which is the boundary that carries no UI at all.
 
 use crate::app::AppState;
+use crate::error::Result;
 
 /// A surface the application can paint its state onto.
 pub trait Renderer {
@@ -28,7 +29,11 @@ pub trait Renderer {
     /// Takes `&mut AppState` because measuring is part of painting: viewport
     /// sizes and cached geometry are settled here and read back by scrolling
     /// and paging.
-    fn render(&mut self, state: &mut AppState) -> anyhow::Result<()>;
+    ///
+    /// A failure here ends the run: if a frame cannot be painted there is
+    /// nowhere left to report anything, so the error travels up to `main`,
+    /// which prints it to a restored terminal.
+    fn render(&mut self, state: &mut AppState) -> Result<()>;
 }
 
 #[cfg(test)]
@@ -46,7 +51,7 @@ pub(crate) mod test_support {
     }
 
     impl Renderer for RecordingRenderer {
-        fn render(&mut self, state: &mut AppState) -> anyhow::Result<()> {
+        fn render(&mut self, state: &mut AppState) -> Result<()> {
             self.frames.push(state.mode());
             Ok(())
         }

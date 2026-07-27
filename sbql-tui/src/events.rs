@@ -19,8 +19,12 @@ pub enum AppEvent {
     Resize,
     /// A response arrived from the Core worker.
     Core(CoreEvent),
-    /// The crossterm reader thread encountered an error.
-    IoError(String),
+    /// The reader thread gave up, so no further input can ever arrive.
+    ///
+    /// Carries the `io::Error` itself rather than a rendered string: this one
+    /// ends the run and is printed to a restored terminal, where the source
+    /// chain is worth having.
+    InputDied(std::io::Error),
     /// Periodic tick for spinner animation (fired every ~100 ms).
     Tick,
 }
@@ -49,7 +53,12 @@ pub fn spawn_event_reader(tx: mpsc::UnboundedSender<AppEvent>) {
             }
             Ok(_) => {} // FocusGained/Lost etc — ignore
             Err(e) => {
-                let _ = tx.send(AppEvent::IoError(e.to_string()));
+                // Fatal, and reported as such. This thread is the only source
+                // of keys, so once it stops the app cannot be driven — or even
+                // quit, since raw mode means Ctrl+C is a keypress and not a
+                // signal. It used to just show a message and leave the user
+                // with a window they had to kill from somewhere else.
+                let _ = tx.send(AppEvent::InputDied(e));
                 break;
             }
         }

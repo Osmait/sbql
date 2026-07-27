@@ -13,7 +13,8 @@ use clap::Parser;
     about = "Terminal SQL workspace",
     after_help = "ENVIRONMENT:\n  \
         SBQL_CONFIG_DIR  Directory holding connections.toml (default ~/.config/sbql)\n  \
-        SBQL_NO_KEYRING  Set to 1 for the same effect as --no-keyring"
+        SBQL_NO_KEYRING  Set to 1 for the same effect as --no-keyring\n  \
+        SBQL_LOG         Log file to write (default: a per-user state directory)"
 )]
 pub struct Cli {
     /// Saved connection to open on startup.
@@ -47,7 +48,19 @@ impl Cli {
             return Ok(None);
         };
 
-        let saved = sbql_core::load_connections().unwrap_or_default();
+        // Not `unwrap_or_default()`. An unreadable config file is not the same
+        // as an empty one, and treating it as empty produces the worst possible
+        // message: "no saved connections found… press `n` to add one", said to
+        // someone whose connections are all still on disk.
+        let saved = match sbql_core::load_connections() {
+            Ok(list) => list,
+            Err(e) => {
+                return Err(StartupError::UnreadableConfig {
+                    source: Box::new(e),
+                })
+            }
+        };
+
         if saved.iter().any(|c| c.name.eq_ignore_ascii_case(name)) {
             return Ok(Some(name.to_string()));
         }
@@ -66,6 +79,11 @@ pub enum StartupError {
         requested: String,
         available: Vec<String>,
     },
+    /// The connection file is there, but could not be read or parsed.
+    ///
+    /// Boxed to keep the enum small: the other variant is two words, and
+    /// `SbqlError` is considerably larger than that.
+    UnreadableConfig { source: Box<sbql_core::SbqlError> },
 }
 
 impl std::fmt::Display for StartupError {
@@ -90,11 +108,23 @@ impl std::fmt::Display for StartupError {
                 }
                 Ok(())
             }
+            StartupError::UnreadableConfig { source } => write!(
+                f,
+                "your saved connections could not be read: {source}\n\
+                 Nothing has been changed. Fix or move the file and try again."
+            ),
         }
     }
 }
 
-impl std::error::Error for StartupError {}
+impl std::error::Error for StartupError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            StartupError::UnknownConnection { .. } => None,
+            StartupError::UnreadableConfig { source } => Some(source.as_ref()),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -153,6 +183,47 @@ mod tests {
             requested: "prod".into(),
             available: vec![],
         };
+        assert!(err.to_string().contains("press `n`"), "{err}");
+    }
+
+    /// A broken config file must not be reported as an empty one. Advising
+    /// someone to re-add connections that are sitting on disk is how config
+    /// files get deleted.
+    #[test]
+    fn a_broken_config_is_not_reported_as_an_empty_one() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::env::set_var(sbql_core::CONFIG_DIR_ENV, dir.path());
+        let path = sbql_core::config_path().expect("config path");
+        std::fs::write(&path, "this is not = valid = toml [[[").expect("write");
+
+        let cli = Cli::parse_from(["sbql", "prod"]);
+        let err = cli
+            .startup_connection()
+            .expect_err("a broken file is not an empty one");
+
+        assert!(
+            matches!(err, StartupError::UnreadableConfig { .. }),
+            "{err:?}"
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("could not be read"), "{msg}");
+        assert!(
+            !msg.contains("press `n`"),
+            "must not invite the user to re-add what is already saved: {msg}"
+        );
+        // The parse error itself stays reachable for anyone printing the chain.
+        assert!(std::error::Error::source(&err).is_some());
+    }
+
+    /// The ordinary case still works: no file at all really is "nothing saved".
+    #[test]
+    fn a_missing_config_is_still_nothing_saved() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::env::set_var(sbql_core::CONFIG_DIR_ENV, dir.path());
+
+        let cli = Cli::parse_from(["sbql", "prod"]);
+        let err = cli.startup_connection().expect_err("no such connection");
+
         assert!(err.to_string().contains("press `n`"), "{err}");
     }
 }

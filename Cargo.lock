@@ -4696,12 +4696,13 @@ dependencies = [
 name = "sbql-tui"
 version = "0.1.2"
 dependencies = [
- "anyhow",
  "clap",
  "crossterm",
+ "dirs",
  "ratatui",
  "sbql-core",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
