@@ -28,8 +28,19 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
 
+      # Not `--all-targets`: that also *runs* the benchmarks, and the
+      # container-backed ones drop their testcontainers guard after the Tokio
+      # runtime is gone, so teardown panics ("there is no reactor running")
+      # and fails the job even though every benchmark passed. Marking the
+      # `[[bench]]` targets `test = false` does not help — `--all-targets`
+      # selects benches regardless of it.
       - name: Run workspace tests
-        run: cargo test --workspace --all-targets
+        run: cargo test --workspace --lib --bins --tests
+
+      # Benches and examples are no longer built by the step above, so compile
+      # them here. Otherwise they rot unnoticed until someone runs them.
+      - name: Check benches and examples still build
+        run: cargo check --workspace --all-targets
 
       # The keyring is optional; without this the no-keyring path silently rots.
       # Only the feature-gated tests run here — the container suites above
