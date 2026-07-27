@@ -32,10 +32,10 @@ pub use connection_spec::{
     BackendSpec, ConnectionDraft, ConnectionField, FieldSpec, ValidationError,
 };
 pub use error::{Result, SbqlError};
-pub use pool::{DbBackend, DbPool};
 pub use import::ImportFormat;
+pub use pool::{DbBackend, DbPool};
 pub use query::{ExportFormat, QueryResult, PAGE_SIZE};
-pub use query_builder::{SortDirection, format_sql};
+pub use query_builder::{format_sql, SortDirection};
 pub use schema::{ColumnInfo, DiagramData, ForeignKey, TableEntry, TableSchema};
 
 use std::collections::HashMap;
@@ -108,7 +108,6 @@ pub enum CoreCommand {
         pk_val: String,
     },
 }
-
 
 impl CoreCommand {
     /// Whether the UI should show a progress indicator while this runs.
@@ -297,7 +296,9 @@ impl Core {
         format: ExportFormat,
         table_name: &str,
     ) -> Result<u64> {
-        let sql = self.effective_sql.as_ref()
+        let sql = self
+            .effective_sql
+            .as_ref()
             .ok_or(SbqlError::Config("No active query".into()))?;
         let pool = self.active_pool().await?;
         query::export_all(&pool, sql, path, format, table_name).await

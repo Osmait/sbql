@@ -70,10 +70,19 @@ async fn test_mysql_list_tables() {
     let (_my, pool, _container) = setup_mysql().await;
     let tables = list_tables(&pool).await.expect("list_tables failed");
     let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
-    assert!(names.contains(&"users"), "Expected 'users' table, got: {names:?}");
-    assert!(names.contains(&"posts"), "Expected 'posts' table, got: {names:?}");
+    assert!(
+        names.contains(&"users"),
+        "Expected 'users' table, got: {names:?}"
+    );
+    assert!(
+        names.contains(&"posts"),
+        "Expected 'posts' table, got: {names:?}"
+    );
     for t in &tables {
-        assert_eq!(t.schema, "test", "Schema should be 'test' (MySQL database name)");
+        assert_eq!(
+            t.schema, "test",
+            "Schema should be 'test' (MySQL database name)"
+        );
     }
 }
 
@@ -124,9 +133,17 @@ async fn test_mysql_diagram() {
 #[tokio::test]
 async fn test_mysql_cell_update() {
     let (my, pool, _container) = setup_mysql().await;
-    execute_cell_update(&pool, "test", "users", "id", "1", "username", "alice_updated")
-        .await
-        .expect("cell update failed");
+    execute_cell_update(
+        &pool,
+        "test",
+        "users",
+        "id",
+        "1",
+        "username",
+        "alice_updated",
+    )
+    .await
+    .expect("cell update failed");
 
     let updated: String = sqlx::query("SELECT username FROM users WHERE id = 1")
         .fetch_one(&my)
@@ -228,7 +245,9 @@ async fn test_mysql_types() {
     .await
     .unwrap();
 
-    let result = execute_page(&pool, "SELECT * FROM type_test", 0).await.unwrap();
+    let result = execute_page(&pool, "SELECT * FROM type_test", 0)
+        .await
+        .unwrap();
     assert_eq!(result.rows.len(), 1);
     let row = &result.rows[0];
     let cols = &result.columns;
@@ -249,13 +268,25 @@ async fn test_mysql_types() {
     assert_eq!(row[date_idx], "2024-01-15");
 
     let datetime_idx = cols.iter().position(|c| c == "datetime_val").unwrap();
-    assert!(row[datetime_idx].contains("2024-01-15"), "datetime: {}", row[datetime_idx]);
+    assert!(
+        row[datetime_idx].contains("2024-01-15"),
+        "datetime: {}",
+        row[datetime_idx]
+    );
 
     let timestamp_idx = cols.iter().position(|c| c == "timestamp_val").unwrap();
-    assert!(row[timestamp_idx].contains("2024-01-15"), "timestamp: {}", row[timestamp_idx]);
+    assert!(
+        row[timestamp_idx].contains("2024-01-15"),
+        "timestamp: {}",
+        row[timestamp_idx]
+    );
 
     let time_idx = cols.iter().position(|c| c == "time_val").unwrap();
-    assert!(row[time_idx].contains("10:30:00"), "time: {}", row[time_idx]);
+    assert!(
+        row[time_idx].contains("10:30:00"),
+        "time: {}",
+        row[time_idx]
+    );
 
     let json_idx = cols.iter().position(|c| c == "json_val").unwrap();
     assert!(row[json_idx].contains("key"), "json: {}", row[json_idx]);
@@ -281,14 +312,17 @@ async fn test_mysql_suggest_distinct_values() {
         .await
         .unwrap();
 
-    sqlx::query("INSERT INTO suggest_test (name) VALUES ('Alice'), ('Alicia'), ('Bob'), ('Charlie')")
-        .execute(&my_pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO suggest_test (name) VALUES ('Alice'), ('Alicia'), ('Bob'), ('Charlie')",
+    )
+    .execute(&my_pool)
+    .await
+    .unwrap();
 
-    let suggestions = suggest_distinct_values(&pool, "SELECT * FROM suggest_test", "name", "Al", 10)
-        .await
-        .unwrap();
+    let suggestions =
+        suggest_distinct_values(&pool, "SELECT * FROM suggest_test", "name", "Al", 10)
+            .await
+            .unwrap();
 
     assert_eq!(suggestions.len(), 2);
     assert!(suggestions.contains(&"Alice".to_string()));
@@ -309,7 +343,9 @@ async fn test_mysql_empty_result() {
         .await
         .unwrap();
 
-    let result = execute_page(&pool, "SELECT * FROM empty_table", 0).await.unwrap();
+    let result = execute_page(&pool, "SELECT * FROM empty_table", 0)
+        .await
+        .unwrap();
     assert_eq!(result.rows.len(), 0);
     assert!(!result.has_next_page);
     assert!(result.columns.is_empty());
@@ -425,9 +461,18 @@ async fn test_mysql_json_nested() {
     let data_idx = cols.iter().position(|c| c == "data").unwrap();
     // MySQL may format JSON with spaces; check the structure is preserved
     let json_val = &result.rows[0][data_idx];
-    assert!(json_val.contains("\"a\""), "JSON should contain key 'a': {json_val}");
-    assert!(json_val.contains("\"b\""), "JSON should contain key 'b': {json_val}");
-    assert!(json_val.contains("\"c\""), "JSON should contain key 'c': {json_val}");
+    assert!(
+        json_val.contains("\"a\""),
+        "JSON should contain key 'a': {json_val}"
+    );
+    assert!(
+        json_val.contains("\"b\""),
+        "JSON should contain key 'b': {json_val}"
+    );
+    assert!(
+        json_val.contains("\"c\""),
+        "JSON should contain key 'c': {json_val}"
+    );
 }
 
 #[tokio::test]

@@ -496,7 +496,10 @@ mod tests {
         assert_eq!(b, DbBackend::Postgres, "cycle must wrap around");
         assert_eq!(seen.len(), DbBackend::ALL.len());
         for backend in DbBackend::ALL {
-            assert!(seen.contains(&backend), "{backend:?} unreachable by cycling");
+            assert!(
+                seen.contains(&backend),
+                "{backend:?} unreachable by cycling"
+            );
         }
     }
 

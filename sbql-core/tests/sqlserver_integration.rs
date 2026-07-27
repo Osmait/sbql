@@ -23,11 +23,7 @@ async fn make_pool(
     config.trust_cert();
 
     let mgr = bb8_tiberius::ConnectionManager::new(config);
-    bb8::Pool::builder()
-        .max_size(5)
-        .build(mgr)
-        .await
-        .unwrap()
+    bb8::Pool::builder().max_size(5).build(mgr).await.unwrap()
 }
 
 /// All SQL Server tests run against a single container to avoid memory pressure.
@@ -197,9 +193,17 @@ async fn test_sqlserver_integration() {
 
     // --- 6. cell update ---
     {
-        execute_cell_update(&pool, "dbo", "users", "id", "1", "username", "alice_updated")
-            .await
-            .expect("Failed to update cell");
+        execute_cell_update(
+            &pool,
+            "dbo",
+            "users",
+            "id",
+            "1",
+            "username",
+            "alice_updated",
+        )
+        .await
+        .expect("Failed to update cell");
 
         let mut conn = raw.get().await.unwrap();
         let stream = conn
@@ -326,11 +330,7 @@ async fn test_sqlserver_integration() {
             .expect("Failed to execute unicode_test query");
         assert_eq!(result.rows.len(), 1);
 
-        let label_idx = result
-            .columns
-            .iter()
-            .position(|c| c == "label")
-            .unwrap();
+        let label_idx = result.columns.iter().position(|c| c == "label").unwrap();
         assert_eq!(
             result.rows[0][label_idx], emoji_cjk,
             "Unicode roundtrip failed"
@@ -406,11 +406,7 @@ async fn test_sqlserver_integration() {
             .expect("Failed to execute large_text_test query");
         assert_eq!(result.rows.len(), 1);
 
-        let content_idx = result
-            .columns
-            .iter()
-            .position(|c| c == "content")
-            .unwrap();
+        let content_idx = result.columns.iter().position(|c| c == "content").unwrap();
         assert_eq!(
             result.rows[0][content_idx].len(),
             10 * 1024,

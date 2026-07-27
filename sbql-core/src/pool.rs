@@ -39,18 +39,9 @@ impl std::fmt::Debug for DbPool {
                 .debug_tuple("Redis")
                 .field(&"ConnectionManager(..)")
                 .finish(),
-            DbPool::DynamoDb(_) => f
-                .debug_tuple("DynamoDb")
-                .field(&"Client(..)")
-                .finish(),
-            DbPool::MongoDb(_) => f
-                .debug_tuple("MongoDb")
-                .field(&"Database(..)")
-                .finish(),
-            DbPool::SqlServer(_) => f
-                .debug_tuple("SqlServer")
-                .field(&"bb8::Pool(..)")
-                .finish(),
+            DbPool::DynamoDb(_) => f.debug_tuple("DynamoDb").field(&"Client(..)").finish(),
+            DbPool::MongoDb(_) => f.debug_tuple("MongoDb").field(&"Database(..)").finish(),
+            DbPool::SqlServer(_) => f.debug_tuple("SqlServer").field(&"bb8::Pool(..)").finish(),
         }
     }
 }

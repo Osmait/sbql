@@ -66,9 +66,9 @@ pub async fn export_all(
         DbPool::Postgres(pg) => export_all_pg(pg, sql, path, format, table_name).await,
         DbPool::Sqlite(sq) => export_all_sqlite(sq, sql, path, format, table_name).await,
         DbPool::Mysql(my) => export_all_mysql(my, sql, path, format, table_name).await,
-        DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_) | DbPool::SqlServer(_) => {
-            Err(SbqlError::Schema("Export not supported for this backend".into()))
-        }
+        DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_) | DbPool::SqlServer(_) => Err(
+            SbqlError::Schema("Export not supported for this backend".into()),
+        ),
     }
 }
 
@@ -88,14 +88,17 @@ pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<Query
 
     // Fetch total count on page 0 for SQL backends.
     // Timeout after COUNT_TIMEOUT to prevent hanging on huge tables.
-    if page == 0 && !matches!(pool, DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_)) {
-        result.total_count = match tokio::time::timeout(
-            COUNT_TIMEOUT,
-            fetch_total_count(pool, sql),
-        ).await {
-            Ok(Ok(count)) => Some(count),
-            _ => None, // Timeout or error — skip count
-        };
+    if page == 0
+        && !matches!(
+            pool,
+            DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_)
+        )
+    {
+        result.total_count =
+            match tokio::time::timeout(COUNT_TIMEOUT, fetch_total_count(pool, sql)).await {
+                Ok(Ok(count)) => Some(count),
+                _ => None, // Timeout or error — skip count
+            };
     }
 
     Ok(result)
@@ -113,15 +116,13 @@ async fn fetch_total_count(pool: &DbPool, sql: &str) -> Result<u64> {
     let count_sql = format!("SELECT COUNT(*) AS cnt FROM ({trimmed}) AS _sbql_count");
 
     let count: i64 = match pool {
-        DbPool::Postgres(pg) => {
-            sqlx::query_scalar(&count_sql).fetch_one(pg).await?
-        }
+        DbPool::Postgres(pg) => sqlx::query_scalar(&count_sql).fetch_one(pg).await?,
         DbPool::Sqlite(sq) => {
-            sqlx::query_scalar::<_, i64>(&count_sql).fetch_one(sq).await?
+            sqlx::query_scalar::<_, i64>(&count_sql)
+                .fetch_one(sq)
+                .await?
         }
-        DbPool::Mysql(my) => {
-            sqlx::query_scalar(&count_sql).fetch_one(my).await?
-        }
+        DbPool::Mysql(my) => sqlx::query_scalar(&count_sql).fetch_one(my).await?,
         DbPool::SqlServer(pool) => {
             let mut conn = pool
                 .get()
@@ -189,7 +190,12 @@ async fn execute_page_pg(pool: &PgPool, sql: &str, page: usize) -> Result<QueryR
     // Precompute type names once — avoids calling type_info().name() per cell per row.
     let type_names: Vec<String> = rows_to_show
         .first()
-        .map(|r| r.columns().iter().map(|c| c.type_info().name().to_owned()).collect())
+        .map(|r| {
+            r.columns()
+                .iter()
+                .map(|c| c.type_info().name().to_owned())
+                .collect()
+        })
         .unwrap_or_default();
 
     let result_rows: Vec<Vec<String>> = rows_to_show
@@ -331,7 +337,12 @@ async fn execute_page_mysql(pool: &MySqlPool, sql: &str, page: usize) -> Result<
     // Precompute type names once — avoids calling type_info().name() per cell per row.
     let type_names: Vec<String> = rows_to_show
         .first()
-        .map(|r| r.columns().iter().map(|c| c.type_info().name().to_owned()).collect())
+        .map(|r| {
+            r.columns()
+                .iter()
+                .map(|c| c.type_info().name().to_owned())
+                .collect()
+        })
         .unwrap_or_default();
 
     let result_rows: Vec<Vec<String>> = rows_to_show
@@ -434,7 +445,10 @@ fn mysql_value_to_string(row: &MySqlRow, idx: usize, type_name: &str) -> String 
     if type_eq(type_name, "SMALLINT UNSIGNED") {
         try_get!(u16);
     }
-    if type_is_any(type_name, &["INT UNSIGNED", "INTEGER UNSIGNED", "MEDIUMINT UNSIGNED"]) {
+    if type_is_any(
+        type_name,
+        &["INT UNSIGNED", "INTEGER UNSIGNED", "MEDIUMINT UNSIGNED"],
+    ) {
         try_get!(u32);
     }
     if type_eq(type_name, "BIGINT UNSIGNED") {
@@ -460,7 +474,19 @@ fn mysql_value_to_string(row: &MySqlRow, idx: usize, type_name: &str) -> String 
     }
 
     // --- Text-like ---
-    if type_is_any(type_name, &["VARCHAR", "TEXT", "CHAR", "TINYTEXT", "MEDIUMTEXT", "LONGTEXT", "ENUM", "SET"]) {
+    if type_is_any(
+        type_name,
+        &[
+            "VARCHAR",
+            "TEXT",
+            "CHAR",
+            "TINYTEXT",
+            "MEDIUMTEXT",
+            "LONGTEXT",
+            "ENUM",
+            "SET",
+        ],
+    ) {
         try_get!(String);
     }
 
@@ -517,7 +543,17 @@ fn mysql_value_to_string(row: &MySqlRow, idx: usize, type_name: &str) -> String 
     }
 
     // --- Binary types ---
-    if type_is_any(type_name, &["BLOB", "BINARY", "VARBINARY", "TINYBLOB", "MEDIUMBLOB", "LONGBLOB"]) {
+    if type_is_any(
+        type_name,
+        &[
+            "BLOB",
+            "BINARY",
+            "VARBINARY",
+            "TINYBLOB",
+            "MEDIUMBLOB",
+            "LONGBLOB",
+        ],
+    ) {
         if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(idx) {
             return match v {
                 Some(b) => format!("\\x{}", hex_encode(&b)),
@@ -540,7 +576,6 @@ fn mysql_value_to_string(row: &MySqlRow, idx: usize, type_name: &str) -> String 
 
     format!("<{}>", type_name)
 }
-
 
 // ---------------------------------------------------------------------------
 // SQL Server implementation
@@ -653,11 +688,7 @@ fn sqlserver_value_to_string(row: &tiberius::Row, col: &tiberius::Column) -> Str
         return val.to_string();
     }
     // NaiveDate (date)
-    if let Some(val) = row
-        .try_get::<chrono::NaiveDate, _>(col_name)
-        .ok()
-        .flatten()
-    {
+    if let Some(val) = row.try_get::<chrono::NaiveDate, _>(col_name).ok().flatten() {
         return val.to_string();
     }
     // NaiveDateTime (datetime, datetime2, smalldatetime)
@@ -669,11 +700,7 @@ fn sqlserver_value_to_string(row: &tiberius::Row, col: &tiberius::Column) -> Str
         return val.to_string();
     }
     // UUID (uniqueidentifier)
-    if let Some(val) = row
-        .try_get::<uuid::Uuid, _>(col_name)
-        .ok()
-        .flatten()
-    {
+    if let Some(val) = row.try_get::<uuid::Uuid, _>(col_name).ok().flatten() {
         return val.to_string();
     }
     // u8 (tinyint)
@@ -945,11 +972,7 @@ async fn execute_page_dynamodb(
         .map(|item| {
             columns
                 .iter()
-                .map(|col| {
-                    item.get(col)
-                        .map(dynamo_attr_to_string)
-                        .unwrap_or_default()
-                })
+                .map(|col| item.get(col).map(dynamo_attr_to_string).unwrap_or_default())
                 .collect()
         })
         .collect();
@@ -992,10 +1015,7 @@ fn dynamo_attr_to_string(attr: &aws_sdk_dynamodb::types::AttributeValue) -> Stri
 // MongoDB implementation
 // ---------------------------------------------------------------------------
 
-async fn execute_page_mongodb(
-    db: &mongodb::Database,
-    input: &str,
-) -> Result<QueryResult> {
+async fn execute_page_mongodb(db: &mongodb::Database, input: &str) -> Result<QueryResult> {
     use mongodb::bson::Document;
 
     let trimmed = input.trim();
@@ -1085,9 +1105,7 @@ fn bson_to_string(val: &mongodb::bson::Bson) -> String {
             let items: Vec<String> = arr.iter().map(bson_to_string).collect();
             format!("[{}]", items.join(", "))
         }
-        Bson::Document(doc) => {
-            serde_json::to_string(doc).unwrap_or_else(|_| format!("{:?}", doc))
-        }
+        Bson::Document(doc) => serde_json::to_string(doc).unwrap_or_else(|_| format!("{:?}", doc)),
         Bson::Binary(b) => format!("\\x{}", hex_encode(b.bytes.as_slice())),
         Bson::Decimal128(d) => d.to_string(),
         _ => format!("{}", val),
@@ -1491,7 +1509,14 @@ async fn export_all_pg(
             columns = Some(cols);
         }
         let values = pg_row_to_strings(&row);
-        write_row(&mut writer, columns.as_ref().unwrap(), &values, format, table_name, count)?;
+        write_row(
+            &mut writer,
+            columns.as_ref().unwrap(),
+            &values,
+            format,
+            table_name,
+            count,
+        )?;
         count += 1;
     }
     write_footer(&mut writer, format)?;
@@ -1520,7 +1545,14 @@ async fn export_all_sqlite(
             columns = Some(cols);
         }
         let values = sqlite_row_to_strings(&row);
-        write_row(&mut writer, columns.as_ref().unwrap(), &values, format, table_name, count)?;
+        write_row(
+            &mut writer,
+            columns.as_ref().unwrap(),
+            &values,
+            format,
+            table_name,
+            count,
+        )?;
         count += 1;
     }
     write_footer(&mut writer, format)?;
@@ -1549,7 +1581,14 @@ async fn export_all_mysql(
             columns = Some(cols);
         }
         let values = mysql_row_to_strings(&row);
-        write_row(&mut writer, columns.as_ref().unwrap(), &values, format, table_name, count)?;
+        write_row(
+            &mut writer,
+            columns.as_ref().unwrap(),
+            &values,
+            format,
+            table_name,
+            count,
+        )?;
         count += 1;
     }
     write_footer(&mut writer, format)?;
@@ -1561,10 +1600,22 @@ async fn export_all_mysql(
 // Export formatting helpers
 // ---------------------------------------------------------------------------
 
-fn write_header(w: &mut impl Write, cols: &[String], fmt: ExportFormat, _table: &str) -> std::io::Result<()> {
+fn write_header(
+    w: &mut impl Write,
+    cols: &[String],
+    fmt: ExportFormat,
+    _table: &str,
+) -> std::io::Result<()> {
     match fmt {
         ExportFormat::Csv => {
-            writeln!(w, "{}", cols.iter().map(|c| escape_csv_value(c)).collect::<Vec<_>>().join(","))
+            writeln!(
+                w,
+                "{}",
+                cols.iter()
+                    .map(|c| escape_csv_value(c))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
         }
         ExportFormat::Json => {
             write!(w, "[\n")
@@ -1583,13 +1634,25 @@ fn write_row(
 ) -> std::io::Result<()> {
     match fmt {
         ExportFormat::Csv => {
-            writeln!(w, "{}", values.iter().map(|v| escape_csv_value(v)).collect::<Vec<_>>().join(","))
+            writeln!(
+                w,
+                "{}",
+                values
+                    .iter()
+                    .map(|v| escape_csv_value(v))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
         }
         ExportFormat::Json => {
-            if row_idx > 0 { write!(w, ",\n")?; }
+            if row_idx > 0 {
+                write!(w, ",\n")?;
+            }
             write!(w, "  {{")?;
             for (i, (col, val)) in cols.iter().zip(values.iter()).enumerate() {
-                if i > 0 { write!(w, ", ")?; }
+                if i > 0 {
+                    write!(w, ", ")?;
+                }
                 let escaped_col = col.replace('\\', "\\\\").replace('"', "\\\"");
                 let escaped_val = val.replace('\\', "\\\\").replace('"', "\\\"");
                 write!(w, "\"{}\": \"{}\"", escaped_col, escaped_val)?;
@@ -1597,9 +1660,23 @@ fn write_row(
             write!(w, "}}")
         }
         ExportFormat::SqlInsert => {
-            let col_list = cols.iter().map(|c| quote_ident(c)).collect::<Vec<_>>().join(", ");
-            let val_list = values.iter().map(|v| escape_sql_export_value(v)).collect::<Vec<_>>().join(", ");
-            writeln!(w, "INSERT INTO {} ({}) VALUES ({});", quote_ident(table), col_list, val_list)
+            let col_list = cols
+                .iter()
+                .map(|c| quote_ident(c))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let val_list = values
+                .iter()
+                .map(|v| escape_sql_export_value(v))
+                .collect::<Vec<_>>()
+                .join(", ");
+            writeln!(
+                w,
+                "INSERT INTO {} ({}) VALUES ({});",
+                quote_ident(table),
+                col_list,
+                val_list
+            )
         }
     }
 }
@@ -1620,9 +1697,15 @@ fn escape_csv_value(s: &str) -> String {
 }
 
 fn escape_sql_export_value(s: &str) -> String {
-    if s.is_empty() { return "NULL".to_owned(); }
-    if s.parse::<f64>().is_ok() { return s.to_owned(); }
-    if s == "true" || s == "false" { return s.to_uppercase(); }
+    if s.is_empty() {
+        return "NULL".to_owned();
+    }
+    if s.parse::<f64>().is_ok() {
+        return s.to_owned();
+    }
+    if s == "true" || s == "false" {
+        return s.to_uppercase();
+    }
     format!("'{}'", s.replace('\'', "''"))
 }
 

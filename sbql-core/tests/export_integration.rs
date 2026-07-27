@@ -41,9 +41,15 @@ async fn test_export_csv() {
 
     let file = NamedTempFile::new().unwrap();
     let path = file.path().to_str().unwrap();
-    let count = export_all(&pool, "SELECT * FROM users", path, ExportFormat::Csv, "users")
-        .await
-        .unwrap();
+    let count = export_all(
+        &pool,
+        "SELECT * FROM users",
+        path,
+        ExportFormat::Csv,
+        "users",
+    )
+    .await
+    .unwrap();
 
     assert_eq!(count, 5);
 
@@ -51,16 +57,32 @@ async fn test_export_csv() {
     let lines: Vec<&str> = content.lines().collect();
 
     // Header + 5 data rows
-    assert_eq!(lines.len(), 6, "Expected 6 lines (header + 5 rows), got: {}", lines.len());
+    assert_eq!(
+        lines.len(),
+        6,
+        "Expected 6 lines (header + 5 rows), got: {}",
+        lines.len()
+    );
 
     // Verify header contains column names
     assert!(lines[0].contains("id"), "Header missing 'id': {}", lines[0]);
-    assert!(lines[0].contains("name"), "Header missing 'name': {}", lines[0]);
-    assert!(lines[0].contains("email"), "Header missing 'email': {}", lines[0]);
+    assert!(
+        lines[0].contains("name"),
+        "Header missing 'name': {}",
+        lines[0]
+    );
+    assert!(
+        lines[0].contains("email"),
+        "Header missing 'email': {}",
+        lines[0]
+    );
 
     // Verify data rows contain expected values
     assert!(content.contains("Alice"), "Missing Alice in CSV output");
-    assert!(content.contains("alice@example.com"), "Missing alice email in CSV output");
+    assert!(
+        content.contains("alice@example.com"),
+        "Missing alice email in CSV output"
+    );
     assert!(content.contains("Eve"), "Missing Eve in CSV output");
 }
 
@@ -70,15 +92,21 @@ async fn test_export_json() {
 
     let file = NamedTempFile::new().unwrap();
     let path = file.path().to_str().unwrap();
-    let count = export_all(&pool, "SELECT * FROM users", path, ExportFormat::Json, "users")
-        .await
-        .unwrap();
+    let count = export_all(
+        &pool,
+        "SELECT * FROM users",
+        path,
+        ExportFormat::Json,
+        "users",
+    )
+    .await
+    .unwrap();
 
     assert_eq!(count, 5);
 
     let content = fs::read_to_string(path).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&content)
-        .expect("Exported JSON should be valid");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&content).expect("Exported JSON should be valid");
 
     let arr = parsed.as_array().expect("JSON should be an array");
     assert_eq!(arr.len(), 5, "Expected 5 JSON objects");
@@ -87,8 +115,14 @@ async fn test_export_json() {
     for obj in arr {
         let map = obj.as_object().expect("Each entry should be an object");
         assert!(map.contains_key("id"), "Missing 'id' key in JSON object");
-        assert!(map.contains_key("name"), "Missing 'name' key in JSON object");
-        assert!(map.contains_key("email"), "Missing 'email' key in JSON object");
+        assert!(
+            map.contains_key("name"),
+            "Missing 'name' key in JSON object"
+        );
+        assert!(
+            map.contains_key("email"),
+            "Missing 'email' key in JSON object"
+        );
     }
 
     // Verify specific values
@@ -337,15 +371,9 @@ async fn test_export_large_dataset() {
     let pool = DbPool::Sqlite(sq);
     let file = NamedTempFile::new().unwrap();
     let path = file.path().to_str().unwrap();
-    let count = export_all(
-        &pool,
-        "SELECT * FROM big",
-        path,
-        ExportFormat::Csv,
-        "big",
-    )
-    .await
-    .unwrap();
+    let count = export_all(&pool, "SELECT * FROM big", path, ExportFormat::Csv, "big")
+        .await
+        .unwrap();
 
     assert_eq!(count, 500);
 

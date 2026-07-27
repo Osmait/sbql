@@ -32,13 +32,9 @@ async fn setup_redis() -> (DbPool, testcontainers::ContainerAsync<Redis>) {
             .unwrap();
     }
     for i in 0..20 {
-        execute_page(
-            &pool,
-            &format!("HSET user:1000 field_{i} value_{i}"),
-            0,
-        )
-        .await
-        .unwrap();
+        execute_page(&pool, &format!("HSET user:1000 field_{i} value_{i}"), 0)
+            .await
+            .unwrap();
     }
     for i in 0..50 {
         execute_page(&pool, &format!("LPUSH mylist item_{i}"), 0)
@@ -58,15 +54,13 @@ fn bench_redis(c: &mut Criterion) {
     group.sample_size(50);
 
     group.bench_function("get_existing", |b| {
-        b.to_async(&rt).iter(|| async {
-            execute_page(&pool, "GET key:42", 0).await.unwrap()
-        })
+        b.to_async(&rt)
+            .iter(|| async { execute_page(&pool, "GET key:42", 0).await.unwrap() })
     });
 
     group.bench_function("get_missing", |b| {
-        b.to_async(&rt).iter(|| async {
-            execute_page(&pool, "GET nonexistent", 0).await.unwrap()
-        })
+        b.to_async(&rt)
+            .iter(|| async { execute_page(&pool, "GET nonexistent", 0).await.unwrap() })
     });
 
     group.bench_function("set", |b| {
@@ -89,11 +83,8 @@ fn bench_redis(c: &mut Criterion) {
     group.sample_size(50);
 
     group.bench_function("hgetall_20_fields", |b| {
-        b.to_async(&rt).iter(|| async {
-            execute_page(&pool, "HGETALL user:1000", 0)
-                .await
-                .unwrap()
-        })
+        b.to_async(&rt)
+            .iter(|| async { execute_page(&pool, "HGETALL user:1000", 0).await.unwrap() })
     });
 
     group.bench_function("hget_single", |b| {
@@ -106,13 +97,9 @@ fn bench_redis(c: &mut Criterion) {
 
     group.bench_function("hset", |b| {
         b.to_async(&rt).iter(|| async {
-            execute_page(
-                &pool,
-                r#"HSET bench:hash name "John Doe" age 30"#,
-                0,
-            )
-            .await
-            .unwrap()
+            execute_page(&pool, r#"HSET bench:hash name "John Doe" age 30"#, 0)
+                .await
+                .unwrap()
         })
     });
 
@@ -123,25 +110,18 @@ fn bench_redis(c: &mut Criterion) {
     group.sample_size(50);
 
     group.bench_function("lrange_50_items", |b| {
-        b.to_async(&rt).iter(|| async {
-            execute_page(&pool, "LRANGE mylist 0 -1", 0)
-                .await
-                .unwrap()
-        })
+        b.to_async(&rt)
+            .iter(|| async { execute_page(&pool, "LRANGE mylist 0 -1", 0).await.unwrap() })
     });
 
     group.bench_function("lrange_10_items", |b| {
-        b.to_async(&rt).iter(|| async {
-            execute_page(&pool, "LRANGE mylist 0 9", 0)
-                .await
-                .unwrap()
-        })
+        b.to_async(&rt)
+            .iter(|| async { execute_page(&pool, "LRANGE mylist 0 9", 0).await.unwrap() })
     });
 
     group.bench_function("llen", |b| {
-        b.to_async(&rt).iter(|| async {
-            execute_page(&pool, "LLEN mylist", 0).await.unwrap()
-        })
+        b.to_async(&rt)
+            .iter(|| async { execute_page(&pool, "LLEN mylist", 0).await.unwrap() })
     });
 
     group.finish();

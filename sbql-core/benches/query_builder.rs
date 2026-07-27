@@ -132,9 +132,7 @@ fn bench_build_paginated_sql(c: &mut Criterion) {
     });
 
     group.bench_function("already_limited", |b| {
-        b.iter(|| {
-            build_paginated_sql(black_box("SELECT * FROM users LIMIT 50"), black_box(0))
-        })
+        b.iter(|| build_paginated_sql(black_box("SELECT * FROM users LIMIT 50"), black_box(0)))
     });
 
     group.finish();

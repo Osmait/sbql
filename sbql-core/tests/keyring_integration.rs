@@ -16,20 +16,27 @@
 
 use sbql_core::ConnectionConfig;
 
+/// Fixture values, deliberately spelled so no human or scanner mistakes them
+/// for a credential. Secret scanners flag password-shaped literals, and a test
+/// that round-trips a keyring is exactly where such a literal looks real.
+const FIXTURE_PASSWORD: &str = "fixture-value-not-a-credential";
+const FIXTURE_SSH_PASSWORD: &str = "fixture-ssh-value-not-a-credential";
+
 /// A saved password must survive a fresh `Entry` lookup, which is what the
 /// mock store cannot do.
 #[test]
 #[ignore = "requires a real OS credential store"]
 fn password_roundtrips_through_the_os_store() {
-    let cfg = ConnectionConfig::new_postgres("keyring-roundtrip", "localhost", 5432, "tester", "db");
+    let cfg =
+        ConnectionConfig::new_postgres("keyring-roundtrip", "localhost", 5432, "tester", "db");
 
-    cfg.save_password("s3cr3t-p4ssw0rd")
+    cfg.save_password(FIXTURE_PASSWORD)
         .expect("saving to the OS credential store failed");
 
     let loaded = cfg
         .load_password()
         .expect("reading back from the OS credential store failed");
-    assert_eq!(loaded, "s3cr3t-p4ssw0rd");
+    assert_eq!(loaded, FIXTURE_PASSWORD);
 
     cfg.delete_password()
         .expect("deleting from the OS credential store failed");
@@ -48,10 +55,10 @@ fn ssh_password_roundtrips_through_the_os_store() {
         ConnectionConfig::new_postgres("keyring-ssh-roundtrip", "localhost", 5432, "tester", "db");
     cfg.ssh_enabled = true;
 
-    cfg.save_ssh_password("tunnel-p4ss")
+    cfg.save_ssh_password(FIXTURE_SSH_PASSWORD)
         .expect("saving the SSH password failed");
 
-    assert_eq!(cfg.load_ssh_password(), "tunnel-p4ss");
+    assert_eq!(cfg.load_ssh_password(), FIXTURE_SSH_PASSWORD);
 }
 
 /// With the keyring switched off, saving a password is a silent no-op rather
@@ -65,7 +72,8 @@ fn opting_out_makes_the_keyring_a_no_op() {
     let cfg = ConnectionConfig::new_postgres("keyring-off", "localhost", 5432, "tester", "db");
 
     // No error, and nothing written anywhere.
-    cfg.save_password("s3cr3t").expect("save should be a no-op");
+    cfg.save_password(FIXTURE_PASSWORD)
+        .expect("save should be a no-op");
 
     match cfg.load_password() {
         Err(sbql_core::SbqlError::PasswordNotFound(name)) => assert_eq!(name, "keyring-off"),

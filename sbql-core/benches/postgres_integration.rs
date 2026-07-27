@@ -110,11 +110,8 @@ fn bench_postgres(c: &mut Criterion) {
         group.sample_size(50);
 
         group.bench_function("simple_select", |b| {
-            b.to_async(&rt).iter(|| async {
-                execute_page(&pool, "SELECT * FROM users", 0)
-                    .await
-                    .unwrap()
-            })
+            b.to_async(&rt)
+                .iter(|| async { execute_page(&pool, "SELECT * FROM users", 0).await.unwrap() })
         });
 
         group.bench_function("with_types", |b| {
@@ -151,11 +148,8 @@ fn bench_postgres(c: &mut Criterion) {
         });
 
         group.bench_function("page_1", |b| {
-            b.to_async(&rt).iter(|| async {
-                execute_page(&pool, "SELECT * FROM users", 1)
-                    .await
-                    .unwrap()
-            })
+            b.to_async(&rt)
+                .iter(|| async { execute_page(&pool, "SELECT * FROM users", 1).await.unwrap() })
         });
 
         group.finish();

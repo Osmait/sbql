@@ -493,10 +493,7 @@ impl ConnectionConfig {
                         self.database,
                     )
                 } else {
-                    format!(
-                        "mongodb://{}:{}/{}",
-                        self.host, self.port, self.database,
-                    )
+                    format!("mongodb://{}:{}/{}", self.host, self.port, self.database,)
                 }
             }
             DbBackend::SqlServer => {
@@ -660,7 +657,8 @@ mod tests {
 
     #[test]
     fn test_connection_config_new() {
-        let conn = ConnectionConfig::new_postgres("local", "localhost", 5432, "postgres", "postgres");
+        let conn =
+            ConnectionConfig::new_postgres("local", "localhost", 5432, "postgres", "postgres");
         assert_eq!(conn.name, "local");
         assert_eq!(conn.host, "localhost");
         assert_eq!(conn.port, 5432);

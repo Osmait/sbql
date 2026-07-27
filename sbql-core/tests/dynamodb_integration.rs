@@ -112,7 +112,11 @@ async fn setup_dynamodb() -> (
 
     // Seed users
     use aws_sdk_dynamodb::types::AttributeValue;
-    for (id, name, age) in [("u1", "Alice", "30"), ("u2", "Bob", "25"), ("u3", "Charlie", "35")] {
+    for (id, name, age) in [
+        ("u1", "Alice", "30"),
+        ("u2", "Bob", "25"),
+        ("u3", "Charlie", "35"),
+    ] {
         client
             .put_item()
             .table_name("users")
@@ -228,7 +232,11 @@ async fn test_dynamodb_empty_table() {
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_dynamodb::config::Credentials::new(
-            "fakekey", "fakesecret", None, None, "test",
+            "fakekey",
+            "fakesecret",
+            None,
+            None,
+            "test",
         ))
         .load()
         .await;
@@ -293,7 +301,10 @@ async fn test_dynamodb_attribute_types() {
         .item("name", AttributeValue::S("TypeTest".into()))
         .item("age", AttributeValue::N("99".into()))
         .item("active", AttributeValue::Bool(true))
-        .item("tags", AttributeValue::Ss(vec!["rust".into(), "aws".into()]))
+        .item(
+            "tags",
+            AttributeValue::Ss(vec!["rust".into(), "aws".into()]),
+        )
         .item(
             "scores",
             AttributeValue::L(vec![
@@ -392,10 +403,9 @@ async fn test_dynamodb_nested_map() {
         [("c".to_string(), AttributeValue::M(inner_most))]
             .into_iter()
             .collect();
-    let level_b: HashMap<String, AttributeValue> =
-        [("b".to_string(), AttributeValue::M(level_c))]
-            .into_iter()
-            .collect();
+    let level_b: HashMap<String, AttributeValue> = [("b".to_string(), AttributeValue::M(level_c))]
+        .into_iter()
+        .collect();
 
     client
         .put_item()
@@ -406,13 +416,9 @@ async fn test_dynamodb_nested_map() {
         .await
         .unwrap();
 
-    let result = execute_page(
-        &pool,
-        "SELECT * FROM users WHERE user_id = 'u_nested'",
-        0,
-    )
-    .await
-    .unwrap();
+    let result = execute_page(&pool, "SELECT * FROM users WHERE user_id = 'u_nested'", 0)
+        .await
+        .unwrap();
 
     assert_eq!(result.rows.len(), 1);
     let cols = &result.columns;
@@ -478,7 +484,11 @@ async fn test_dynamodb_multiple_tables() {
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(aws_config::Region::new("us-east-1"))
         .credentials_provider(aws_sdk_dynamodb::config::Credentials::new(
-            "fakekey", "fakesecret", None, None, "test",
+            "fakekey",
+            "fakesecret",
+            None,
+            None,
+            "test",
         ))
         .load()
         .await;
@@ -548,13 +558,9 @@ async fn test_dynamodb_null_attribute() {
         .await
         .unwrap();
 
-    let result = execute_page(
-        &pool,
-        "SELECT * FROM users WHERE user_id = 'u_null'",
-        0,
-    )
-    .await
-    .unwrap();
+    let result = execute_page(&pool, "SELECT * FROM users WHERE user_id = 'u_null'", 0)
+        .await
+        .unwrap();
 
     assert_eq!(result.rows.len(), 1);
     let cols = &result.columns;

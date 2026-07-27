@@ -579,8 +579,15 @@ async fn test_pg_null_in_all_types() {
 
     // All nullable columns should come back as empty string
     for col_name in &[
-        "int_val", "text_val", "bool_val", "real_val", "ts_val", "json_val", "arr_val",
-        "uuid_val", "bytes_val",
+        "int_val",
+        "text_val",
+        "bool_val",
+        "real_val",
+        "ts_val",
+        "json_val",
+        "arr_val",
+        "uuid_val",
+        "bytes_val",
     ] {
         let idx = cols.iter().position(|c| c == col_name).unwrap();
         assert_eq!(row[idx], "", "Expected empty string for NULL {col_name}");
@@ -723,7 +730,10 @@ async fn test_pg_view_in_list_tables() {
     let tables = list_tables(&pool).await.expect("list_tables failed");
     let names: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
     assert!(names.contains(&"base_table"), "Expected 'base_table'");
-    assert!(names.contains(&"my_view"), "Expected 'my_view' in list_tables, got: {names:?}");
+    assert!(
+        names.contains(&"my_view"),
+        "Expected 'my_view' in list_tables, got: {names:?}"
+    );
 }
 
 #[tokio::test]
