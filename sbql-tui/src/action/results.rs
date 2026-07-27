@@ -85,7 +85,7 @@ pub(super) fn apply(
                 || !state.mutation.pending_deletes.is_empty()
             {
                 state.mutation.discard_pending();
-                state.status_msg = Some("Staged changes discarded.".into());
+                state.inform("Staged changes discarded.");
             } else {
                 state.focused = FocusedPanel::Editor;
             }
@@ -115,7 +115,7 @@ pub(super) fn apply_commit_pending(
     cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
 ) {
     if state.mutation.pending_edits.is_empty() && state.mutation.pending_deletes.is_empty() {
-        state.error_msg = Some("Nothing to commit — no staged edits or deletes.".into());
+        state.report("Nothing to commit — no staged edits or deletes.");
         return;
     }
 
@@ -149,7 +149,7 @@ pub(super) fn apply_commit_pending(
     let page = state.results.current_page;
     let _ = cmd_tx.send(CoreCommand::FetchPage { page });
 
-    state.status_msg = Some(format!(
+    state.inform(format!(
         "Committed: {} edit(s), {} delete(s).",
         edit_count, delete_count
     ));

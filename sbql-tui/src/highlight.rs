@@ -33,6 +33,17 @@ const HIGHLIGHT_NAMES: &[&str] = &[
     "constant.builtin",
 ];
 
+/// The source split into lines, all in one colour.
+///
+/// What the editor falls back to whenever highlighting is unavailable: no
+/// grammar, or a parse that failed on this particular text.
+fn unstyled(source: &str, style: Style) -> Vec<Vec<(Style, String)>> {
+    source
+        .lines()
+        .map(|line| vec![(style, line.to_string())])
+        .collect()
+}
+
 /// Map a highlight-name index to a Catppuccin Mocha foreground colour.
 fn style_for_highlight(idx: usize) -> Style {
     let fg = match HIGHLIGHT_NAMES.get(idx) {
@@ -57,21 +68,33 @@ fn style_for_highlight(idx: usize) -> Style {
 
 pub struct SqlHighlighter {
     highlighter: Highlighter,
-    config: HighlightConfiguration,
+    /// `None` if the grammar would not load.
+    ///
+    /// The editor then shows plain, unstyled SQL. That is worse-looking and
+    /// entirely usable, which is more than can be said for the `expect` this
+    /// replaces: it ran during startup, inside the alternate screen, and took
+    /// the whole application down over a colour scheme.
+    config: Option<HighlightConfiguration>,
 }
 
 impl SqlHighlighter {
     pub fn new() -> Self {
-        let mut config = HighlightConfiguration::new(
+        let config = match HighlightConfiguration::new(
             tree_sitter_sequel::LANGUAGE.into(),
             "sql",
             tree_sitter_sequel::HIGHLIGHTS_QUERY,
             "", // no injection query
             "", // no locals query
-        )
-        .expect("failed to create HighlightConfiguration for SQL");
-
-        config.configure(HIGHLIGHT_NAMES);
+        ) {
+            Ok(mut config) => {
+                config.configure(HIGHLIGHT_NAMES);
+                Some(config)
+            }
+            Err(e) => {
+                tracing::error!("SQL highlighting disabled, grammar failed to load: {e}");
+                None
+            }
+        };
 
         Self {
             highlighter: Highlighter::new(),
@@ -91,18 +114,17 @@ impl SqlHighlighter {
 
         let default_style = Style::default().fg(theme::TEXT);
 
+        // No grammar: the editor still shows the SQL, just without colour.
+        let Some(config) = self.config.as_ref() else {
+            return unstyled(source, default_style);
+        };
+
         let events = match self
             .highlighter
-            .highlight(&self.config, source.as_bytes(), None, |_| None)
+            .highlight(config, source.as_bytes(), None, |_| None)
         {
             Ok(iter) => iter,
-            Err(_) => {
-                // Fallback: return unstyled lines.
-                return source
-                    .lines()
-                    .map(|l| vec![(default_style, l.to_string())])
-                    .collect();
-            }
+            Err(_) => return unstyled(source, default_style),
         };
 
         let mut style_stack: Vec<Style> = vec![default_style];
@@ -118,8 +140,10 @@ impl SqlHighlighter {
                         if i > 0 {
                             lines.push(Vec::new());
                         }
-                        if !part.is_empty() {
-                            let line = lines.last_mut().unwrap();
+                        // `lines` is seeded with one entry and only ever grows,
+                        // so this always matches — but a panic in a draw path
+                        // costs the whole frame, and skipping a span does not.
+                        if let (false, Some(line)) = (part.is_empty(), lines.last_mut()) {
                             line.push((style, part.to_string()));
                         }
                     }

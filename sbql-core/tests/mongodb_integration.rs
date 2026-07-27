@@ -1,3 +1,11 @@
+// Integration test: an `unwrap` that fails here *is* the test failing, which is
+// what it is for. `clippy.toml` exempts `#[cfg(test)]` modules from the panic
+// lints in the workspace `Cargo.toml`, but not files under `tests/`.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+// A sample double in the fixture below happens to be 3.14, which clippy reads
+// as a botched `f64::consts::PI`. It is neither — it is test data.
+#![allow(clippy::approx_constant)]
+
 use mongodb::bson::{doc, Document};
 use sbql_core::{
     query::execute_page,
@@ -122,6 +130,7 @@ async fn test_mongodb_attribute_types() {
         "str_val": "hello",
         "int32_val": 42_i32,
         "int64_val": 9_999_999_999_i64,
+        // Not π, just a double. See the crate-level `approx_constant` allow.
         "double_val": 3.14_f64,
         "bool_val": true,
         "oid_val": mongodb::bson::oid::ObjectId::new(),

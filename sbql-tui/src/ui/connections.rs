@@ -193,22 +193,23 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
             Style::default().fg(theme::OVERLAY2)
         };
 
-        // Rows the user cycles rather than types into: the backend picker
-        // (row 0) and any choice field the backend declares, e.g. SSL Mode.
-        let choice = match form.field_at(i) {
-            None => Some(form.draft.backend.label().to_owned()),
-            Some(spec) if !spec.field.is_text() => Some(form.draft.value(spec.field).to_owned()),
-            Some(_) => None,
-        };
-
-        let display = match choice {
-            Some(current) => {
-                let hint = if is_active { "  Space: cycle" } else { "" };
-                format!("{current}{hint}")
-            }
+        // One match on the row rather than two lookups and an `expect` to
+        // reconcile them: the compiler now proves the text-field case has a
+        // spec, instead of a comment claiming it.
+        let display = match form.field_at(i) {
+            // Row 0, the backend picker.
             None => {
-                // Safe: `choice` is None only when `field_at` returned a text field.
-                let spec = form.field_at(i).expect("text row has a field spec");
+                let hint = if is_active { "  Space: cycle" } else { "" };
+                format!("{}{hint}", form.draft.backend.label())
+            }
+            // A choice field the backend declares, e.g. SSL Mode.
+            Some(spec) if !spec.field.is_text() => {
+                let hint = if is_active { "  Space: cycle" } else { "" };
+                format!("{}{hint}", form.draft.value(spec.field))
+            }
+            // A field the user types into. Secrets are starred, and a stored
+            // password left untouched reads as unchanged rather than as empty.
+            Some(spec) => {
                 let value = form.draft.value(spec.field);
                 if spec.field.is_secret() {
                     if value.is_empty() && form.draft.id.is_some() {
@@ -222,18 +223,24 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
             }
         };
 
+        // `chunks` has one entry per field plus two, but a panic here would
+        // take down the whole app mid-frame. Skipping a row is survivable.
+        let Some(&row) = chunks.get(i) else { continue };
+
         let para = Paragraph::new(display).block(
             Block::default()
                 .title(Span::styled(format!(" {label} "), title_style))
                 .borders(Borders::ALL)
                 .border_style(border_style),
         );
-        frame.render_widget(para, chunks[i]);
+        frame.render_widget(para, row);
     }
 
-    let help = Paragraph::new("Tab/↑↓: next field  Space: cycle  Enter: save  Esc: cancel")
-        .style(Style::default().fg(theme::OVERLAY0));
-    frame.render_widget(help, *chunks.last().unwrap());
+    if let Some(&help_area) = chunks.last() {
+        let help = Paragraph::new("Tab/↑↓: next field  Space: cycle  Enter: save  Esc: cancel")
+            .style(Style::default().fg(theme::OVERLAY0));
+        frame.render_widget(help, help_area);
+    }
 
     if let Some(ref err) = form.error {
         let err_area = Rect {

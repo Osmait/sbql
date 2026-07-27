@@ -31,7 +31,7 @@ pub use config::{
 pub use connection_spec::{
     BackendSpec, ConnectionDraft, ConnectionField, FieldSpec, ValidationError,
 };
-pub use error::{Result, SbqlError};
+pub use error::{CoreError, ErrorKind, Result, SbqlError, Severity};
 pub use import::ImportFormat;
 pub use pool::{DbBackend, DbPool};
 pub use query::{ExportFormat, QueryResult, PAGE_SIZE};
@@ -172,8 +172,19 @@ pub enum CoreEvent {
     FilterSuggestions { items: Vec<String>, token: u64 },
     /// A long-running operation has started (show a spinner).
     Loading,
-    /// An error occurred.
-    Error(String),
+    /// Something went wrong — or went through with a caveat, see
+    /// [`CoreError::severity`].
+    Error(CoreError),
+}
+
+impl CoreEvent {
+    /// Report a failure, classifying it and keeping its cause chain.
+    ///
+    /// The single place `SbqlError` becomes client-facing, so no handler has to
+    /// remember to do more than `to_string()`.
+    pub fn error(e: impl Into<CoreError>) -> Self {
+        CoreEvent::Error(e.into())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -206,16 +217,57 @@ pub struct Core {
     pub active_filter: Option<String>,
     /// In-memory password cache so reconnects work even if keyring lookup fails.
     pub(crate) password_cache: HashMap<Uuid, String>,
+    /// Why the saved connections could not be read, if they could not.
+    ///
+    /// Held rather than returned because [`Core::new`] cannot fail — clients
+    /// collect it from [`Core::startup_events`].
+    pub(crate) load_error: Option<CoreError>,
 }
 
 impl Core {
     /// Create a new Core and load connections from disk.
+    ///
+    /// A config file that cannot be parsed is *not* quietly treated as "no
+    /// connections saved". That is what used to happen, and the result is
+    /// indistinguishable from a fresh install: the user is invited to add the
+    /// connections they already have, while the file that still holds them
+    /// sits there unread.
     pub fn new() -> Self {
-        let connections = load_connections().unwrap_or_default();
+        let (connections, load_error) = match load_connections() {
+            Ok(list) => (list, None),
+            Err(e) => {
+                tracing::error!("Could not read saved connections: {e}");
+                (
+                    Vec::new(),
+                    Some(
+                        CoreError::new(
+                            ErrorKind::Config,
+                            "Saved connections could not be read — none are available",
+                        )
+                        .with_detail(e.to_string()),
+                    ),
+                )
+            }
+        };
+
         Self {
             connections,
+            load_error,
             ..Default::default()
         }
+    }
+
+    /// What a client should be told before it sends its first command.
+    ///
+    /// The connection list, plus anything that went wrong producing it. Lives
+    /// here rather than in each frontend so the TUI and the macOS app cannot
+    /// disagree about what startup looks like.
+    pub fn startup_events(&self) -> Vec<CoreEvent> {
+        let mut events = vec![CoreEvent::ConnectionList(self.connections.clone())];
+        if let Some(err) = &self.load_error {
+            events.push(CoreEvent::Error(err.clone()));
+        }
+        events
     }
 
     /// Process a single [`CoreCommand`] and return zero or more [`CoreEvent`]s.
@@ -326,11 +378,16 @@ impl Core {
     pub(crate) async fn execute_current_page(&mut self, page: usize) -> Vec<CoreEvent> {
         let sql = match &self.effective_sql {
             Some(s) => s.clone(),
-            None => return vec![CoreEvent::Error("No active query".into())],
+            None => {
+                return vec![CoreEvent::Error(CoreError::new(
+                    ErrorKind::Query,
+                    "No active query",
+                ))]
+            }
         };
         let pool = match self.active_pool().await {
             Ok(p) => p,
-            Err(e) => return vec![CoreEvent::Error(e.to_string())],
+            Err(e) => return vec![CoreEvent::error(&e)],
         };
         match query::execute_page(&pool, &sql, page).await {
             Ok(result) => {
@@ -340,7 +397,7 @@ impl Core {
                 self.last_page = result.page;
                 vec![CoreEvent::QueryResult(result)]
             }
-            Err(e) => vec![CoreEvent::Error(e.to_string())],
+            Err(e) => vec![CoreEvent::error(&e)],
         }
     }
 }
@@ -359,6 +416,45 @@ mod tests {
         assert!(core.effective_sql.is_none());
     }
 
+    /// Normally there is nothing to report beyond the list itself.
+    #[test]
+    fn startup_says_only_what_there_is_to_say() {
+        let core = Core::default();
+        let events = core.startup_events();
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], CoreEvent::ConnectionList(_)));
+    }
+
+    /// An unreadable config file used to look exactly like an empty one. The
+    /// client has to be able to tell the difference, or it invites the user to
+    /// re-add connections that are still sitting on disk.
+    #[test]
+    fn startup_reports_connections_it_could_not_read() {
+        let core = Core {
+            load_error: Some(
+                CoreError::new(ErrorKind::Config, "Saved connections could not be read")
+                    .with_detail("expected `=` at line 3"),
+            ),
+            ..Default::default()
+        };
+
+        let events = core.startup_events();
+
+        assert!(
+            matches!(&events[0], CoreEvent::ConnectionList(list) if list.is_empty()),
+            "the empty list still comes first: {events:?}"
+        );
+        match &events[1] {
+            CoreEvent::Error(e) => {
+                assert_eq!(e.kind, ErrorKind::Config);
+                assert!(!e.is_warning(), "losing the connection list is a failure");
+                assert_eq!(e.detail.as_deref(), Some("expected `=` at line 3"));
+            }
+            other => panic!("expected the load failure, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn test_core_handle_unknown_connection() {
         let mut core = Core::new();
@@ -371,7 +467,7 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         match &events[0] {
-            CoreEvent::Error(msg) => assert!(msg.contains("not found")),
+            CoreEvent::Error(e) => assert!(e.message.contains("not found")),
             _ => panic!("Expected error event"),
         }
     }
@@ -400,7 +496,7 @@ mod tests {
             .await;
         assert_eq!(events.len(), 1);
         match &events[0] {
-            CoreEvent::Error(msg) => assert!(msg.contains("No active connection")),
+            CoreEvent::Error(e) => assert!(e.message.contains("No active connection")),
             _ => panic!("Expected error event"),
         }
     }
@@ -411,7 +507,7 @@ mod tests {
         let events = core.handle(CoreCommand::ListTables).await;
         assert_eq!(events.len(), 1);
         match &events[0] {
-            CoreEvent::Error(msg) => assert!(msg.contains("No active connection")),
+            CoreEvent::Error(e) => assert!(e.message.contains("No active connection")),
             _ => panic!("Expected error event"),
         }
     }
@@ -452,7 +548,7 @@ mod tests {
             .await;
         assert_eq!(events.len(), 1);
         match &events[0] {
-            CoreEvent::Error(msg) => assert!(msg.contains("No active query")),
+            CoreEvent::Error(e) => assert!(e.message.contains("No active query")),
             _ => panic!("Expected error event"),
         }
     }
@@ -468,7 +564,7 @@ mod tests {
             .await;
         assert_eq!(events.len(), 1);
         match &events[0] {
-            CoreEvent::Error(msg) => assert!(msg.contains("No active query")),
+            CoreEvent::Error(e) => assert!(e.message.contains("No active query")),
             _ => panic!("Expected error event"),
         }
     }
@@ -496,7 +592,7 @@ mod tests {
         let events = core.handle(CoreCommand::FetchPage { page: 0 }).await;
         assert_eq!(events.len(), 1);
         match &events[0] {
-            CoreEvent::Error(msg) => assert!(msg.contains("No active query")),
+            CoreEvent::Error(e) => assert!(e.message.contains("No active query")),
             _ => panic!("Expected error event"),
         }
     }
@@ -516,7 +612,7 @@ mod tests {
             .await;
         assert_eq!(events.len(), 1);
         match &events[0] {
-            CoreEvent::Error(msg) => assert!(msg.contains("No active connection")),
+            CoreEvent::Error(e) => assert!(e.message.contains("No active connection")),
             _ => panic!("Expected Error event"),
         }
     }

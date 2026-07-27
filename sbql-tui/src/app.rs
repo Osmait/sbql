@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::completion::CompletionState;
 use crate::highlight::SqlHighlighter;
 use crate::list_cursor::ListCursor;
+use crate::notice::Notice;
 
 // ---------------------------------------------------------------------------
 // Focus model
@@ -559,6 +560,8 @@ pub struct LayoutCache {
 pub enum Mode {
     /// Full-screen schema diagram. Takes every key.
     Diagram,
+    /// The full text of the current notice, over the workspace.
+    NoticeDetail,
     /// Single-cell edit popup over the results grid.
     CellEdit,
     /// Filter bar under the results grid.
@@ -599,9 +602,13 @@ pub struct AppState {
     // ---- cached diagram data for completions ----
     pub cached_diagram: Option<DiagramData>,
 
-    // ---- status / error ----
-    pub status_msg: Option<String>,
-    pub error_msg: Option<String>,
+    // ---- what to tell the user ----
+    /// The one thing the status bar is saying, if anything.
+    pub notice: Option<Notice>,
+    /// Whether the full text of `notice` is open over the workspace.
+    pub notice_detail_open: bool,
+    /// Ticks since startup. Only used to expire notices; see [`Notice`].
+    pub tick: u64,
 
     // ---- quit ----
     pub should_quit: bool,
@@ -625,6 +632,8 @@ impl AppState {
     pub fn mode(&self) -> Mode {
         if self.diagram.is_some() {
             Mode::Diagram
+        } else if self.notice_detail_open {
+            Mode::NoticeDetail
         } else if self.mutation.cell_edit.is_some() {
             Mode::CellEdit
         } else if self.filter.visible {
@@ -650,6 +659,61 @@ impl AppState {
         self.filter.show_suggestions = false;
         self.conn.form.visible = false;
         self.conn.pending_delete = None;
+        self.notice_detail_open = false;
+    }
+
+    // -----------------------------------------------------------------------
+    // Telling the user things
+    // -----------------------------------------------------------------------
+
+    /// Confirm that something worked. Clears itself after a few seconds.
+    pub fn inform(&mut self, text: impl Into<String>) {
+        self.notice = Some(Notice::info(text, self.tick));
+    }
+
+    /// Report a failure the TUI worked out on its own.
+    pub fn report(&mut self, text: impl Into<String>) {
+        self.notice = Some(Notice::error(text, self.tick));
+    }
+
+    /// Report what the core sent back, keeping its kind, severity and cause.
+    pub fn report_core(&mut self, err: sbql_core::CoreError) {
+        self.notice = Some(Notice::from_core(err, self.tick));
+    }
+
+    /// Take the message down.
+    pub fn dismiss_notice(&mut self) {
+        self.notice = None;
+        self.notice_detail_open = false;
+    }
+
+    /// What the status bar is saying, if anything.
+    #[cfg(test)]
+    pub fn notice_text(&self) -> Option<&str> {
+        self.notice.as_ref().map(|n| n.text.as_str())
+    }
+
+    /// Whether the bar is currently showing a failure (not a warning, not a
+    /// confirmation).
+    #[cfg(test)]
+    pub fn is_failing(&self) -> bool {
+        self.notice
+            .as_ref()
+            .is_some_and(|n| n.level == crate::notice::Level::Error)
+    }
+
+    /// Drop the current notice if it has been up long enough.
+    ///
+    /// Returns whether anything changed, so the caller knows to repaint.
+    pub fn expire_notice(&mut self) -> bool {
+        let expired = self
+            .notice
+            .as_ref()
+            .is_some_and(|n| n.is_expired(self.tick));
+        if expired {
+            self.dismiss_notice();
+        }
+        expired
     }
 
     /// Number of overlays currently open. Should only ever be 0 or 1.
@@ -657,6 +721,7 @@ impl AppState {
     pub fn open_overlay_count(&self) -> usize {
         [
             self.diagram.is_some(),
+            self.notice_detail_open,
             self.mutation.cell_edit.is_some(),
             self.filter.visible,
             self.conn.form.visible,
@@ -735,8 +800,9 @@ impl AppState {
             diagram: None,
             diagram_requested: false,
             cached_diagram: None,
-            status_msg: None,
-            error_msg: None,
+            notice: None,
+            notice_detail_open: false,
+            tick: 0,
             should_quit: false,
         }
     }
@@ -767,8 +833,7 @@ impl AppState {
                     .find(|c| c.id == id)
                     .map(|c| c.name.clone())
                     .unwrap_or_else(|| id.to_string());
-                self.status_msg = Some(format!("Connected to {name}"));
-                self.error_msg = None;
+                self.inform(format!("Connected to {name}"));
             }
             CoreEvent::Disconnected(id) => {
                 self.results.is_loading = false;
@@ -776,7 +841,7 @@ impl AppState {
                     self.conn.active_id = None;
                 }
                 self.tables.tables.clear();
-                self.status_msg = Some("Disconnected".into());
+                self.inform("Disconnected");
             }
             CoreEvent::TableList(tables) => {
                 self.results.is_loading = false;
@@ -809,8 +874,7 @@ impl AppState {
 
                 self.results.data = result;
                 self.results.col_widths_dirty = true;
-                self.error_msg = None;
-                self.status_msg = None;
+                self.dismiss_notice();
             }
             CoreEvent::CellUpdated => {
                 self.results.is_loading = false;
@@ -846,8 +910,7 @@ impl AppState {
                         .unwrap_or_default();
 
                     if pk_col.is_empty() || pk_val.is_empty() {
-                        self.error_msg =
-                            Some("Cannot mark for delete: primary key not found.".into());
+                        self.report("Cannot mark for delete: primary key not found.");
                     } else {
                         // Toggle: if already marked, unmark
                         if let std::collections::hash_map::Entry::Vacant(e) =
@@ -898,8 +961,7 @@ impl AppState {
                         .unwrap_or_default();
 
                     if pk_col.is_empty() || pk_val.is_empty() {
-                        self.error_msg =
-                            Some("Cannot edit: primary key value not found in result set.".into());
+                        self.report("Cannot edit: primary key value not found in result set.");
                         return;
                     }
 
@@ -910,7 +972,9 @@ impl AppState {
             }
             CoreEvent::Loading => {
                 self.results.is_loading = true;
-                self.error_msg = None;
+                // A failure from the previous attempt must not sit next to a
+                // spinner for the next one.
+                self.dismiss_notice();
             }
             CoreEvent::DiagramLoaded(data) => {
                 self.results.is_loading = false;
@@ -940,9 +1004,9 @@ impl AppState {
                     self.filter.loading_suggestions = false;
                 }
             }
-            CoreEvent::Error(msg) => {
+            CoreEvent::Error(err) => {
                 self.results.is_loading = false;
-                self.error_msg = Some(msg);
+                self.report_core(err);
                 self.mutation.pending_cell_edit = None;
                 self.mutation.pending_delete_row = None;
                 self.filter.loading_suggestions = false;
@@ -1063,7 +1127,14 @@ mod tests {
         let id = Uuid::new_v4();
         state.apply_core_event(CoreEvent::Connected(id));
         assert_eq!(state.conn.active_id, Some(id));
-        assert!(state.error_msg.is_none());
+        assert!(
+            state
+                .notice_text()
+                .is_some_and(|t| t.starts_with("Connected")),
+            "{:?}",
+            state.notice_text()
+        );
+        assert!(!state.is_failing());
     }
 
     #[test]
@@ -1191,7 +1262,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.apply_core_event(CoreEvent::Loading);
         assert!(state.results.is_loading);
-        assert!(state.error_msg.is_none());
+        assert!(state.notice.is_none());
     }
 
     #[test]
@@ -1264,7 +1335,7 @@ mod tests {
             columns: vec![], // no pk
         });
         assert!(state.mutation.cell_edit.is_none());
-        assert!(state.error_msg.is_some());
+        assert!(state.is_failing());
     }
 
     #[test]
@@ -1316,13 +1387,57 @@ mod tests {
         assert!(!state.filter.suggestions.contains(&"stale".to_string()));
     }
 
+    /// A core failure reaches the bar with everything the core knew about it,
+    /// not just its text.
     #[test]
     fn core_event_error() {
         let mut state = AppState::new(vec![]);
         state.results.is_loading = true;
-        state.apply_core_event(CoreEvent::Error("something failed".into()));
+        state.apply_core_event(CoreEvent::Error(
+            sbql_core::CoreError::new(sbql_core::ErrorKind::Query, "something failed")
+                .with_detail("near line 1"),
+        ));
+
         assert!(!state.results.is_loading);
-        assert_eq!(state.error_msg, Some("something failed".into()));
+        assert!(state.is_failing());
+        let notice = state.notice.as_ref().expect("a notice");
+        assert_eq!(notice.text, "something failed");
+        assert_eq!(notice.detail.as_deref(), Some("near line 1"));
+        assert_eq!(notice.kind, Some(sbql_core::ErrorKind::Query));
+    }
+
+    /// The severity survives the trip, so a caveat is not painted as a failure.
+    #[test]
+    fn a_core_warning_stays_a_warning() {
+        let mut state = AppState::new(vec![]);
+        state.apply_core_event(CoreEvent::Error(sbql_core::CoreError::warning(
+            sbql_core::ErrorKind::Credentials,
+            "saved, password not stored",
+        )));
+
+        assert!(!state.is_failing(), "a warning is not a failure");
+        assert_eq!(
+            state.notice.as_ref().map(|n| n.level),
+            Some(crate::notice::Level::Warning)
+        );
+    }
+
+    /// The bug two fields made possible: a confirmation arriving after a
+    /// failure and never being seen.
+    #[test]
+    fn a_later_message_replaces_an_earlier_failure() {
+        let mut state = AppState::new(vec![]);
+        state.apply_core_event(CoreEvent::Error(sbql_core::CoreError::new(
+            sbql_core::ErrorKind::Connection,
+            "connection refused",
+        )));
+        assert!(state.is_failing());
+
+        let id = uuid::Uuid::new_v4();
+        state.apply_core_event(CoreEvent::Disconnected(id));
+
+        assert_eq!(state.notice_text(), Some("Disconnected"));
+        assert!(!state.is_failing(), "the old failure should be gone");
     }
 
     // -----------------------------------------------------------------------

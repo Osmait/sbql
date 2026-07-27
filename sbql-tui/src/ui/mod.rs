@@ -4,6 +4,7 @@ pub mod connections;
 pub mod diagram;
 pub mod editor;
 pub mod layout;
+pub mod notice;
 pub mod results;
 pub mod theme;
 
@@ -15,6 +16,7 @@ use ratatui::{
 };
 
 use crate::app::{AppState, EditorMode, LastAreas, NavMode};
+use crate::notice::Level;
 
 /// Root draw function — dispatches to each panel.
 pub fn draw(frame: &mut Frame, state: &mut AppState, cache: &mut cache::RenderCache) {
@@ -92,8 +94,31 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, cache: &mut cache::RenderCa
         results::draw_filter_bar(frame, &mut state.filter, areas.results);
     }
 
+    // Drawn last so it sits over everything else, including the other overlays.
+    if state.notice_detail_open {
+        if let Some(ref n) = state.notice {
+            notice::draw(frame, n, frame.area());
+        }
+    }
+
     // Status bar — always visible at the bottom
     draw_status_bar(frame, state, areas.status_bar);
+}
+
+/// Fit `text` to `width`, and say so when it does not fit.
+///
+/// The bar is one row high with no wrapping, so anything too long used to be
+/// cut off with no sign that there was more — which, for a database client,
+/// is exactly what happens to the interesting half of a SQL error. Now the
+/// truncation is visible and Ctrl+E has the rest.
+fn fit(text: &str, width: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= width {
+        return text.to_owned();
+    }
+    // Room for the ellipsis; a width this small has nothing to show anyway.
+    let keep = width.saturating_sub(1);
+    chars.into_iter().take(keep).chain(['…']).collect()
 }
 
 fn draw_status_bar(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rect) {
@@ -106,20 +131,39 @@ fn draw_status_bar(frame: &mut Frame, state: &AppState, area: ratatui::layout::R
                 .add_modifier(Modifier::BOLD),
         )));
         frame.render_widget(bar, area);
-    } else if let Some(ref err) = state.error_msg {
-        let bar = Paragraph::new(Line::from(Span::styled(
-            format!(" ✗ {err}"),
-            Style::default()
-                .fg(theme::TEXT)
-                .bg(theme::RED)
-                .add_modifier(Modifier::BOLD),
-        )));
-        frame.render_widget(bar, area);
-    } else if let Some(ref msg) = state.status_msg {
-        let bar = Paragraph::new(Line::from(Span::styled(
-            format!(" ✓ {msg}"),
-            Style::default().fg(theme::BASE).bg(theme::GREEN),
-        )));
+    } else if let Some(ref notice) = state.notice {
+        let (marker, style) = match notice.level {
+            Level::Error => (
+                "✗",
+                Style::default()
+                    .fg(theme::TEXT)
+                    .bg(theme::RED)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Level::Warning => (
+                "!",
+                Style::default()
+                    .fg(theme::BASE)
+                    .bg(theme::YELLOW)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Level::Info => ("✓", Style::default().fg(theme::BASE).bg(theme::GREEN)),
+        };
+
+        let more = if notice.has_detail() {
+            "  (Ctrl+E: details)"
+        } else {
+            ""
+        };
+        // The affordance is the part that must survive: a truncated message the
+        // user cannot expand is worse than one they know how to expand.
+        let room = (area.width as usize).saturating_sub(more.chars().count());
+        let text = fit(&format!(" {marker} {}", notice.text), room);
+
+        let bar = Paragraph::new(Line::from(vec![
+            Span::styled(text, style),
+            Span::styled(more, style),
+        ]));
         frame.render_widget(bar, area);
     } else {
         const SPINNER: [&str; 8] = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
@@ -226,6 +270,65 @@ mod tests {
         assert!(
             content.contains("Connected to "),
             "Status bar should show connection success"
+        );
+    }
+
+    // -- fit --
+
+    #[test]
+    fn a_message_that_fits_is_left_alone() {
+        assert_eq!(fit("short", 20), "short");
+        assert_eq!(fit("exactly-ten", 11), "exactly-ten");
+    }
+
+    /// The bar cannot wrap, so the cut has to be visible. Silently dropping the
+    /// end of a database error is how the useful half goes missing.
+    #[test]
+    fn a_message_too_long_is_marked_as_cut() {
+        let cut = fit("syntax error at or near \")\"", 10);
+
+        assert_eq!(cut.chars().count(), 10, "must fit the width exactly");
+        assert!(cut.ends_with('…'), "{cut}");
+        assert!(cut.starts_with("syntax"), "{cut}");
+    }
+
+    #[test]
+    fn fitting_into_almost_no_room_does_not_panic() {
+        for width in 0..3 {
+            let cut = fit("something", width);
+            assert!(cut.chars().count() <= width.max(1));
+        }
+    }
+
+    /// Counted in characters, not bytes: a multi-byte name must not be sliced
+    /// down the middle of a code point.
+    #[test]
+    fn fitting_counts_characters_not_bytes() {
+        let cut = fit("préférences très longues", 8);
+        assert_eq!(cut.chars().count(), 8, "{cut}");
+    }
+
+    /// A failure has to reach the bar, in its own colour, with the way to read
+    /// the rest of it.
+    #[test]
+    fn a_failure_reaches_the_status_bar_with_its_detail_offered() {
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        let mut state = AppState::new(vec![]);
+        let mut cache = cache::RenderCache::new();
+
+        state.apply_core_event(CoreEvent::Error(sbql_core::CoreError::new(
+            sbql_core::ErrorKind::NoActiveConnection,
+            "No active connection",
+        )));
+
+        terminal.draw(|f| draw(f, &mut state, &mut cache)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content().iter().map(|c| c.symbol()).collect();
+
+        assert!(content.contains("No active connection"), "{content}");
+        assert!(
+            content.contains("Ctrl+E"),
+            "the way to read the hint should be offered"
         );
     }
 }

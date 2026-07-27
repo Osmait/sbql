@@ -11,7 +11,7 @@ pub(crate) async fn update_cell(
 ) -> Vec<CoreEvent> {
     let pool = match core.active_pool().await {
         Ok(p) => p,
-        Err(e) => return vec![CoreEvent::Error(e.to_string())],
+        Err(e) => return vec![CoreEvent::error(&e)],
     };
     match schema::execute_cell_update(
         &pool,
@@ -25,7 +25,7 @@ pub(crate) async fn update_cell(
     .await
     {
         Ok(()) => vec![CoreEvent::CellUpdated],
-        Err(e) => vec![CoreEvent::Error(e.to_string())],
+        Err(e) => vec![CoreEvent::error(&e)],
     }
 }
 
@@ -38,11 +38,11 @@ pub(crate) async fn delete_row(
 ) -> Vec<CoreEvent> {
     let pool = match core.active_pool().await {
         Ok(p) => p,
-        Err(e) => return vec![CoreEvent::Error(e.to_string())],
+        Err(e) => return vec![CoreEvent::error(&e)],
     };
     match schema::execute_row_delete(&pool, &schema_name, &table, &pk_col, &pk_val).await {
         Ok(()) => vec![CoreEvent::RowDeleted],
-        Err(e) => vec![CoreEvent::Error(e.to_string())],
+        Err(e) => vec![CoreEvent::error(&e)],
     }
 }
 
@@ -91,7 +91,7 @@ mod tests {
             })
             .await;
         assert!(
-            matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection"))
+            matches!(&events[0], CoreEvent::Error(e) if e.message.contains("No active connection"))
         );
     }
 
@@ -107,7 +107,7 @@ mod tests {
             })
             .await;
         assert!(
-            matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection"))
+            matches!(&events[0], CoreEvent::Error(e) if e.message.contains("No active connection"))
         );
     }
 

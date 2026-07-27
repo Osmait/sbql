@@ -1,3 +1,8 @@
+// Benchmark harness: `unwrap` on setup is how a bench reports it cannot run.
+// `clippy.toml` exempts `#[cfg(test)]` modules from the workspace panic lints,
+// but not benches or examples.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use sbql_core::{ConnectionConfig, Core, CoreCommand, CoreEvent};
 
 #[tokio::main]

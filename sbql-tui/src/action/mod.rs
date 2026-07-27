@@ -47,8 +47,15 @@ pub enum Action {
     Diagram(DiagramAction),
 
     // -- Cross-cutting --
-    SetStatus(Option<String>),
-    SetError(Option<String>),
+    /// Say something in the status bar. The reducer stamps the time, so key
+    /// handlers stay pure and do not need a clock.
+    Inform(String),
+    /// Take whatever the status bar is saying down.
+    DismissNotice,
+    /// Show the full text of the current notice, cause and hint included.
+    ShowNoticeDetail,
+    /// Close that overlay, leaving the notice itself in the bar.
+    CloseNoticeDetail,
     Quit,
     Noop,
 
@@ -204,12 +211,25 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
         Action::Diagram(a) => diagram::apply(a, state, cmd_tx),
 
         // -- Status --
-        Action::SetStatus(msg) => {
-            state.status_msg = msg;
+        Action::Inform(msg) => {
+            state.inform(msg);
         }
 
-        Action::SetError(msg) => {
-            state.error_msg = msg;
+        Action::DismissNotice => {
+            state.dismiss_notice();
+        }
+
+        Action::ShowNoticeDetail => {
+            // Only worth an overlay if there is something the bar could not
+            // fit. Otherwise this is a key press that appears to do nothing.
+            if state.notice.as_ref().is_some_and(|n| n.has_detail()) {
+                state.close_overlays();
+                state.notice_detail_open = true;
+            }
+        }
+
+        Action::CloseNoticeDetail => {
+            state.notice_detail_open = false;
         }
 
         Action::Quit => {
@@ -362,7 +382,7 @@ mod tests {
         let (tx, _rx) = cmd_channel();
         apply(Action::Nav(NavAction::ToggleSidebar), &mut state, &tx);
         assert!(state.layout.sidebar_hidden);
-        assert_eq!(state.status_msg, Some("Sidebar hidden".into()));
+        assert_eq!(state.notice_text(), Some("Sidebar hidden"));
     }
 
     #[test]
@@ -372,7 +392,7 @@ mod tests {
         let (tx, _rx) = cmd_channel();
         apply(Action::Nav(NavAction::ToggleSidebar), &mut state, &tx);
         assert!(!state.layout.sidebar_hidden);
-        assert_eq!(state.status_msg, Some("Sidebar shown".into()));
+        assert_eq!(state.notice_text(), Some("Sidebar shown"));
     }
 
     #[test]
@@ -576,8 +596,8 @@ mod tests {
         apply(Action::CellEdit(CellEditAction::Stage), &mut state, &tx);
         assert!(state.mutation.pending_edits.is_empty());
         assert_eq!(
-            state.status_msg,
-            Some("No changes to stage (value unchanged).".into())
+            state.notice_text(),
+            Some("No changes to stage (value unchanged).")
         );
     }
 
@@ -594,7 +614,7 @@ mod tests {
             &mut state,
             &tx,
         );
-        assert!(state.error_msg.is_some());
+        assert!(state.is_failing());
     }
 
     #[test]
@@ -661,7 +681,7 @@ mod tests {
             &tx,
         );
         assert!(state.mutation.pending_edits.is_empty());
-        assert!(state.status_msg.unwrap().contains("discarded"));
+        assert!(state.notice_text().unwrap().contains("discarded"));
     }
 
     #[test]
@@ -1115,7 +1135,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
         apply(Action::Diagram(DiagramAction::Open), &mut state, &tx);
-        assert!(state.error_msg.is_some());
+        assert!(state.is_failing());
     }
 
     #[test]
@@ -1227,19 +1247,52 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn set_status() {
+    fn informing_the_user_replaces_whatever_the_bar_was_saying() {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::SetStatus(Some("hello".into())), &mut state, &tx);
-        assert_eq!(state.status_msg, Some("hello".into()));
+
+        state.report("something went wrong");
+        assert!(state.is_failing());
+
+        apply(Action::Inform("hello".into()), &mut state, &tx);
+        assert_eq!(state.notice_text(), Some("hello"));
+        // The bug one field was introduced to make impossible: a stale failure
+        // outranking the thing that happened after it.
+        assert!(!state.is_failing());
     }
 
     #[test]
-    fn set_error() {
+    fn esc_takes_a_failure_down() {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::SetError(Some("err".into())), &mut state, &tx);
-        assert_eq!(state.error_msg, Some("err".into()));
+
+        state.report("err");
+        apply(Action::DismissNotice, &mut state, &tx);
+        assert_eq!(state.notice_text(), None);
+    }
+
+    /// Offering an overlay with nothing extra in it is a key press that looks
+    /// broken, so the action declines.
+    #[test]
+    fn the_detail_overlay_only_opens_when_there_is_detail() {
+        let mut state = AppState::new(vec![]);
+        let (tx, _rx) = cmd_channel();
+
+        state.inform("nothing more to say");
+        apply(Action::ShowNoticeDetail, &mut state, &tx);
+        assert!(!state.notice_detail_open);
+
+        state.report_core(
+            sbql_core::CoreError::new(sbql_core::ErrorKind::Query, "bad sql")
+                .with_detail("near \")\""),
+        );
+        apply(Action::ShowNoticeDetail, &mut state, &tx);
+        assert!(state.notice_detail_open);
+        assert_eq!(state.mode(), crate::app::Mode::NoticeDetail);
+
+        apply(Action::CloseNoticeDetail, &mut state, &tx);
+        assert!(!state.notice_detail_open);
+        assert!(state.is_failing(), "closing the overlay keeps the message");
     }
 
     #[test]

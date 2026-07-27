@@ -20,6 +20,7 @@ mod events;
 mod handlers;
 mod highlight;
 mod list_cursor;
+mod notice;
 mod renderer;
 mod sbql;
 mod session;

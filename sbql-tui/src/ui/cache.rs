@@ -69,7 +69,7 @@ mod tests {
     fn highlight_is_reused_until_the_revision_moves() {
         let mut cache = RenderCache::new();
         let builds = Cell::new(0);
-        let mut build_for = |cache: &mut RenderCache, rev: u64| {
+        let build_for = |cache: &mut RenderCache, rev: u64| {
             cache.highlight(rev, || {
                 builds.set(builds.get() + 1);
                 vec![vec![(Style::default(), format!("rev{rev}"))]]

@@ -137,8 +137,13 @@ impl Sbql {
     }
 
     fn on_tick(&mut self) {
+        self.state.tick = self.state.tick.wrapping_add(1);
+
         if self.state.results.is_loading {
             self.state.layout.spinner_frame = self.state.layout.spinner_frame.wrapping_add(1);
+            self.state.layout.needs_redraw = true;
+        }
+        if self.state.expire_notice() {
             self.state.layout.needs_redraw = true;
         }
         if action::apply_live_filter_if_due(&mut self.state, &self.cmd_tx) {

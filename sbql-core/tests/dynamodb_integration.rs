@@ -1,3 +1,8 @@
+// Integration test: an `unwrap` that fails here *is* the test failing, which is
+// what it is for. `clippy.toml` exempts `#[cfg(test)]` modules from the panic
+// lints in the workspace `Cargo.toml`, but not files under `tests/`.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use sbql_core::{
     query::execute_page,
     schema::{get_primary_keys, list_tables, load_diagram},

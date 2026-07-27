@@ -15,8 +15,7 @@ pub(super) fn apply(
                 state.diagram_requested = true;
                 let _ = cmd_tx.send(CoreCommand::LoadDiagram);
             } else {
-                state.error_msg =
-                    Some("Connect to a database first (Enter on a connection).".into());
+                state.report("Connect to a database first (Enter on a connection).");
             }
         }
 

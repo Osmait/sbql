@@ -39,12 +39,11 @@ pub(super) fn apply(
             {
                 state.focused = FocusedPanel::Editor;
             }
-            state.status_msg = Some(if state.layout.sidebar_hidden {
-                "Sidebar hidden".into()
+            state.inform(if state.layout.sidebar_hidden {
+                "Sidebar hidden"
             } else {
-                "Sidebar shown".into()
+                "Sidebar shown"
             });
-            state.error_msg = None;
         }
 
         // -- Vim state --

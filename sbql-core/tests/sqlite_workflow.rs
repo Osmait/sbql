@@ -10,6 +10,11 @@
 //! cargo test -p sbql-core --test sqlite_workflow
 //! ```
 
+// Integration test: an `unwrap` that fails here *is* the test failing, which is
+// what it is for. `clippy.toml` exempts `#[cfg(test)]` modules from the panic
+// lints in the workspace `Cargo.toml`, but not files under `tests/`.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use sbql_core::{config::CONFIG_DIR_ENV, Core, CoreCommand, CoreEvent};
 
 /// Build a throwaway SQLite database plus a config file pointing at it, and

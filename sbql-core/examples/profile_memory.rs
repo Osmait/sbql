@@ -6,6 +6,11 @@
 //! Produces `dhat-heap.json` in the current directory.
 //! View at: https://nnethercote.github.io/dh_view/dh_view.html
 
+// Benchmark harness: `unwrap` on setup is how a bench reports it cannot run.
+// `clippy.toml` exempts `#[cfg(test)]` modules from the workspace panic lints,
+// but not benches or examples.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;

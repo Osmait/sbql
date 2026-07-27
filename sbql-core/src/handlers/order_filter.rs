@@ -1,4 +1,4 @@
-use crate::{query, query_builder, Core, CoreEvent, SortDirection};
+use crate::{query, query_builder, Core, CoreError, CoreEvent, ErrorKind, SortDirection};
 
 pub(crate) async fn apply_order(
     core: &mut Core,
@@ -7,11 +7,16 @@ pub(crate) async fn apply_order(
 ) -> Vec<CoreEvent> {
     let base = match &core.effective_sql {
         Some(s) => s.clone(),
-        None => return vec![CoreEvent::Error("No active query".into())],
+        None => {
+            return vec![CoreEvent::Error(CoreError::new(
+                ErrorKind::Query,
+                "No active query",
+            ))]
+        }
     };
     let backend = match core.active_backend() {
         Ok(b) => b,
-        Err(e) => return vec![CoreEvent::Error(e.to_string())],
+        Err(e) => return vec![CoreEvent::error(&e)],
     };
     let without_order = query_builder::clear_order(&base, backend).unwrap_or(base);
     match query_builder::apply_order(&without_order, &column, direction, backend) {
@@ -21,7 +26,7 @@ pub(crate) async fn apply_order(
             core.sort_state.insert(column, direction);
             core.execute_current_page(0).await
         }
-        Err(e) => vec![CoreEvent::Error(e.to_string())],
+        Err(e) => vec![CoreEvent::error(&e)],
     }
 }
 
@@ -32,7 +37,7 @@ pub(crate) async fn clear_order(core: &mut Core) -> Vec<CoreEvent> {
     };
     let backend = match core.active_backend() {
         Ok(b) => b,
-        Err(e) => return vec![CoreEvent::Error(e.to_string())],
+        Err(e) => return vec![CoreEvent::error(&e)],
     };
     match query_builder::clear_order(&effective, backend) {
         Ok(new_sql) => {
@@ -40,18 +45,23 @@ pub(crate) async fn clear_order(core: &mut Core) -> Vec<CoreEvent> {
             core.sort_state.clear();
             core.execute_current_page(0).await
         }
-        Err(e) => vec![CoreEvent::Error(e.to_string())],
+        Err(e) => vec![CoreEvent::error(&e)],
     }
 }
 
 pub(crate) async fn apply_filter(core: &mut Core, filter: String) -> Vec<CoreEvent> {
     let base = match &core.base_sql {
         Some(s) => s.clone(),
-        None => return vec![CoreEvent::Error("No active query".into())],
+        None => {
+            return vec![CoreEvent::Error(CoreError::new(
+                ErrorKind::Query,
+                "No active query",
+            ))]
+        }
     };
     let backend = match core.active_backend() {
         Ok(b) => b,
-        Err(e) => return vec![CoreEvent::Error(e.to_string())],
+        Err(e) => return vec![CoreEvent::error(&e)],
     };
     let cols = if core.last_columns.is_empty() {
         None
@@ -69,7 +79,7 @@ pub(crate) async fn apply_filter(core: &mut Core, filter: String) -> Vec<CoreEve
             core.active_filter = Some(filter);
             core.execute_current_page(0).await
         }
-        Err(e) => vec![CoreEvent::Error(e.to_string())],
+        Err(e) => vec![CoreEvent::error(&e)],
     }
 }
 
@@ -81,7 +91,7 @@ pub(crate) async fn clear_filter(core: &mut Core) -> Vec<CoreEvent> {
     };
     let backend = match core.active_backend() {
         Ok(b) => b,
-        Err(e) => return vec![CoreEvent::Error(e.to_string())],
+        Err(e) => return vec![CoreEvent::error(&e)],
     };
     let final_sql = if let Some((col, &dir)) = core.sort_state.iter().next() {
         query_builder::apply_order(&base, col, dir, backend).unwrap_or(base)
@@ -101,7 +111,7 @@ pub(crate) async fn suggest_filter_values(
 ) -> Vec<CoreEvent> {
     let pool = match core.active_pool().await {
         Ok(p) => p,
-        Err(e) => return vec![CoreEvent::Error(e.to_string())],
+        Err(e) => return vec![CoreEvent::error(&e)],
     };
     let base = match &core.base_sql {
         Some(s) => s.clone(),
@@ -122,7 +132,7 @@ pub(crate) async fn suggest_filter_values(
 
     match query::suggest_distinct_values(&pool, &base, &column, &prefix, limit).await {
         Ok(items) => vec![CoreEvent::FilterSuggestions { items, token }],
-        Err(e) => vec![CoreEvent::Error(e.to_string())],
+        Err(e) => vec![CoreEvent::error(&e)],
     }
 }
 
@@ -180,7 +190,7 @@ mod tests {
                 direction: SortDirection::Ascending,
             })
             .await;
-        assert!(matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active query")));
+        assert!(matches!(&events[0], CoreEvent::Error(e) if e.message.contains("No active query")));
     }
 
     #[tokio::test]

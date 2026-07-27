@@ -71,12 +71,12 @@ pub(super) fn apply_stage_cell_edit(state: &mut AppState) {
                 },
             );
             let total = state.mutation.pending_edits.len() + state.mutation.pending_deletes.len();
-            state.status_msg = Some(format!(
+            state.inform(format!(
                 "Staged edit on '{}'. Total staged: {}. Press Ctrl+W to commit.",
                 col_name, total
             ));
         } else {
-            state.status_msg = Some("No changes to stage (value unchanged).".into());
+            state.inform("No changes to stage (value unchanged).");
         }
     }
 }
