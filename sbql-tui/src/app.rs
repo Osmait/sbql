@@ -349,6 +349,7 @@ impl EditorState {
     }
 }
 
+#[derive(Default)]
 pub struct ResultsState {
     pub data: QueryResult,
     pub scroll: usize,

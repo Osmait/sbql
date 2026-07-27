@@ -50,23 +50,25 @@ pub fn draw(frame: &mut Frame, state: &mut AppState) {
         state.focused,
         areas.editor,
     );
-    let output = results::draw(
-        frame,
-        &state.results,
-        &state.mutation,
-        state.focused,
-        state.active_filter.as_deref(),
-        state.filter.visible,
-        state.layout.spinner_frame,
-        state.conn.active_id.is_some(),
-        areas.results,
-    );
-    // Write back computed values from the draw cycle
-    state.results.viewport_height = output.viewport_height;
-    state.results.viewport_cols = output.viewport_cols;
-    state.layout.last_col_widths = output.col_widths.clone();
-    state.results.cached_col_widths = output.col_widths;
+    // Measure first, then render. Drawing no longer produces state the caller
+    // has to copy back out of it.
+    let results_layout = results::measure(&state.results, areas.results);
+    state.results.viewport_height = results_layout.viewport_height;
+    state.results.viewport_cols = results_layout.viewport_cols;
+    state.layout.last_col_widths = results_layout.col_widths.clone();
+    state.results.cached_col_widths = results_layout.col_widths.clone();
     state.results.col_widths_dirty = false;
+
+    let results_view = results::ResultsView {
+        results: &state.results,
+        mutation: &state.mutation,
+        focused: state.focused,
+        active_filter: state.active_filter.as_deref(),
+        filter_visible: state.filter.visible,
+        spinner_frame: state.layout.spinner_frame,
+        has_active_connection: state.conn.active_id.is_some(),
+    };
+    results::draw(frame, &results_view, &results_layout, areas.results);
 
     // Overlays (drawn on top)
     if state.conn.form.visible {
