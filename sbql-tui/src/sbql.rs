@@ -11,6 +11,7 @@
 //! looks.
 
 use anyhow::Result;
+use ratatui::backend::Backend;
 use sbql_core::{CoreCommand, CoreEvent};
 use tokio::sync::mpsc;
 
@@ -20,7 +21,6 @@ use crate::events::{spawn_event_reader, AppEvent};
 use crate::handlers;
 use crate::session;
 use crate::tui::Tui;
-use crate::ui;
 use crate::worker::spawn_worker;
 
 /// How often the spinner advances.
@@ -28,8 +28,6 @@ const TICK: std::time::Duration = std::time::Duration::from_millis(100);
 
 pub struct Sbql {
     state: AppState,
-    /// Rendered output kept between frames. Purely an optimisation.
-    render_cache: ui::cache::RenderCache,
     /// Commands out to the core worker.
     cmd_tx: mpsc::UnboundedSender<CoreCommand>,
     /// Every kind of event, merged into one stream.
@@ -70,9 +68,20 @@ impl Sbql {
             }
         });
 
+        Self::with_channels(cmd_tx, events, startup_connection)
+    }
+
+    /// Build around channels somebody else owns.
+    ///
+    /// Production goes through [`Sbql::new`]; tests use this to feed the loop
+    /// synthetic events instead of real key presses.
+    pub fn with_channels(
+        cmd_tx: mpsc::UnboundedSender<CoreCommand>,
+        events: mpsc::UnboundedReceiver<AppEvent>,
+        startup_connection: Option<String>,
+    ) -> Self {
         Self {
             state: AppState::new(Vec::new()),
-            render_cache: ui::cache::RenderCache::new(),
             cmd_tx,
             events,
             startup_connection,
@@ -81,7 +90,9 @@ impl Sbql {
     }
 
     /// Run until the user quits or the event stream closes.
-    pub async fn run(&mut self, tui: &mut Tui) -> Result<()> {
+    ///
+    /// Generic over the backend so the whole loop can be driven in a test.
+    pub async fn run<B: Backend>(&mut self, tui: &mut Tui<B>) -> Result<()> {
         self.draw(tui)?;
 
         while let Some(event) = self.events.recv().await {
@@ -120,9 +131,8 @@ impl Sbql {
         self.state.layout.needs_redraw = true;
     }
 
-    fn draw(&mut self, tui: &mut Tui) -> Result<()> {
-        tui.terminal
-            .draw(|frame| ui::draw(frame, &mut self.state, &mut self.render_cache))?;
+    fn draw<B: Backend>(&mut self, tui: &mut Tui<B>) -> Result<()> {
+        tui.draw(&mut self.state)?;
         Ok(())
     }
 
@@ -189,7 +199,114 @@ mod tests {
     //! Cover the pipeline `Sbql` drives: a key becomes an action, the reducer
     //! applies it, and the resulting state is what the view would render.
 
+    use super::*;
     use crossterm::event::KeyCode;
+    use ratatui::backend::TestBackend;
+
+    use crate::events::AppEvent;
+    use crate::tui::Tui;
+
+    /// Drive the real loop over a scripted event stream.
+    ///
+    /// Dropping the sender ends the stream, so `run` returns on its own. This
+    /// is what the `Backend` generic bought: the loop, the reducer and the view
+    /// all execute, with no terminal attached.
+    async fn run_with(events: Vec<crate::events::AppEvent>) -> (Tui<TestBackend>, AppState) {
+        // `Connected` persists the last-connection file; keep that off the
+        // developer's machine.
+        let scratch = tempfile::tempdir().expect("temp dir");
+        std::env::set_var(sbql_core::CONFIG_DIR_ENV, scratch.path());
+
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        for e in events {
+            event_tx.send(e).expect("queue event");
+        }
+        drop(event_tx);
+
+        let mut tui = Tui::with_backend(TestBackend::new(120, 30)).expect("test backend");
+        let mut app = Sbql::with_channels(cmd_tx, event_rx, None);
+        app.run(&mut tui).await.expect("run");
+        (tui, app.state)
+    }
+
+    #[tokio::test]
+    async fn the_loop_paints_the_workspace() {
+        let (tui, _) = run_with(vec![]).await;
+        let screen = tui.rendered();
+        for panel in ["Connections", "Tables", "SQL Editor", "Results"] {
+            assert!(screen.contains(panel), "{panel} missing from:\n{screen}");
+        }
+    }
+
+    /// The full round trip: a key press asks the core for something, the reply
+    /// arrives as an event, and the result reaches the screen.
+    ///
+    /// `D` alone does not open the diagram — it only requests the data. The
+    /// overlay appears when `DiagramLoaded` comes back, which is why this test
+    /// has to play the core's part.
+    #[tokio::test]
+    async fn a_key_press_and_the_reply_it_asks_for_reach_the_screen() {
+        let data = sbql_core::DiagramData {
+            tables: vec![sbql_core::TableSchema {
+                schema: "public".into(),
+                name: "customers".into(),
+                columns: vec![sbql_core::ColumnInfo {
+                    name: "id".into(),
+                    data_type: "integer".into(),
+                    is_pk: true,
+                    is_nullable: false,
+                }],
+            }],
+            foreign_keys: vec![],
+        };
+
+        // The diagram is only offered once a connection is open.
+        let conn = sbql_core::ConnectionConfig::new_sqlite("demo", "/tmp/demo.db");
+        let id = conn.id;
+
+        let (tui, state) = run_with(vec![
+            AppEvent::Core(CoreEvent::ConnectionList(vec![conn])),
+            AppEvent::Core(CoreEvent::Connected(id)),
+            AppEvent::Key(key(KeyCode::Char('D'))),
+            AppEvent::Core(CoreEvent::DiagramLoaded(data)),
+        ])
+        .await;
+
+        assert_eq!(
+            state.mode(),
+            crate::app::Mode::Diagram,
+            "the reply should have opened the overlay"
+        );
+        let screen = tui.rendered();
+        assert!(screen.contains("Diagram"), "diagram not painted:\n{screen}");
+        assert!(screen.contains("customers"), "table missing:\n{screen}");
+    }
+
+    /// Quitting ends the loop rather than relying on the stream closing.
+    #[tokio::test]
+    async fn quitting_stops_the_loop() {
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        event_tx
+            .send(AppEvent::Key(key(KeyCode::Char('q'))))
+            .unwrap();
+        // Still open, and still holding queued work the loop must not reach.
+        event_tx
+            .send(AppEvent::Key(key(KeyCode::Char('D'))))
+            .unwrap();
+
+        let mut tui = Tui::with_backend(TestBackend::new(80, 24)).expect("test backend");
+        let mut app = Sbql::with_channels(cmd_tx, event_rx, None);
+        app.run(&mut tui).await.expect("run");
+
+        assert!(app.state.should_quit);
+        assert_ne!(
+            app.state.mode(),
+            crate::app::Mode::Diagram,
+            "events after quit must not be processed"
+        );
+    }
 
     use crate::app::{EditorMode, FocusedPanel, NavMode};
     use crate::test_helpers::*;
