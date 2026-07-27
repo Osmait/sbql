@@ -14,6 +14,10 @@ pub const CONFIG_DIR_ENV: &str = "SBQL_CONFIG_DIR";
 /// Passwords then live in memory for the session and are never written anywhere.
 pub const NO_KEYRING_ENV: &str = "SBQL_NO_KEYRING";
 
+/// Fault injection for tests in other modules of this crate.
+#[cfg(test)]
+pub(crate) use store::fault as store_fault;
+
 /// Whether passwords are persisted at all.
 ///
 /// False when the crate was built without the `keyring` feature, or when
@@ -37,6 +41,51 @@ mod store {
 
     pub(super) const SERVICE: &str = "sbql";
     pub(super) const SSH_SERVICE: &str = "sbql-ssh";
+
+    /// Pretend the credential store is broken, for tests that need to exercise
+    /// the failure path without a real one.
+    ///
+    /// Thread-local rather than global: the test suite runs in parallel, and a
+    /// process-wide flag would leak into whatever else is running.
+    #[cfg(test)]
+    pub(crate) mod fault {
+        use std::cell::Cell;
+
+        thread_local! {
+            static FORCED: Cell<bool> = const { Cell::new(false) };
+        }
+
+        /// Make every store operation on this thread fail until dropped.
+        pub(crate) struct ForcedFailure;
+
+        impl ForcedFailure {
+            pub(crate) fn new() -> Self {
+                FORCED.with(|f| f.set(true));
+                Self
+            }
+        }
+
+        impl Drop for ForcedFailure {
+            fn drop(&mut self) {
+                FORCED.with(|f| f.set(false));
+            }
+        }
+
+        pub(super) fn active() -> bool {
+            FORCED.with(|f| f.get())
+        }
+    }
+
+    #[cfg(test)]
+    fn forced_failure() -> Option<SbqlError> {
+        fault::active()
+            .then(|| SbqlError::Keyring("credential store unavailable (test)".to_string()))
+    }
+
+    #[cfg(not(test))]
+    fn forced_failure() -> Option<SbqlError> {
+        None
+    }
 
     #[cfg(feature = "keyring")]
     mod backend {
@@ -114,6 +163,9 @@ mod store {
     }
 
     pub(super) fn set(service: &str, user: &str, password: &str) -> Result<()> {
+        if let Some(e) = forced_failure() {
+            return Err(e);
+        }
         if opted_out_of_keyring() {
             return Ok(());
         }
@@ -121,6 +173,9 @@ mod store {
     }
 
     pub(super) fn get(service: &str, user: &str, label: &str) -> Result<String> {
+        if let Some(e) = forced_failure() {
+            return Err(e);
+        }
         if opted_out_of_keyring() {
             return Err(SbqlError::PasswordNotFound(label.to_string()));
         }
@@ -128,6 +183,9 @@ mod store {
     }
 
     pub(super) fn delete(service: &str, user: &str) -> Result<()> {
+        if let Some(e) = forced_failure() {
+            return Err(e);
+        }
         if opted_out_of_keyring() {
             return Ok(());
         }
