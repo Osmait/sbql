@@ -1166,7 +1166,6 @@ mod tests {
 
         // Draw the UI
         let mut cache = crate::ui::cache::RenderCache::new();
-        let mut cache = crate::ui::cache::RenderCache::new();
         terminal
             .draw(|f| {
                 // measure settles the canvas cache; draw is a pure read.
@@ -1372,7 +1371,6 @@ mod tests {
         let mut state = DiagramState::new(data);
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
-        let mut cache = crate::ui::cache::RenderCache::new();
         let mut cache = crate::ui::cache::RenderCache::new();
         terminal
             .draw(|f| {

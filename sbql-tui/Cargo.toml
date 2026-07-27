@@ -23,6 +23,7 @@ keyring = ["sbql-core/keyring"]
 
 [dependencies]
 sbql-core = { workspace = true, default-features = false }
+clap = { version = "4", features = ["derive"] }
 tokio.workspace = true
 uuid.workspace = true
 anyhow.workspace = true
@@ -34,3 +35,6 @@ tui-textarea.workspace = true
 tree-sitter.workspace = true
 tree-sitter-highlight.workspace = true
 tree-sitter-sequel.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
