@@ -28,6 +28,7 @@ use crossterm::{
 use ratatui::{backend::Backend, backend::CrosstermBackend, Terminal};
 
 use crate::app::AppState;
+use crate::renderer::Renderer;
 use crate::ui;
 
 /// The terminal, plus the render state that lives alongside it.
@@ -88,13 +89,6 @@ impl<B: Backend> Tui<B> {
         })
     }
 
-    /// Paint the current state.
-    pub fn draw(&mut self, state: &mut AppState) -> io::Result<()> {
-        let cache = &mut self.cache;
-        self.terminal.draw(|frame| ui::draw(frame, state, cache))?;
-        Ok(())
-    }
-
     /// Hand the terminal back. Idempotent, a no-op for borrowed backends, and
     /// also run from `Drop`.
     pub fn restore(&mut self) -> io::Result<()> {
@@ -112,6 +106,14 @@ impl<B: Backend> Tui<B> {
         }
         execute!(out, LeaveAlternateScreen, DisableMouseCapture)?;
         self.terminal.show_cursor()
+    }
+}
+
+impl<B: Backend> Renderer for Tui<B> {
+    fn render(&mut self, state: &mut AppState) -> anyhow::Result<()> {
+        let cache = &mut self.cache;
+        self.terminal.draw(|frame| ui::draw(frame, state, cache))?;
+        Ok(())
     }
 }
 
@@ -167,7 +169,7 @@ mod tests {
         let mut tui = Tui::with_backend(TestBackend::new(80, 24)).expect("build tui");
         let mut state = AppState::new(vec![]);
 
-        tui.draw(&mut state).expect("draw");
+        tui.render(&mut state).expect("draw");
 
         let rendered = tui.rendered();
         assert!(

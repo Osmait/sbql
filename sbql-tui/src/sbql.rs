@@ -11,7 +11,6 @@
 //! looks.
 
 use anyhow::Result;
-use ratatui::backend::Backend;
 use sbql_core::{CoreCommand, CoreEvent};
 use tokio::sync::mpsc;
 
@@ -19,8 +18,8 @@ use crate::action;
 use crate::app::AppState;
 use crate::events::{spawn_event_reader, AppEvent};
 use crate::handlers;
+use crate::renderer::Renderer;
 use crate::session;
-use crate::tui::Tui;
 use crate::worker::spawn_worker;
 
 /// How often the spinner advances.
@@ -91,9 +90,10 @@ impl Sbql {
 
     /// Run until the user quits or the event stream closes.
     ///
-    /// Generic over the backend so the whole loop can be driven in a test.
-    pub async fn run<B: Backend>(&mut self, tui: &mut Tui<B>) -> Result<()> {
-        self.draw(tui)?;
+    /// Takes any [`Renderer`], so the loop can be driven with no terminal — and
+    /// so this layer never names a UI framework.
+    pub async fn run<R: Renderer>(&mut self, renderer: &mut R) -> Result<()> {
+        self.draw(renderer)?;
 
         while let Some(event) = self.events.recv().await {
             match event {
@@ -118,7 +118,7 @@ impl Sbql {
                 break;
             }
             if self.state.layout.needs_redraw {
-                self.draw(tui)?;
+                self.draw(renderer)?;
                 self.state.layout.needs_redraw = false;
             }
         }
@@ -131,9 +131,8 @@ impl Sbql {
         self.state.layout.needs_redraw = true;
     }
 
-    fn draw<B: Backend>(&mut self, tui: &mut Tui<B>) -> Result<()> {
-        tui.draw(&mut self.state)?;
-        Ok(())
+    fn draw<R: Renderer>(&mut self, renderer: &mut R) -> Result<()> {
+        renderer.render(&mut self.state)
     }
 
     fn on_tick(&mut self) {
@@ -204,6 +203,8 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use crate::events::AppEvent;
+    use crate::renderer::test_support::RecordingRenderer;
+    use crate::renderer::Renderer;
     use crate::tui::Tui;
 
     /// Drive the real loop over a scripted event stream.
@@ -281,6 +282,37 @@ mod tests {
         let screen = tui.rendered();
         assert!(screen.contains("Diagram"), "diagram not painted:\n{screen}");
         assert!(screen.contains("customers"), "table missing:\n{screen}");
+    }
+
+    /// The loop runs against a renderer that has nothing to do with ratatui —
+    /// no terminal, no backend, no buffer. This is what the `Renderer` seam is
+    /// for: the application never names a UI framework.
+    #[tokio::test]
+    async fn the_loop_runs_without_any_ui_framework() {
+        let scratch = tempfile::tempdir().expect("temp dir");
+        std::env::set_var(sbql_core::CONFIG_DIR_ENV, scratch.path());
+
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        event_tx.send(AppEvent::Key(key(KeyCode::Enter))).unwrap();
+        event_tx.send(AppEvent::Resize).unwrap();
+        drop(event_tx);
+
+        let mut renderer = RecordingRenderer::default();
+        let mut app = Sbql::with_channels(cmd_tx, event_rx, None);
+        app.run(&mut renderer).await.expect("run");
+
+        // One frame up front, then one per event that asked for a redraw.
+        assert_eq!(
+            renderer.frames.len(),
+            3,
+            "expected an initial frame plus one per event, got {:?}",
+            renderer.frames
+        );
+        assert!(renderer
+            .frames
+            .iter()
+            .all(|m| *m == crate::app::Mode::Browsing));
     }
 
     /// Quitting ends the loop rather than relying on the stream closing.
