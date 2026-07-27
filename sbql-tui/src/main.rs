@@ -266,7 +266,8 @@ async fn main() -> anyhow::Result<()> {
             }
 
             AppEvent::Mouse(mouse) => {
-                handlers::mouse::handle(&mut state, mouse, &cmd_tx);
+                let act = handlers::mouse::handle(&state, mouse);
+                action::apply(act, &mut state, &cmd_tx);
                 state.layout.needs_redraw = true;
             }
 

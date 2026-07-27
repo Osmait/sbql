@@ -1,26 +1,16 @@
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
-use tokio::sync::mpsc;
 
 use crate::action::{
-    self, Action, ConnectionsAction, DiagramAction, NavAction, ResultsAction, TablesAction,
+    Action, ConnectionsAction, DiagramAction, NavAction, ResultsAction, TablesAction,
 };
 use crate::app::{AppState, FocusedPanel, NavMode};
-use sbql_core::CoreCommand;
 
-/// Mouse events are applied directly (not via Action) because they involve
-/// complex coordinate calculations that depend on mutable state.
-/// This keeps the mouse handler pragmatic while keyboard handlers use the Action pattern.
-pub fn handle(
-    state: &mut AppState,
-    mouse: MouseEvent,
-    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
-) {
-    let act = map_mouse(state, mouse);
-    action::apply(act, state, cmd_tx);
-}
-
-fn map_mouse(state: &AppState, mouse: MouseEvent) -> Action {
+/// Map a mouse event to an [`Action`], the same contract as [`super::handle_key`].
+///
+/// Hit-testing needs the rectangles from the last draw, so this reads geometry
+/// as well as state — but it stays a pure function of both.
+pub fn handle(state: &AppState, mouse: MouseEvent) -> Action {
     if state.diagram.is_some() {
         return match mouse.kind {
             MouseEventKind::ScrollDown => {

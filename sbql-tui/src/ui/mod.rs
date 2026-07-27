@@ -19,6 +19,10 @@ use crate::app::{AppState, EditorMode, LastAreas, NavMode};
 pub fn draw(frame: &mut Frame, state: &mut AppState) {
     // Diagram mode replaces the entire layout when active.
     if let Some(ref mut diag) = state.diagram {
+        // Measure first: this settles the canvas cache and clamps scroll, so
+        // rendering below is a pure read.
+        let full = frame.area();
+        diagram::measure(diag, full);
         diagram::draw(frame, diag);
         return;
     }

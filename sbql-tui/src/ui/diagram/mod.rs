@@ -78,14 +78,52 @@ fn data_type_color(data_type: &str) -> ratatui::style::Color {
 // Public draw entry point
 // ---------------------------------------------------------------------------
 
-pub fn draw(frame: &mut Frame, state: &mut DiagramState) {
-    let full = frame.area();
-
-    // Split into left sidebar + right canvas
-    let split = Layout::default()
+/// Where the diagram's two panes sit for a given screen.
+fn panes(full: Rect) -> std::rc::Rc<[Rect]> {
+    Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(22), Constraint::Percentage(78)])
-        .split(full);
+        .split(full)
+}
+
+/// Rebuild the canvas if stale, record the viewport, and pull scroll back into
+/// range.
+///
+/// Everything that *changes* the diagram lives here. Rendering used to do this
+/// mid-draw, which meant the scroll offset was only correct once a frame had
+/// been painted — so anything reading it before then saw a stale value.
+pub fn measure(state: &mut DiagramState, full: Rect) {
+    let area = panes(full)[1];
+    let inner_h = area.height.saturating_sub(2) as usize;
+    let inner_w = area.width.saturating_sub(2) as usize;
+
+    state.last_viewport_w = inner_w as u16;
+    state.last_viewport_h = inner_h as u16;
+
+    if state.canvas_dirty || state.cached_canvas.is_none() {
+        let build = build_canvas_lines(state, area.width);
+        state.cached_canvas = Some(build.lines);
+        state.table_positions = build.table_positions;
+        state.canvas_dirty = false;
+    }
+
+    let (canvas_height, canvas_width) = match &state.cached_canvas {
+        Some(lines) => (lines.len(), lines.iter().map(line_width).max().unwrap_or(0)),
+        None => (0, 0),
+    };
+
+    state.scroll_y = state
+        .scroll_y
+        .min(canvas_height.saturating_sub(inner_h) as u16);
+    state.scroll_x = state
+        .scroll_x
+        .min(canvas_width.saturating_sub(inner_w) as u16);
+}
+
+/// Render the diagram. Reads state only — call [`measure`] first.
+pub fn draw(frame: &mut Frame, state: &DiagramState) {
+    let full = frame.area();
+    let split = panes(full);
 
     draw_sidebar(frame, state, split[0]);
     draw_canvas(frame, state, split[1]);
@@ -228,7 +266,7 @@ fn draw_sidebar(frame: &mut Frame, state: &DiagramState, area: Rect) {
 // Right canvas: ASCII table boxes
 // ---------------------------------------------------------------------------
 
-fn draw_canvas(frame: &mut Frame, state: &mut DiagramState, area: Rect) {
+fn draw_canvas(frame: &mut Frame, state: &DiagramState, area: Rect) {
     let data = &state.data;
     let visible_indices = visible_table_indices(state);
     let visible_keys: std::collections::HashSet<String> = visible_indices
@@ -238,28 +276,10 @@ fn draw_canvas(frame: &mut Frame, state: &mut DiagramState, area: Rect) {
         .collect();
     let visible_fk_count = visible_foreign_keys(state, &visible_keys).len();
 
-    // Store viewport dimensions for navigation centering
     let inner_h = area.height.saturating_sub(2) as usize;
     let inner_w = area.width.saturating_sub(2) as usize;
-    state.last_viewport_w = inner_w as u16;
-    state.last_viewport_h = inner_h as u16;
-
-    // Rebuild canvas only when dirty or not yet cached
-    if state.canvas_dirty || state.cached_canvas.is_none() {
-        let build = build_canvas_lines(state, area.width);
-        state.cached_canvas = Some(build.lines);
-        state.table_positions = build.table_positions;
-        state.canvas_dirty = false;
-    }
     let lines = state.cached_canvas.clone().unwrap_or_default();
-
     let canvas_height = lines.len();
-    let canvas_width = lines.iter().map(line_width).max().unwrap_or(0);
-
-    let max_scroll_y = canvas_height.saturating_sub(inner_h) as u16;
-    let max_scroll_x = canvas_width.saturating_sub(inner_w) as u16;
-    state.scroll_y = state.scroll_y.min(max_scroll_y);
-    state.scroll_x = state.scroll_x.min(max_scroll_x);
 
     // Position indicator
     let pct = if canvas_height > 0 {
@@ -1034,6 +1054,52 @@ mod tests {
     use ratatui::{backend::TestBackend, Terminal};
     use sbql_core::{ColumnInfo, DiagramData, ForeignKey, TableSchema};
 
+    /// Scroll clamping is a state change, so it belongs to `measure`. It used
+    /// to happen mid-draw, which left the offset stale for anything that read
+    /// it before the next frame was painted.
+    #[test]
+    fn measure_clamps_scroll_without_rendering() {
+        let data = DiagramData {
+            tables: vec![TableSchema {
+                schema: "public".into(),
+                name: "solo".into(),
+                columns: vec![ColumnInfo {
+                    name: "id".into(),
+                    data_type: "integer".into(),
+                    is_pk: true,
+                    is_nullable: false,
+                }],
+            }],
+            foreign_keys: vec![],
+        };
+        let mut state = DiagramState::new(data);
+        state.scroll_x = 9_000;
+        state.scroll_y = 9_000;
+
+        let full = Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 40,
+        };
+        measure(&mut state, full);
+
+        assert!(
+            state.scroll_y < 9_000,
+            "vertical scroll should be pulled back"
+        );
+        assert!(
+            state.scroll_x < 9_000,
+            "horizontal scroll should be pulled back"
+        );
+        assert!(state.cached_canvas.is_some(), "canvas built by measure");
+        assert!(!state.canvas_dirty);
+        assert_eq!(
+            state.last_viewport_h, 38,
+            "viewport recorded without a frame"
+        );
+    }
+
     #[test]
     fn test_diagram_rendering() {
         // Setup mock diagram data
@@ -1093,7 +1159,13 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Draw the UI
-        terminal.draw(|f| draw(f, &mut state)).unwrap();
+        terminal
+            .draw(|f| {
+                // measure settles the canvas cache; draw is a pure read.
+                measure(&mut state, f.area());
+                draw(f, &state);
+            })
+            .unwrap();
 
         let buffer = terminal.backend().buffer();
         let mut content = String::new();
@@ -1292,7 +1364,13 @@ mod tests {
         let mut state = DiagramState::new(data);
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut state)).unwrap();
+        terminal
+            .draw(|f| {
+                // measure settles the canvas cache; draw is a pure read.
+                measure(&mut state, f.area());
+                draw(f, &state);
+            })
+            .unwrap();
 
         let buffer = terminal.backend().buffer();
         let mut content = String::new();
