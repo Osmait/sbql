@@ -12,7 +12,7 @@ pub(super) fn apply(
         // -- Editor --
         EditorAction::Input(input) => {
             state.editor.textarea.input(input);
-            state.editor.invalidate_highlight();
+            state.editor.mark_text_changed();
             // Recompute completions inline
             completion_ui::recompute_completions(state);
         }

@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod cell_edit;
 pub mod connections;
 pub mod diagram;
@@ -16,14 +17,14 @@ use ratatui::{
 use crate::app::{AppState, EditorMode, LastAreas, NavMode};
 
 /// Root draw function — dispatches to each panel.
-pub fn draw(frame: &mut Frame, state: &mut AppState) {
+pub fn draw(frame: &mut Frame, state: &mut AppState, cache: &mut cache::RenderCache) {
     // Diagram mode replaces the entire layout when active.
     if let Some(ref mut diag) = state.diagram {
         // Measure first: this settles the canvas cache and clamps scroll, so
         // rendering below is a pure read.
         let full = frame.area();
-        diagram::measure(diag, full);
-        diagram::draw(frame, diag);
+        diagram::measure(diag, cache, full);
+        diagram::draw(frame, diag, cache);
         return;
     }
 
@@ -47,8 +48,12 @@ pub fn draw(frame: &mut Frame, state: &mut AppState) {
             areas.tables,
         );
     }
+    // The diagram is closed, so a canvas from a previous one must not linger.
+    cache.clear_diagram_canvas();
+
     editor::draw(
         frame,
+        cache,
         &mut state.editor,
         &state.conn,
         state.focused,
@@ -172,7 +177,8 @@ mod tests {
         };
         state.apply_core_event(CoreEvent::QueryResult(result));
 
-        terminal.draw(|f| draw(f, &mut state)).unwrap();
+        let mut cache = cache::RenderCache::new();
+        terminal.draw(|f| draw(f, &mut state, &mut cache)).unwrap();
 
         let buffer = terminal.backend().buffer();
         let mut content = String::new();
@@ -206,7 +212,8 @@ mod tests {
 
         state.apply_core_event(CoreEvent::Connected(uuid::Uuid::new_v4()));
 
-        terminal.draw(|f| draw(f, &mut state)).unwrap();
+        let mut cache = cache::RenderCache::new();
+        terminal.draw(|f| draw(f, &mut state, &mut cache)).unwrap();
         let buffer = terminal.backend().buffer();
 
         let mut content = String::new();

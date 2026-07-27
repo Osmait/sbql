@@ -39,7 +39,7 @@ pub(super) fn apply(
                         shift: false,
                     });
                 }
-                state.editor.invalidate_highlight();
+                state.editor.mark_text_changed();
                 state.editor.completion.dismiss();
             }
         }

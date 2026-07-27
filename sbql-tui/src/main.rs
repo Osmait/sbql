@@ -195,8 +195,11 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let mut state = AppState::new(Vec::new());
+    // Rendered output kept between frames. Purely an optimisation: dropping it
+    // would only cost time.
+    let mut render_cache = ui::cache::RenderCache::new();
     let mut auto_connected = false;
-    terminal.draw(|f| ui::draw(f, &mut state))?;
+    terminal.draw(|f| ui::draw(f, &mut state, &mut render_cache))?;
 
     loop {
         let event = match app_rx.recv().await {
@@ -283,7 +286,7 @@ async fn main() -> anyhow::Result<()> {
         }
 
         if state.layout.needs_redraw {
-            terminal.draw(|f| ui::draw(f, &mut state))?;
+            terminal.draw(|f| ui::draw(f, &mut state, &mut render_cache))?;
             state.layout.needs_redraw = false;
         }
     }

@@ -15,6 +15,7 @@ use crate::ui::theme;
 
 pub fn draw(
     frame: &mut Frame,
+    cache: &mut crate::ui::cache::RenderCache,
     editor: &mut EditorState,
     conn: &ConnectionState,
     focused: FocusedPanel,
@@ -102,10 +103,12 @@ pub fn draw(
 
     // --- Build highlighted lines if cache is empty ---
     let source = editor.sql();
-    if editor.highlight_cache.is_none() {
-        editor.highlight_cache = Some(editor.highlighter.highlight_lines(&source));
-    }
-    let hl_lines = editor.highlight_cache.as_ref().unwrap();
+    let hl_lines = cache
+        .highlight(editor.revision, || {
+            editor.highlighter.highlight_lines(&source)
+        })
+        .to_vec();
+    let hl_lines = &hl_lines;
 
     // --- Cursor position ---
     let (cursor_row, cursor_col) = editor.textarea.cursor();

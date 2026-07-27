@@ -92,7 +92,7 @@ fn panes(full: Rect) -> std::rc::Rc<[Rect]> {
 /// Everything that *changes* the diagram lives here. Rendering used to do this
 /// mid-draw, which meant the scroll offset was only correct once a frame had
 /// been painted — so anything reading it before then saw a stale value.
-pub fn measure(state: &mut DiagramState, full: Rect) {
+pub fn measure(state: &mut DiagramState, cache: &mut crate::ui::cache::RenderCache, full: Rect) {
     let area = panes(full)[1];
     let inner_h = area.height.saturating_sub(2) as usize;
     let inner_w = area.width.saturating_sub(2) as usize;
@@ -100,14 +100,14 @@ pub fn measure(state: &mut DiagramState, full: Rect) {
     state.last_viewport_w = inner_w as u16;
     state.last_viewport_h = inner_h as u16;
 
-    if state.canvas_dirty || state.cached_canvas.is_none() {
+    if state.canvas_dirty || cache.diagram_canvas().is_none() {
         let build = build_canvas_lines(state, area.width);
-        state.cached_canvas = Some(build.lines);
+        cache.set_diagram_canvas(build.lines);
         state.table_positions = build.table_positions;
         state.canvas_dirty = false;
     }
 
-    let (canvas_height, canvas_width) = match &state.cached_canvas {
+    let (canvas_height, canvas_width) = match cache.diagram_canvas() {
         Some(lines) => (lines.len(), lines.iter().map(line_width).max().unwrap_or(0)),
         None => (0, 0),
     };
@@ -121,12 +121,12 @@ pub fn measure(state: &mut DiagramState, full: Rect) {
 }
 
 /// Render the diagram. Reads state only — call [`measure`] first.
-pub fn draw(frame: &mut Frame, state: &DiagramState) {
+pub fn draw(frame: &mut Frame, state: &DiagramState, cache: &crate::ui::cache::RenderCache) {
     let full = frame.area();
     let split = panes(full);
 
     draw_sidebar(frame, state, split[0]);
-    draw_canvas(frame, state, split[1]);
+    draw_canvas(frame, state, cache, split[1]);
     draw_help_bar(frame, full, state.focus_mode);
 }
 
@@ -266,7 +266,12 @@ fn draw_sidebar(frame: &mut Frame, state: &DiagramState, area: Rect) {
 // Right canvas: ASCII table boxes
 // ---------------------------------------------------------------------------
 
-fn draw_canvas(frame: &mut Frame, state: &DiagramState, area: Rect) {
+fn draw_canvas(
+    frame: &mut Frame,
+    state: &DiagramState,
+    cache: &crate::ui::cache::RenderCache,
+    area: Rect,
+) {
     let data = &state.data;
     let visible_indices = visible_table_indices(state);
     let visible_keys: std::collections::HashSet<String> = visible_indices
@@ -278,7 +283,7 @@ fn draw_canvas(frame: &mut Frame, state: &DiagramState, area: Rect) {
 
     let inner_h = area.height.saturating_sub(2) as usize;
     let inner_w = area.width.saturating_sub(2) as usize;
-    let lines = state.cached_canvas.clone().unwrap_or_default();
+    let lines = cache.diagram_canvas().unwrap_or_default().to_vec();
     let canvas_height = lines.len();
 
     // Position indicator
@@ -1082,7 +1087,8 @@ mod tests {
             width: 120,
             height: 40,
         };
-        measure(&mut state, full);
+        let mut cache = crate::ui::cache::RenderCache::new();
+        measure(&mut state, &mut cache, full);
 
         assert!(
             state.scroll_y < 9_000,
@@ -1092,7 +1098,7 @@ mod tests {
             state.scroll_x < 9_000,
             "horizontal scroll should be pulled back"
         );
-        assert!(state.cached_canvas.is_some(), "canvas built by measure");
+        assert!(cache.diagram_canvas().is_some(), "canvas built by measure");
         assert!(!state.canvas_dirty);
         assert_eq!(
             state.last_viewport_h, 38,
@@ -1159,11 +1165,13 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Draw the UI
+        let mut cache = crate::ui::cache::RenderCache::new();
+        let mut cache = crate::ui::cache::RenderCache::new();
         terminal
             .draw(|f| {
                 // measure settles the canvas cache; draw is a pure read.
-                measure(&mut state, f.area());
-                draw(f, &state);
+                measure(&mut state, &mut cache, f.area());
+                draw(f, &state, &cache);
             })
             .unwrap();
 
@@ -1364,11 +1372,13 @@ mod tests {
         let mut state = DiagramState::new(data);
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
+        let mut cache = crate::ui::cache::RenderCache::new();
+        let mut cache = crate::ui::cache::RenderCache::new();
         terminal
             .draw(|f| {
                 // measure settles the canvas cache; draw is a pure read.
-                measure(&mut state, f.area());
-                draw(f, &state);
+                measure(&mut state, &mut cache, f.area());
+                draw(f, &state, &cache);
             })
             .unwrap();
 

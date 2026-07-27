@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use ratatui::layout::Rect;
-use ratatui::style::Style;
 use sbql_core::{
     ConnectionConfig, ConnectionDraft, CoreEvent, DbBackend, DiagramData, FieldSpec, QueryResult,
     SortDirection, SslMode, TableEntry,
@@ -254,7 +253,6 @@ pub struct DiagramState {
     /// Glyph rendering mode for diagram connectors/boxes.
     pub glyph_mode: DiagramGlyphMode,
     /// Cached canvas lines from the last render.
-    pub cached_canvas: Option<Vec<ratatui::text::Line<'static>>>,
     /// When true, the cached canvas must be rebuilt.
     pub canvas_dirty: bool,
     /// Stored table positions (global table index → (x, y)) from the last layout.
@@ -284,7 +282,6 @@ impl DiagramState {
             scroll_y: 0,
             focus_mode: false,
             glyph_mode: DiagramGlyphMode::Ascii,
-            cached_canvas: None,
             canvas_dirty: true,
             table_positions: HashMap::new(),
             last_viewport_w: 0,
@@ -331,7 +328,9 @@ pub struct EditorState {
     // Syntax highlighting
     pub scroll_row: usize,
     pub scroll_col: usize,
-    pub highlight_cache: Option<Vec<Vec<(Style, String)>>>,
+    /// Bumped on every text change. The view keys its highlight cache on this
+    /// so the model never holds rendered output.
+    pub revision: u64,
     pub highlighter: SqlHighlighter,
     // Autocomplete
     pub completion: CompletionState,
@@ -343,9 +342,9 @@ impl EditorState {
         self.textarea.lines().join("\n")
     }
 
-    /// Invalidate the cached highlight spans (call on any text change).
-    pub fn invalidate_highlight(&mut self) {
-        self.highlight_cache = None;
+    /// Record that the text changed, so the view knows to re-highlight.
+    pub fn mark_text_changed(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
     }
 }
 
@@ -692,7 +691,7 @@ impl AppState {
                 mode: EditorMode::Normal,
                 scroll_row: 0,
                 scroll_col: 0,
-                highlight_cache: None,
+                revision: 0,
                 highlighter: SqlHighlighter::new(),
                 completion: CompletionState::default(),
             },
