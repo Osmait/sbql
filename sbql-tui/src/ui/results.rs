@@ -374,7 +374,7 @@ pub fn draw_filter_bar(frame: &mut Frame, filter: &mut FilterBar, results_area: 
 
         let mut lines = Vec::new();
         for (i, item) in filter.suggestions.iter().take(max_items).enumerate() {
-            let style = if i == filter.selected_suggestion {
+            let style = if i == filter.suggestion_cursor.index() {
                 Style::default().fg(theme::BASE).bg(theme::BLUE)
             } else {
                 Style::default().fg(theme::TEXT)

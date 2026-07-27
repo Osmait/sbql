@@ -306,7 +306,7 @@ fn draw_completion_popup(
     let mut lines: Vec<Line> = Vec::with_capacity(max_visible);
 
     for (i, item) in comp.items.iter().enumerate().take(max_visible) {
-        let is_selected = i == comp.selected;
+        let is_selected = i == comp.selected();
         let icon = match item.kind {
             CompletionKind::Table => Span::styled("T ", Style::default().fg(theme::BLUE)),
             CompletionKind::Column => Span::styled("C ", Style::default().fg(theme::YELLOW)),

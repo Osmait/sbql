@@ -7,7 +7,7 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => {
             if !state.tables.tables.is_empty() {
-                let next = (state.tables.selected + 1).min(state.tables.tables.len() - 1);
+                let next = state.tables.selected() + 1;
                 Action::Batch(vec![Action::ClearPendingG, Action::SelectTable(next)])
             } else {
                 Action::ClearPendingG
@@ -15,7 +15,7 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
         }
         KeyCode::Up | KeyCode::Char('k') => Action::Batch(vec![
             Action::ClearPendingG,
-            Action::SelectTable(state.tables.selected.saturating_sub(1)),
+            Action::SelectTable(state.tables.selected().saturating_sub(1)),
         ]),
         KeyCode::Char('G') => {
             if !state.tables.tables.is_empty() {
@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn k_moves_up() {
         let mut state = state_with_tables(3);
-        state.tables.selected = 2;
+        state.tables.cursor.select(2, state.tables.tables.len());
         let act = handle(&state, key(KeyCode::Char('k')));
         assert!(matches!(act, Action::Batch(_)));
     }

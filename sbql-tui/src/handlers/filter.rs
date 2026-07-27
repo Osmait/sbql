@@ -35,7 +35,7 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
                 let choice = state
                     .filter
                     .suggestions
-                    .get(state.filter.selected_suggestion)
+                    .get(state.filter.suggestion_cursor.index())
                     .cloned()
                     .unwrap_or_default();
                 let current = state.filter.textarea.lines().join("");
@@ -65,7 +65,7 @@ mod tests {
         state.filter.visible = true;
         state.filter.show_suggestions = show_suggestions;
         state.filter.suggestions = suggestions.iter().map(|s| s.to_string()).collect();
-        state.filter.selected_suggestion = 0;
+        state.filter.suggestion_cursor.reset();
         state
     }
 

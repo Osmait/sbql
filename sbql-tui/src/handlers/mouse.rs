@@ -49,7 +49,7 @@ fn map_mouse(state: &AppState, mouse: MouseEvent) -> Action {
             FocusedPanel::Results => Action::MoveRowDown,
             FocusedPanel::Connections => {
                 if !state.conn.connections.is_empty() {
-                    let next = (state.conn.selected + 1).min(state.conn.connections.len() - 1);
+                    let next = state.conn.selected() + 1;
                     Action::SelectConnection(next)
                 } else {
                     Action::Noop
@@ -57,7 +57,7 @@ fn map_mouse(state: &AppState, mouse: MouseEvent) -> Action {
             }
             FocusedPanel::Tables => {
                 if !state.tables.tables.is_empty() {
-                    let next = (state.tables.selected + 1).min(state.tables.tables.len() - 1);
+                    let next = state.tables.selected() + 1;
                     Action::SelectTable(next)
                 } else {
                     Action::Noop
@@ -68,9 +68,9 @@ fn map_mouse(state: &AppState, mouse: MouseEvent) -> Action {
         MouseEventKind::ScrollUp => match state.focused {
             FocusedPanel::Results => Action::MoveRowUp,
             FocusedPanel::Connections => {
-                Action::SelectConnection(state.conn.selected.saturating_sub(1))
+                Action::SelectConnection(state.conn.selected().saturating_sub(1))
             }
-            FocusedPanel::Tables => Action::SelectTable(state.tables.selected.saturating_sub(1)),
+            FocusedPanel::Tables => Action::SelectTable(state.tables.selected().saturating_sub(1)),
             _ => Action::Noop,
         },
         _ => Action::Noop,
@@ -85,9 +85,9 @@ fn map_mouse_click(state: &AppState, col: u16, row: u16) -> Action {
                 Action::SetNavMode(NavMode::Panel),
             ];
             if row > la.table_list.y {
+                // SelectTable clamps, so a click below the last row is safe.
                 let clicked = (row - la.table_list.y).saturating_sub(1) as usize;
-                let new_idx = clicked.min(state.tables.tables.len().saturating_sub(1));
-                actions.push(Action::SelectTable(new_idx));
+                actions.push(Action::SelectTable(clicked));
             }
             return Action::Batch(actions);
         }
@@ -96,10 +96,10 @@ fn map_mouse_click(state: &AppState, col: u16, row: u16) -> Action {
                 Action::FocusPanel(FocusedPanel::Connections),
                 Action::SetNavMode(NavMode::Panel),
             ];
-            if row > la.conn_list.y && !state.conn.connections.is_empty() {
+            if row > la.conn_list.y {
+                // SelectConnection clamps, so a click below the last row is safe.
                 let clicked = (row - la.conn_list.y).saturating_sub(1) as usize;
-                let new_idx = clicked.min(state.conn.connections.len() - 1);
-                actions.push(Action::SelectConnection(new_idx));
+                actions.push(Action::SelectConnection(clicked));
             }
             return Action::Batch(actions);
         }

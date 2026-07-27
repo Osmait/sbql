@@ -7,7 +7,7 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => {
             if !state.conn.connections.is_empty() {
-                let next = (state.conn.selected + 1).min(state.conn.connections.len() - 1);
+                let next = state.conn.selected() + 1;
                 Action::Batch(vec![Action::ClearPendingG, Action::SelectConnection(next)])
             } else {
                 Action::ClearPendingG
@@ -15,7 +15,7 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
         }
         KeyCode::Up | KeyCode::Char('k') => Action::Batch(vec![
             Action::ClearPendingG,
-            Action::SelectConnection(state.conn.selected.saturating_sub(1)),
+            Action::SelectConnection(state.conn.selected().saturating_sub(1)),
         ]),
         KeyCode::Char('G') => {
             if !state.conn.connections.is_empty() {
@@ -64,11 +64,13 @@ pub fn handle_form(state: &AppState, key: KeyEvent) -> Action {
         KeyCode::Tab | KeyCode::Down => Action::FormNextField,
         KeyCode::BackTab | KeyCode::Up => Action::FormPrevField,
         KeyCode::Enter => Action::FormSubmit,
+        // Space cycles whichever choice row is active — which row that is comes
+        // from the backend's field list, not from hard-coded indices.
         KeyCode::Char(' ') if form.field_index == 0 => Action::FormCycleBackend,
         KeyCode::Char(' ')
-            if (form.backend == sbql_core::DbBackend::Postgres
-                || form.backend == sbql_core::DbBackend::Mysql)
-                && form.field_index == 7 =>
+            if form
+                .field_at(form.field_index)
+                .is_some_and(|s| s.field == sbql_core::ConnectionField::SslMode) =>
         {
             Action::FormCycleSsl
         }
@@ -103,7 +105,7 @@ mod tests {
     #[test]
     fn handle_k_moves_up() {
         let mut state = state_with_conns(3);
-        state.conn.selected = 2;
+        state.conn.cursor.select(2, state.conn.connections.len());
         let act = handle(&state, key(KeyCode::Char('k')));
         assert!(matches!(act, Action::Batch(_)));
     }

@@ -30,7 +30,7 @@ pub fn draw_connections(
         .map(|(i, c)| {
             let is_active = conn.active_id == Some(c.id);
             let indicator = if is_active { "● " } else { "  " };
-            let style = if i == conn.selected && is_focused {
+            let style = if i == conn.selected() && is_focused {
                 Style::default()
                     .fg(theme::BASE)
                     .bg(theme::BLUE)
@@ -78,7 +78,7 @@ pub fn draw_connections(
         .highlight_style(Style::default().add_modifier(Modifier::BOLD));
 
     let mut conn_state = ListState::default();
-    conn_state.select(Some(conn.selected));
+    conn_state.select(Some(conn.selected()));
     frame.render_stateful_widget(conn_list, area, &mut conn_state);
 }
 
@@ -106,12 +106,12 @@ pub fn draw_tables(
         .iter()
         .enumerate()
         .map(|(i, t)| {
-            let style = if i == tables.selected && is_focused {
+            let style = if i == tables.selected() && is_focused {
                 Style::default()
                     .fg(theme::BASE)
                     .bg(theme::YELLOW)
                     .add_modifier(Modifier::BOLD)
-            } else if i == tables.selected {
+            } else if i == tables.selected() {
                 Style::default().fg(theme::YELLOW)
             } else {
                 Style::default().fg(theme::OVERLAY2)
@@ -139,7 +139,7 @@ pub fn draw_tables(
     tbl_state.select(if tables.tables.is_empty() {
         None
     } else {
-        Some(tables.selected)
+        Some(tables.selected())
     });
     frame.render_stateful_widget(table_list, area, &mut tbl_state);
 }
@@ -153,7 +153,7 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
 
     frame.render_widget(Clear, area);
 
-    let title = if form.editing_id.is_some() {
+    let title = if form.draft.id.is_some() {
         " Edit Connection "
     } else {
         " New Connection "
@@ -186,120 +186,40 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
             Style::default().fg(theme::OVERLAY0)
         };
         let title_style = if is_active {
-            Style::default()
-                .fg(theme::BLUE)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(theme::BLUE).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::OVERLAY2)
         };
 
-        // Backend field (field 0 for all backends)
-        if i == 0 {
-            let backend_display = match form.backend {
-                sbql_core::DbBackend::Postgres => "PostgreSQL",
-                sbql_core::DbBackend::Mysql => "MySQL",
-                sbql_core::DbBackend::Sqlite => "SQLite",
-                sbql_core::DbBackend::Redis => "Redis",
-                sbql_core::DbBackend::DynamoDb => "DynamoDB",
-                sbql_core::DbBackend::MongoDb => "MongoDB",
-                sbql_core::DbBackend::SqlServer => "SQL Server",
-            };
-            let hint = if is_active { "  Space: cycle" } else { "" };
-            let para = Paragraph::new(format!("{backend_display}{hint}")).block(
-                Block::default()
-                    .title(Span::styled(format!(" {label} "), title_style))
-                    .borders(Borders::ALL)
-                    .border_style(border_style),
-            );
-            frame.render_widget(para, chunks[i]);
-            continue;
-        }
-
-        // SSL Mode field (only PG, last field)
-        if (form.backend == sbql_core::DbBackend::Postgres
-            || form.backend == sbql_core::DbBackend::Mysql)
-            && i == 7
-        {
-            let ssl_display = form.ssl_mode.as_str().to_owned();
-            let hint = if is_active { "  Space: cycle" } else { "" };
-            let para = Paragraph::new(format!("{ssl_display}{hint}")).block(
-                Block::default()
-                    .title(Span::styled(format!(" {label} "), title_style))
-                    .borders(Borders::ALL)
-                    .border_style(border_style),
-            );
-            frame.render_widget(para, chunks[i]);
-            continue;
-        }
-
-        // Text fields
-        let value = match form.backend {
-            sbql_core::DbBackend::Postgres | sbql_core::DbBackend::Mysql => match i {
-                1 => &form.name,
-                2 => &form.host,
-                3 => &form.port,
-                4 => &form.user,
-                5 => &form.database,
-                6 => &form.password,
-                _ => continue,
-            },
-            sbql_core::DbBackend::Sqlite => match i {
-                1 => &form.name,
-                2 => &form.file_path,
-                _ => continue,
-            },
-            sbql_core::DbBackend::Redis => match i {
-                1 => &form.name,
-                2 => &form.host,
-                3 => &form.port,
-                4 => &form.password,
-                5 => &form.database,
-                _ => continue,
-            },
-            sbql_core::DbBackend::DynamoDb => match i {
-                1 => &form.name,
-                2 => &form.host,
-                3 => &form.port,
-                4 => &form.database, // region
-                5 => &form.user,     // access_key
-                6 => &form.password,  // secret_key
-                _ => continue,
-            },
-            sbql_core::DbBackend::MongoDb => match i {
-                1 => &form.name,
-                2 => &form.host,
-                3 => &form.port,
-                4 => &form.database,
-                5 => &form.user,
-                6 => &form.password,
-                _ => continue,
-            },
-            sbql_core::DbBackend::SqlServer => match i {
-                1 => &form.name,
-                2 => &form.host,
-                3 => &form.port,
-                4 => &form.user,
-                5 => &form.database,
-                6 => &form.password,
-                _ => continue,
-            },
+        // Rows the user cycles rather than types into: the backend picker
+        // (row 0) and any choice field the backend declares, e.g. SSL Mode.
+        let choice = match form.field_at(i) {
+            None => Some(form.draft.backend.label().to_owned()),
+            Some(spec) if !spec.field.is_text() => {
+                Some(form.draft.value(spec.field).to_owned())
+            }
+            Some(_) => None,
         };
 
-        let is_password = ((form.backend == sbql_core::DbBackend::Postgres
-            || form.backend == sbql_core::DbBackend::Mysql)
-            && i == 6)
-            || (form.backend == sbql_core::DbBackend::Redis && i == 4)
-            || (form.backend == sbql_core::DbBackend::DynamoDb && i == 6)
-            || (form.backend == sbql_core::DbBackend::MongoDb && i == 6)
-            || (form.backend == sbql_core::DbBackend::SqlServer && i == 6);
-        let display = if is_password {
-            if value.is_empty() && form.editing_id.is_some() {
-                "(unchanged)".to_owned()
-            } else {
-                "*".repeat(value.len())
+        let display = match choice {
+            Some(current) => {
+                let hint = if is_active { "  Space: cycle" } else { "" };
+                format!("{current}{hint}")
             }
-        } else {
-            value.clone()
+            None => {
+                // Safe: `choice` is None only when `field_at` returned a text field.
+                let spec = form.field_at(i).expect("text row has a field spec");
+                let value = form.draft.value(spec.field);
+                if spec.field.is_secret() {
+                    if value.is_empty() && form.draft.id.is_some() {
+                        "(unchanged)".to_owned()
+                    } else {
+                        "*".repeat(value.len())
+                    }
+                } else {
+                    value.to_owned()
+                }
+            }
         };
 
         let para = Paragraph::new(display).block(

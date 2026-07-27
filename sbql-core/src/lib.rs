@@ -12,6 +12,7 @@
 
 pub mod config;
 pub mod connection;
+pub mod connection_spec;
 pub mod error;
 mod handlers;
 pub mod import;
@@ -24,8 +25,11 @@ pub mod tunnel;
 
 // Re-export the most commonly used types at the crate root.
 pub use config::{
-    config_path, load_connections, load_connections_from, save_connections, save_connections_to,
-    ConnectionConfig, SslMode,
+    config_path, keyring_enabled, load_connections, load_connections_from, save_connections,
+    save_connections_to, ConnectionConfig, SslMode, CONFIG_DIR_ENV, NO_KEYRING_ENV,
+};
+pub use connection_spec::{
+    BackendSpec, ConnectionDraft, ConnectionField, FieldSpec, ValidationError,
 };
 pub use error::{Result, SbqlError};
 pub use pool::{DbBackend, DbPool};

@@ -5,6 +5,7 @@ use crate::app::{
     AppState, ConnectionForm, DiagramGlyphMode, EditorMode, FocusedPanel, NavMode, PendingEdit,
 };
 use crate::completion;
+use crate::list_cursor::Overflow;
 use sbql_core::CoreCommand;
 
 /// A pure description of a state change or side effect.
@@ -266,7 +267,7 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
             state.filter.visible = true;
             state.filter.textarea = tui_textarea::TextArea::default();
             state.filter.suggestions.clear();
-            state.filter.selected_suggestion = 0;
+            state.filter.suggestion_cursor.reset();
             state.filter.show_suggestions = false;
             state.filter.loading_suggestions = false;
             state.filter.pending_live_apply_at = None;
@@ -333,11 +334,11 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
         // -- Connections --
         Action::SelectConnection(idx) => {
             if !state.conn.connections.is_empty() {
-                state.conn.selected = idx.min(state.conn.connections.len() - 1);
+                state.conn.cursor.select(idx, state.conn.connections.len());
             }
         }
         Action::ConnectSelected => {
-            if let Some(cfg) = state.conn.connections.get(state.conn.selected) {
+            if let Some(cfg) = state.conn.connections.get(state.conn.selected()) {
                 let id = cfg.id;
                 let _ = cmd_tx.send(CoreCommand::Connect(id));
             }
@@ -346,12 +347,12 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
             state.conn.form = ConnectionForm::open_new();
         }
         Action::OpenEditConnForm => {
-            if let Some(cfg) = state.conn.connections.get(state.conn.selected).cloned() {
+            if let Some(cfg) = state.conn.connections.get(state.conn.selected()).cloned() {
                 state.conn.form = ConnectionForm::open_edit(&cfg);
             }
         }
         Action::InitDeleteConnection => {
-            if let Some(cfg) = state.conn.connections.get(state.conn.selected).cloned() {
+            if let Some(cfg) = state.conn.connections.get(state.conn.selected()).cloned() {
                 state.conn.pending_delete = Some((cfg.id, cfg.name.clone()));
                 state.status_msg = Some(format!(
                     "Confirm delete connection '{}': y/Enter = confirm, n/Esc = cancel.",
@@ -417,10 +418,10 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
 
         // -- Tables --
         Action::SelectTable(idx) => {
-            state.tables.selected = idx;
+            state.tables.cursor.select(idx, state.tables.tables.len());
         }
         Action::OpenSelectedTable => {
-            if let Some(t) = state.tables.tables.get(state.tables.selected) {
+            if let Some(t) = state.tables.tables.get(state.tables.selected()) {
                 let sql = sbql_core::query_builder::table_select_sql(
                     &t.schema,
                     &t.name,
@@ -464,11 +465,10 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
             apply_refresh_filter_suggestions(state, cmd_tx);
         }
         Action::FilterSuggestionUp => {
-            state.filter.selected_suggestion = state.filter.selected_suggestion.saturating_sub(1);
+            state.filter.suggestion_cursor.prev(state.filter.suggestions.len(), Overflow::Clamp);
         }
         Action::FilterSuggestionDown => {
-            let max = state.filter.suggestions.len().saturating_sub(1);
-            state.filter.selected_suggestion = (state.filter.selected_suggestion + 1).min(max);
+            state.filter.suggestion_cursor.next(state.filter.suggestions.len(), Overflow::Clamp);
         }
         Action::FilterApplySuggestion => {
             if apply_selected_filter_suggestion(state) {
@@ -800,254 +800,17 @@ fn apply_commit_pending(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<Cor
 }
 
 fn apply_form_submit(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCommand>) {
-    let form = &state.conn.form;
-
-    if form.name.trim().is_empty() {
-        state.conn.form.error = Some("Name is required".into());
-        return;
-    }
-
-    let (config, password) = match form.backend {
-        sbql_core::DbBackend::Postgres => {
-            if form.host.trim().is_empty() {
-                state.conn.form.error = Some("Host is required".into());
-                return;
+    // Validation and construction both live in sbql-core, so the rules here are
+    // exactly the ones the macOS app and the save handler enforce.
+    let (config, password) = match state.conn.form.draft.build() {
+        Ok(config) => (config, state.conn.form.draft.password_for_save()),
+        Err(e) => {
+            // Send the user back to the field that needs attention.
+            if let Some(idx) = state.conn.form.row_of(e.field) {
+                state.conn.form.field_index = idx;
             }
-            let port: u16 = match form.port.trim().parse() {
-                Ok(p) => p,
-                Err(_) => {
-                    state.conn.form.error = Some("Port must be a number (1-65535)".into());
-                    return;
-                }
-            };
-            if form.user.trim().is_empty() {
-                state.conn.form.error = Some("User is required".into());
-                return;
-            }
-            if form.database.trim().is_empty() {
-                state.conn.form.error = Some("Database is required".into());
-                return;
-            }
-
-            let mut config = sbql_core::ConnectionConfig::new_postgres(
-                form.name.trim(),
-                form.host.trim(),
-                port,
-                form.user.trim(),
-                form.database.trim(),
-            );
-            config.ssl_mode = form.ssl_mode.clone();
-
-            if let Some(id) = form.editing_id {
-                config.id = id;
-            }
-
-            let password = if form.password.is_empty() && form.editing_id.is_some() {
-                None
-            } else {
-                Some(form.password.clone())
-            };
-            (config, password)
-        }
-        sbql_core::DbBackend::Mysql => {
-            if form.host.trim().is_empty() {
-                state.conn.form.error = Some("Host is required".into());
-                return;
-            }
-            let port: u16 = match form.port.trim().parse() {
-                Ok(p) => p,
-                Err(_) => {
-                    state.conn.form.error = Some("Port must be a number (1-65535)".into());
-                    return;
-                }
-            };
-            if form.user.trim().is_empty() {
-                state.conn.form.error = Some("User is required".into());
-                return;
-            }
-            if form.database.trim().is_empty() {
-                state.conn.form.error = Some("Database is required".into());
-                return;
-            }
-
-            let mut config = sbql_core::ConnectionConfig::new_mysql(
-                form.name.trim(),
-                form.host.trim(),
-                port,
-                form.user.trim(),
-                form.database.trim(),
-            );
-            config.ssl_mode = form.ssl_mode.clone();
-
-            if let Some(id) = form.editing_id {
-                config.id = id;
-            }
-
-            let password = if form.password.is_empty() && form.editing_id.is_some() {
-                None
-            } else {
-                Some(form.password.clone())
-            };
-            (config, password)
-        }
-        sbql_core::DbBackend::Sqlite => {
-            if form.file_path.trim().is_empty() {
-                state.conn.form.error = Some("File path is required".into());
-                return;
-            }
-
-            let mut config =
-                sbql_core::ConnectionConfig::new_sqlite(form.name.trim(), form.file_path.trim());
-
-            if let Some(id) = form.editing_id {
-                config.id = id;
-            }
-
-            (config, Some(String::new()))
-        }
-        sbql_core::DbBackend::Redis => {
-            if form.host.trim().is_empty() {
-                state.conn.form.error = Some("Host is required".into());
-                return;
-            }
-            let port: u16 = match form.port.trim().parse() {
-                Ok(p) => p,
-                Err(_) => {
-                    state.conn.form.error = Some("Port must be a number (1-65535)".into());
-                    return;
-                }
-            };
-
-            let mut config =
-                sbql_core::ConnectionConfig::new_redis(form.name.trim(), form.host.trim(), port);
-            config.database = form.database.trim().to_string();
-
-            if let Some(id) = form.editing_id {
-                config.id = id;
-            }
-
-            let password = if form.password.is_empty() && form.editing_id.is_some() {
-                None
-            } else if form.password.is_empty() {
-                Some(String::new())
-            } else {
-                Some(form.password.clone())
-            };
-            (config, password)
-        }
-        sbql_core::DbBackend::DynamoDb => {
-            if form.host.trim().is_empty() {
-                state.conn.form.error = Some("Endpoint is required".into());
-                return;
-            }
-            let port: u16 = match form.port.trim().parse() {
-                Ok(p) => p,
-                Err(_) => {
-                    state.conn.form.error = Some("Port must be a number (1-65535)".into());
-                    return;
-                }
-            };
-            if form.database.trim().is_empty() {
-                state.conn.form.error = Some("Region is required".into());
-                return;
-            }
-
-            let mut config = sbql_core::ConnectionConfig::new_dynamodb(
-                form.name.trim(),
-                form.host.trim(),
-                port,
-                form.database.trim(),
-            );
-            config.user = form.user.trim().to_string();
-
-            if let Some(id) = form.editing_id {
-                config.id = id;
-            }
-
-            let password = if form.password.is_empty() && form.editing_id.is_some() {
-                None
-            } else if form.password.is_empty() {
-                Some(String::new())
-            } else {
-                Some(form.password.clone())
-            };
-            (config, password)
-        }
-        sbql_core::DbBackend::MongoDb => {
-            if form.host.trim().is_empty() {
-                state.conn.form.error = Some("Host is required".into());
-                return;
-            }
-            let port: u16 = match form.port.trim().parse() {
-                Ok(p) => p,
-                Err(_) => {
-                    state.conn.form.error = Some("Port must be a number (1-65535)".into());
-                    return;
-                }
-            };
-            if form.database.trim().is_empty() {
-                state.conn.form.error = Some("Database is required".into());
-                return;
-            }
-
-            let mut config = sbql_core::ConnectionConfig::new_mongodb(
-                form.name.trim(),
-                form.host.trim(),
-                port,
-                form.database.trim(),
-            );
-            config.user = form.user.trim().to_string();
-
-            if let Some(id) = form.editing_id {
-                config.id = id;
-            }
-
-            let password = if form.password.is_empty() && form.editing_id.is_some() {
-                None
-            } else if form.password.is_empty() {
-                Some(String::new())
-            } else {
-                Some(form.password.clone())
-            };
-            (config, password)
-        }
-        sbql_core::DbBackend::SqlServer => {
-            if form.host.trim().is_empty() {
-                state.conn.form.error = Some("Host is required".into());
-                return;
-            }
-            let port: u16 = match form.port.trim().parse() {
-                Ok(p) => p,
-                Err(_) => {
-                    state.conn.form.error = Some("Port must be a number (1-65535)".into());
-                    return;
-                }
-            };
-            if form.database.trim().is_empty() {
-                state.conn.form.error = Some("Database is required".into());
-                return;
-            }
-
-            let mut config = sbql_core::ConnectionConfig::new_sqlserver(
-                form.name.trim(),
-                form.host.trim(),
-                port,
-                form.user.trim(),
-                form.database.trim(),
-            );
-
-            if let Some(id) = form.editing_id {
-                config.id = id;
-            }
-
-            let password = if form.password.is_empty() && form.editing_id.is_some() {
-                None
-            } else if form.password.is_empty() {
-                Some(String::new())
-            } else {
-                Some(form.password.clone())
-            };
-            (config, password)
+            state.conn.form.error = Some(e.message);
+            return;
         }
     };
 
@@ -1084,7 +847,7 @@ fn apply_refresh_filter_suggestions(
             .collect();
         suggestions.sort();
         state.filter.suggestions = suggestions;
-        state.filter.selected_suggestion = 0;
+        state.filter.suggestion_cursor.reset();
         state.filter.show_suggestions = !state.filter.suggestions.is_empty();
         state.filter.loading_suggestions = false;
         state.filter.pending_live_apply_at = None;
@@ -1137,7 +900,7 @@ fn apply_refresh_filter_suggestions(
         }
     }
     state.filter.suggestions = local.into_iter().collect();
-    state.filter.selected_suggestion = 0;
+    state.filter.suggestion_cursor.reset();
     state.filter.show_suggestions = true;
 
     state.filter.suggestion_token = state.filter.suggestion_token.saturating_add(1);
@@ -1169,7 +932,7 @@ fn apply_selected_filter_suggestion(state: &mut AppState) -> bool {
     let Some(choice) = state
         .filter
         .suggestions
-        .get(state.filter.selected_suggestion)
+        .get(state.filter.suggestion_cursor.index())
         .cloned()
     else {
         return false;
@@ -1273,7 +1036,7 @@ fn recompute_completions(state: &mut AppState) {
         } else {
             state.editor.completion.prefix = prefix;
             state.editor.completion.items = items;
-            state.editor.completion.selected = 0;
+            state.editor.completion.cursor.reset();
             state.editor.completion.visible = true;
         }
     } else {
@@ -1722,7 +1485,7 @@ mod tests {
         ]);
         let (tx, _rx) = cmd_channel();
         apply(Action::SelectConnection(1), &mut state, &tx);
-        assert_eq!(state.conn.selected, 1);
+        assert_eq!(state.conn.selected(), 1);
     }
 
     #[test]
@@ -1732,7 +1495,7 @@ mod tests {
         )]);
         let (tx, _rx) = cmd_channel();
         apply(Action::SelectConnection(10), &mut state, &tx);
-        assert_eq!(state.conn.selected, 0);
+        assert_eq!(state.conn.selected(), 0);
     }
 
     #[test]
@@ -1766,7 +1529,7 @@ mod tests {
         let (tx, _rx) = cmd_channel();
         apply(Action::OpenEditConnForm, &mut state, &tx);
         assert!(state.conn.form.visible);
-        assert_eq!(state.conn.form.name, "a");
+        assert_eq!(state.conn.form.draft.name, "a");
     }
 
     #[test]
@@ -1846,17 +1609,17 @@ mod tests {
         state.conn.form.field_index = 1; // Name field
         let (tx, _rx) = cmd_channel();
         apply(Action::FormInput('a'), &mut state, &tx);
-        assert_eq!(state.conn.form.name, "a");
+        assert_eq!(state.conn.form.draft.name, "a");
     }
 
     #[test]
     fn form_backspace() {
         let mut state = AppState::new(vec![]);
-        state.conn.form.name = "ab".into();
+        state.conn.form.draft.name = "ab".into();
         state.conn.form.field_index = 1; // Name field
         let (tx, _rx) = cmd_channel();
         apply(Action::FormBackspace, &mut state, &tx);
-        assert_eq!(state.conn.form.name, "a");
+        assert_eq!(state.conn.form.draft.name, "a");
     }
 
     #[test]
@@ -1864,18 +1627,18 @@ mod tests {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
         apply(Action::FormCycleSsl, &mut state, &tx);
-        assert_eq!(state.conn.form.ssl_mode, sbql_core::SslMode::Require);
+        assert_eq!(state.conn.form.draft.ssl_mode, sbql_core::SslMode::Require);
     }
 
     #[test]
     fn form_submit_valid() {
         let mut state = AppState::new(vec![]);
         state.conn.form.visible = true;
-        state.conn.form.name = "test".into();
-        state.conn.form.host = "localhost".into();
-        state.conn.form.port = "5432".into();
-        state.conn.form.user = "postgres".into();
-        state.conn.form.database = "testdb".into();
+        state.conn.form.draft.name = "test".into();
+        state.conn.form.draft.host = "localhost".into();
+        state.conn.form.draft.port = "5432".into();
+        state.conn.form.draft.user = "postgres".into();
+        state.conn.form.draft.database = "testdb".into();
         let (tx, mut rx) = cmd_channel();
         apply(Action::FormSubmit, &mut state, &tx);
         assert!(!state.conn.form.visible);
@@ -1886,7 +1649,7 @@ mod tests {
     fn form_submit_missing_name() {
         let mut state = AppState::new(vec![]);
         state.conn.form.visible = true;
-        state.conn.form.name = "".into();
+        state.conn.form.draft.name = "".into();
         let (tx, _rx) = cmd_channel();
         apply(Action::FormSubmit, &mut state, &tx);
         assert!(state.conn.form.error.is_some());
@@ -1897,11 +1660,11 @@ mod tests {
     fn form_submit_bad_port() {
         let mut state = AppState::new(vec![]);
         state.conn.form.visible = true;
-        state.conn.form.name = "test".into();
-        state.conn.form.host = "localhost".into();
-        state.conn.form.port = "not_a_number".into();
-        state.conn.form.user = "u".into();
-        state.conn.form.database = "d".into();
+        state.conn.form.draft.name = "test".into();
+        state.conn.form.draft.host = "localhost".into();
+        state.conn.form.draft.port = "not_a_number".into();
+        state.conn.form.draft.user = "u".into();
+        state.conn.form.draft.database = "d".into();
         let (tx, _rx) = cmd_channel();
         apply(Action::FormSubmit, &mut state, &tx);
         assert!(state.conn.form.error.unwrap().contains("Port"));
@@ -1911,11 +1674,11 @@ mod tests {
     fn form_submit_redis_valid() {
         let mut state = AppState::new(vec![]);
         state.conn.form.visible = true;
-        state.conn.form.backend = sbql_core::DbBackend::Redis;
-        state.conn.form.name = "my-redis".into();
-        state.conn.form.host = "localhost".into();
-        state.conn.form.port = "6379".into();
-        state.conn.form.database = "0".into();
+        state.conn.form.draft.backend = sbql_core::DbBackend::Redis;
+        state.conn.form.draft.name = "my-redis".into();
+        state.conn.form.draft.host = "localhost".into();
+        state.conn.form.draft.port = "6379".into();
+        state.conn.form.draft.database = "0".into();
         let (tx, mut rx) = cmd_channel();
         apply(Action::FormSubmit, &mut state, &tx);
         assert!(!state.conn.form.visible);
@@ -1927,10 +1690,10 @@ mod tests {
     fn form_submit_redis_missing_host() {
         let mut state = AppState::new(vec![]);
         state.conn.form.visible = true;
-        state.conn.form.backend = sbql_core::DbBackend::Redis;
-        state.conn.form.name = "my-redis".into();
-        state.conn.form.host = "".into();
-        state.conn.form.port = "6379".into();
+        state.conn.form.draft.backend = sbql_core::DbBackend::Redis;
+        state.conn.form.draft.name = "my-redis".into();
+        state.conn.form.draft.host = "".into();
+        state.conn.form.draft.port = "6379".into();
         let (tx, _rx) = cmd_channel();
         apply(Action::FormSubmit, &mut state, &tx);
         assert!(state.conn.form.visible);
@@ -1941,10 +1704,10 @@ mod tests {
     fn form_submit_redis_bad_port() {
         let mut state = AppState::new(vec![]);
         state.conn.form.visible = true;
-        state.conn.form.backend = sbql_core::DbBackend::Redis;
-        state.conn.form.name = "my-redis".into();
-        state.conn.form.host = "localhost".into();
-        state.conn.form.port = "abc".into();
+        state.conn.form.draft.backend = sbql_core::DbBackend::Redis;
+        state.conn.form.draft.name = "my-redis".into();
+        state.conn.form.draft.host = "localhost".into();
+        state.conn.form.draft.port = "abc".into();
         let (tx, _rx) = cmd_channel();
         apply(Action::FormSubmit, &mut state, &tx);
         assert!(state.conn.form.visible);
@@ -1958,9 +1721,38 @@ mod tests {
     #[test]
     fn select_table() {
         let mut state = AppState::new(vec![]);
+        state.tables.tables = (0..6)
+            .map(|i| sbql_core::TableEntry {
+                schema: "public".into(),
+                name: format!("t{i}"),
+            })
+            .collect();
         let (tx, _rx) = cmd_channel();
         apply(Action::SelectTable(5), &mut state, &tx);
-        assert_eq!(state.tables.selected, 5);
+        assert_eq!(state.tables.selected(), 5);
+    }
+
+    /// A click below the last row used to store an index past the end, leaving
+    /// the panel with nothing selected.
+    #[test]
+    fn select_table_past_the_end_lands_on_the_last_row() {
+        let mut state = AppState::new(vec![]);
+        state.tables.tables = vec![sbql_core::TableEntry {
+            schema: "public".into(),
+            name: "only".into(),
+        }];
+        let (tx, _rx) = cmd_channel();
+        apply(Action::SelectTable(99), &mut state, &tx);
+        assert_eq!(state.tables.selected(), 0);
+        assert!(state.tables.tables.get(state.tables.selected()).is_some());
+    }
+
+    #[test]
+    fn select_table_in_an_empty_list_stays_at_zero() {
+        let mut state = AppState::new(vec![]);
+        let (tx, _rx) = cmd_channel();
+        apply(Action::SelectTable(5), &mut state, &tx);
+        assert_eq!(state.tables.selected(), 0);
     }
 
     // -----------------------------------------------------------------------
@@ -1998,20 +1790,21 @@ mod tests {
     #[test]
     fn filter_suggestion_up() {
         let mut state = make_state_with_results();
-        state.filter.selected_suggestion = 2;
+        state.filter.suggestions = vec!["a".into(), "b".into(), "c".into()];
+        state.filter.suggestion_cursor.select(2, 3);
         let (tx, _rx) = cmd_channel();
         apply(Action::FilterSuggestionUp, &mut state, &tx);
-        assert_eq!(state.filter.selected_suggestion, 1);
+        assert_eq!(state.filter.suggestion_cursor.index(), 1);
     }
 
     #[test]
     fn filter_suggestion_down() {
         let mut state = make_state_with_results();
         state.filter.suggestions = vec!["a".into(), "b".into(), "c".into()];
-        state.filter.selected_suggestion = 0;
+        state.filter.suggestion_cursor.reset();
         let (tx, _rx) = cmd_channel();
         apply(Action::FilterSuggestionDown, &mut state, &tx);
-        assert_eq!(state.filter.selected_suggestion, 1);
+        assert_eq!(state.filter.suggestion_cursor.index(), 1);
     }
 
     #[test]

@@ -1,5 +1,7 @@
 use sbql_core::{DiagramData, TableEntry};
 
+use crate::list_cursor::{ListCursor, Overflow};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionKind {
     Table,
@@ -18,7 +20,7 @@ pub struct CompletionItem {
 pub struct CompletionState {
     pub visible: bool,
     pub items: Vec<CompletionItem>,
-    pub selected: usize,
+    pub cursor: ListCursor,
     pub prefix: String,
 }
 
@@ -26,28 +28,25 @@ impl CompletionState {
     pub fn dismiss(&mut self) {
         self.visible = false;
         self.items.clear();
-        self.selected = 0;
+        self.cursor.reset();
         self.prefix.clear();
     }
 
+    /// A short popup, so it wraps: cycling is quicker than reversing.
     pub fn move_up(&mut self) {
-        if !self.items.is_empty() {
-            self.selected = if self.selected == 0 {
-                self.items.len() - 1
-            } else {
-                self.selected - 1
-            };
-        }
+        self.cursor.prev(self.items.len(), Overflow::Wrap);
     }
 
     pub fn move_down(&mut self) {
-        if !self.items.is_empty() {
-            self.selected = (self.selected + 1) % self.items.len();
-        }
+        self.cursor.next(self.items.len(), Overflow::Wrap);
+    }
+
+    pub fn selected(&self) -> usize {
+        self.cursor.index()
     }
 
     pub fn selected_item(&self) -> Option<&CompletionItem> {
-        self.items.get(self.selected)
+        self.items.get(self.cursor.index())
     }
 }
 
