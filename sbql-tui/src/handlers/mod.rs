@@ -10,9 +10,7 @@ pub mod tables;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::action::{
-    Action, CellEditAction, ConnectionsAction, DiagramAction, FilterAction, FormAction, NavAction,
-};
+use crate::action::{Action, CellEditAction, DiagramAction, NavAction};
 use crate::app::{AppState, EditorMode, FocusedPanel, NavMode};
 use crate::events::is_quit;
 
@@ -210,6 +208,7 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::action::{ConnectionsAction, FilterAction, FormAction};
     use crate::app::{CellEditState, DiagramState};
     use crate::test_helpers::{key, key_mod, make_state_with_results};
     use sbql_core::DiagramData;

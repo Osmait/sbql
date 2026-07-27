@@ -67,24 +67,6 @@ impl ListCursor {
         };
     }
 
-    pub fn first(&mut self) {
-        self.index = 0;
-    }
-
-    pub fn last(&mut self, len: usize) {
-        self.index = len.saturating_sub(1);
-    }
-
-    /// Move by `delta` rows, clamped. Used for half-page jumps.
-    pub fn step(&mut self, delta: isize, len: usize) {
-        if len == 0 {
-            self.index = 0;
-            return;
-        }
-        let target = self.index as isize + delta;
-        self.index = target.clamp(0, len as isize - 1) as usize;
-    }
-
     /// Pull the index back inside a list that changed under it.
     ///
     /// Call this whenever the backing list is replaced, otherwise a stale index
@@ -111,10 +93,6 @@ mod tests {
             c.prev(0, overflow);
             assert_eq!(c.index(), 0);
         }
-        c.last(0);
-        assert_eq!(c.index(), 0);
-        c.step(5, 0);
-        assert_eq!(c.index(), 0);
     }
 
     #[test]
@@ -162,18 +140,5 @@ mod tests {
         assert_eq!(c.index(), 2);
         c.clamp(0);
         assert_eq!(c.index(), 0);
-    }
-
-    #[test]
-    fn step_moves_by_a_delta_without_leaving_the_list() {
-        let mut c = ListCursor::new();
-        c.step(5, 10);
-        assert_eq!(c.index(), 5);
-        c.step(-2, 10);
-        assert_eq!(c.index(), 3);
-        c.step(-99, 10);
-        assert_eq!(c.index(), 0);
-        c.step(99, 10);
-        assert_eq!(c.index(), 9);
     }
 }
