@@ -24,18 +24,22 @@ pub(super) fn apply(
         }
 
         ConnectionsAction::OpenNewForm => {
+            state.close_overlays();
             state.conn.form = ConnectionForm::open_new();
         }
 
         ConnectionsAction::OpenEditForm => {
             if let Some(cfg) = state.conn.connections.get(state.conn.selected()).cloned() {
+                state.close_overlays();
                 state.conn.form = ConnectionForm::open_edit(&cfg);
             }
         }
 
         ConnectionsAction::InitDelete => {
             if let Some(cfg) = state.conn.connections.get(state.conn.selected()).cloned() {
-                state.conn.pending_delete = Some((cfg.id, cfg.name.clone()));
+                let pending = (cfg.id, cfg.name.clone());
+                state.close_overlays();
+                state.conn.pending_delete = Some(pending);
                 state.status_msg = Some(format!(
                     "Confirm delete connection '{}': y/Enter = confirm, n/Esc = cancel.",
                     cfg.name

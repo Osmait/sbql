@@ -10,6 +10,7 @@ pub(super) fn apply(
 ) {
     match action {
         FilterAction::Open => {
+            state.close_overlays();
             state.filter.visible = true;
             state.filter.textarea = tui_textarea::TextArea::default();
             state.filter.suggestions.clear();

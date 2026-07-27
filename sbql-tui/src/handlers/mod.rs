@@ -11,44 +11,30 @@ pub mod tables;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::action::{Action, CellEditAction, DiagramAction, NavAction};
-use crate::app::{AppState, EditorMode, FocusedPanel, NavMode};
+use crate::app::{AppState, EditorMode, FocusedPanel, Mode, NavMode};
 use crate::events::is_quit;
 
 /// Top-level key dispatch. Returns an [`Action`] to be applied by the event loop.
 pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
     tracing::info!(
-        "handle_key: focused={:?} code={:?} mods={:?} cell_edit={} conn_form={} filter={}",
+        "handle_key: mode={:?} focused={:?} code={:?} mods={:?}",
+        state.mode(),
         state.focused,
         key.code,
         key.modifiers,
-        state.mutation.cell_edit.is_some(),
-        state.conn.form.visible,
-        state.filter.visible,
     );
 
-    // ---- Diagram mode — intercept all keys ----
-    if state.diagram.is_some() {
-        return diagram::handle(state, key);
-    }
-
-    // ---- Cell edit mode ----
-    if state.mutation.cell_edit.is_some() {
-        return cell_edit::handle(state, key);
-    }
-
-    // ---- Filter bar mode ----
-    if state.filter.visible {
-        return filter::handle(state, key);
-    }
-
-    // ---- Connection form mode ----
-    if state.conn.form.visible {
-        return connections::handle_form(state, key);
-    }
-
-    // ---- Pending destructive confirmation ----
-    if state.conn.pending_delete.is_some() {
-        return connections::handle_confirm_delete(state, key);
+    // Overlays own the keyboard while they are open. `mode()` decides which
+    // one wins; this match is exhaustive, so a new overlay cannot be added
+    // without deciding what it does with a key press.
+    match state.mode() {
+        Mode::Diagram => return diagram::handle(state, key),
+        Mode::CellEdit => return cell_edit::handle(state, key),
+        Mode::Filter => return filter::handle(state, key),
+        Mode::ConnectionForm => return connections::handle_form(state, key),
+        Mode::ConfirmDelete => return connections::handle_confirm_delete(state, key),
+        // Fall through to the panel and global keys below.
+        Mode::Browsing => {}
     }
 
     // ---- Global keys ----
@@ -207,6 +193,61 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
 
 #[cfg(test)]
 mod tests {
+    use crate::app::Mode;
+
+    /// Opening one overlay must close any other, so `mode()` never has to
+    /// arbitrate between two things that both think they own the keyboard.
+    #[test]
+    fn overlays_are_mutually_exclusive() {
+        use crate::action::{apply, Action, ConnectionsAction, FilterAction};
+
+        let mut state = crate::test_helpers::make_state_with_results();
+        state.conn.connections = vec![sbql_core::ConnectionConfig::new_sqlite("c", "/tmp/x.db")];
+        let (tx, _rx) = crate::test_helpers::cmd_channel();
+
+        let opens: Vec<Action> = vec![
+            Action::Filter(FilterAction::Open),
+            Action::Connections(ConnectionsAction::OpenNewForm),
+            Action::Connections(ConnectionsAction::InitDelete),
+            Action::Connections(ConnectionsAction::OpenEditForm),
+        ];
+        for open in opens {
+            apply(open, &mut state, &tx);
+            assert_eq!(
+                state.open_overlay_count(),
+                1,
+                "exactly one overlay may be open, mode is {:?}",
+                state.mode()
+            );
+        }
+    }
+
+    /// The diagram sits above everything: while it is open no other overlay
+    /// can steal a key press.
+    #[test]
+    fn mode_resolves_in_precedence_order() {
+        let mut state = crate::test_helpers::make_state_with_results();
+        assert_eq!(state.mode(), Mode::Browsing);
+
+        state.conn.pending_delete = Some((uuid::Uuid::new_v4(), "c".into()));
+        assert_eq!(state.mode(), Mode::ConfirmDelete);
+
+        state.conn.form.visible = true;
+        assert_eq!(state.mode(), Mode::ConnectionForm, "form outranks confirm");
+
+        state.filter.visible = true;
+        assert_eq!(state.mode(), Mode::Filter, "filter outranks form");
+
+        state.diagram = Some(crate::app::DiagramState::new(
+            sbql_core::DiagramData::default(),
+        ));
+        assert_eq!(state.mode(), Mode::Diagram, "diagram outranks everything");
+
+        state.close_overlays();
+        assert_eq!(state.mode(), Mode::Browsing);
+        assert_eq!(state.open_overlay_count(), 0);
+    }
+
     use super::*;
     use crate::action::{ConnectionsAction, FilterAction, FormAction};
     use crate::app::{CellEditState, DiagramState};

@@ -549,6 +549,28 @@ pub struct LayoutCache {
 // Main application state
 // ---------------------------------------------------------------------------
 
+/// Which part of the UI currently owns the keyboard.
+///
+/// Overlays are exclusive: opening one closes any other. The variants are
+/// listed in precedence order, which is the order [`AppState::mode`] resolves
+/// them — so the answer to "who gets this key" is declared here rather than
+/// implied by the order of a chain of `if`s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// Full-screen schema diagram. Takes every key.
+    Diagram,
+    /// Single-cell edit popup over the results grid.
+    CellEdit,
+    /// Filter bar under the results grid.
+    Filter,
+    /// Add/edit connection dialog.
+    ConnectionForm,
+    /// "Delete connection?" confirmation.
+    ConfirmDelete,
+    /// No overlay: keys go to the focused panel.
+    Browsing,
+}
+
 pub struct AppState {
     // ---- panels ----
     pub focused: FocusedPanel,
@@ -595,6 +617,56 @@ pub struct LastAreas {
 }
 
 impl AppState {
+    /// Which mode owns the keyboard right now.
+    ///
+    /// The single place overlay precedence is decided. Callers `match` on the
+    /// result, so adding an overlay forces every dispatch site to say what it
+    /// does with it, instead of silently falling through to the panel keys.
+    pub fn mode(&self) -> Mode {
+        if self.diagram.is_some() {
+            Mode::Diagram
+        } else if self.mutation.cell_edit.is_some() {
+            Mode::CellEdit
+        } else if self.filter.visible {
+            Mode::Filter
+        } else if self.conn.form.visible {
+            Mode::ConnectionForm
+        } else if self.conn.pending_delete.is_some() {
+            Mode::ConfirmDelete
+        } else {
+            Mode::Browsing
+        }
+    }
+
+    /// Close every overlay.
+    ///
+    /// Opening an overlay goes through here first, so two can never be open at
+    /// once and `mode()` never has to arbitrate between contradictory state.
+    pub fn close_overlays(&mut self) {
+        self.diagram = None;
+        self.diagram_requested = false;
+        self.mutation.cell_edit = None;
+        self.filter.visible = false;
+        self.filter.show_suggestions = false;
+        self.conn.form.visible = false;
+        self.conn.pending_delete = None;
+    }
+
+    /// Number of overlays currently open. Should only ever be 0 or 1.
+    #[cfg(test)]
+    pub fn open_overlay_count(&self) -> usize {
+        [
+            self.diagram.is_some(),
+            self.mutation.cell_edit.is_some(),
+            self.filter.visible,
+            self.conn.form.visible,
+            self.conn.pending_delete.is_some(),
+        ]
+        .iter()
+        .filter(|open| **open)
+        .count()
+    }
+
     pub fn new(connections: Vec<ConnectionConfig>) -> Self {
         let mut textarea = TextArea::default();
         textarea.set_placeholder_text("-- Write SQL here. Press Ctrl+S or F5 to run.");
@@ -845,6 +917,7 @@ impl AppState {
                 self.cached_diagram = Some(data.clone());
                 if self.diagram_requested {
                     self.diagram_requested = false;
+                    self.close_overlays();
                     self.diagram = Some(DiagramState::new(data));
                 }
             }
