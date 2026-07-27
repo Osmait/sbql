@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::action::Action;
+use crate::action::{Action, CellEditAction, FilterAction, NavAction, ResultsAction};
 use crate::app::AppState;
 use crate::events::is_commit;
 
@@ -14,78 +14,87 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
     );
     match (key.code, key.modifiers) {
         (KeyCode::Down | KeyCode::Char('j'), KeyModifiers::NONE) => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::ClearPendingD,
-            Action::MoveRowDown,
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+            Action::Results(ResultsAction::RowDown),
         ]),
         (KeyCode::Up | KeyCode::Char('k'), KeyModifiers::NONE) => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::ClearPendingD,
-            Action::MoveRowUp,
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+            Action::Results(ResultsAction::RowUp),
         ]),
         (KeyCode::Right | KeyCode::Char('l'), KeyModifiers::NONE) => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::ClearPendingD,
-            Action::MoveColRight,
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+            Action::Results(ResultsAction::ColRight),
         ]),
         (KeyCode::Left | KeyCode::Char('h'), KeyModifiers::NONE) => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::ClearPendingD,
-            Action::MoveColLeft,
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+            Action::Results(ResultsAction::ColLeft),
         ]),
         (KeyCode::Char('g'), KeyModifiers::NONE) => {
             if state.vim.pending_g {
                 Action::Batch(vec![
-                    Action::ClearPendingG,
-                    Action::ClearPendingD,
-                    Action::MoveRowFirst,
+                    Action::Nav(NavAction::ClearPendingG),
+                    Action::Nav(NavAction::ClearPendingD),
+                    Action::Results(ResultsAction::RowFirst),
                 ])
             } else {
-                Action::Batch(vec![Action::ClearPendingD, Action::SetPendingG])
+                Action::Batch(vec![
+                    Action::Nav(NavAction::ClearPendingD),
+                    Action::Nav(NavAction::SetPendingG),
+                ])
             }
         }
         (KeyCode::Char('G'), KeyModifiers::NONE) | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
             Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::ClearPendingD,
-                Action::MoveRowLast,
+                Action::Nav(NavAction::ClearPendingG),
+                Action::Nav(NavAction::ClearPendingD),
+                Action::Results(ResultsAction::RowLast),
             ])
         }
         (KeyCode::Char('d'), KeyModifiers::CONTROL) => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::ClearPendingD,
-            Action::MoveHalfPageDown,
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+            Action::Results(ResultsAction::HalfPageDown),
         ]),
         (KeyCode::Char('u'), KeyModifiers::CONTROL) => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::ClearPendingD,
-            Action::MoveHalfPageUp,
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+            Action::Results(ResultsAction::HalfPageUp),
         ]),
         (KeyCode::Char('d'), KeyModifiers::NONE) => {
             if state.mutation.pending_d {
                 Action::Batch(vec![
-                    Action::ClearPendingG,
-                    Action::ClearPendingD,
-                    Action::MarkRowForDeletion,
+                    Action::Nav(NavAction::ClearPendingG),
+                    Action::Nav(NavAction::ClearPendingD),
+                    Action::Results(ResultsAction::MarkRowForDeletion),
                 ])
             } else {
-                Action::Batch(vec![Action::ClearPendingG, Action::SetPendingD])
+                Action::Batch(vec![
+                    Action::Nav(NavAction::ClearPendingG),
+                    Action::Nav(NavAction::SetPendingD),
+                ])
             }
         }
         (KeyCode::Char('0'), KeyModifiers::NONE) | (KeyCode::Char('^'), KeyModifiers::NONE) => {
             Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::ClearPendingD,
-                Action::MoveColFirst,
+                Action::Nav(NavAction::ClearPendingG),
+                Action::Nav(NavAction::ClearPendingD),
+                Action::Results(ResultsAction::ColFirst),
             ])
         }
         (KeyCode::Char('$'), KeyModifiers::NONE) => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::ClearPendingD,
-            Action::MoveColLast,
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+            Action::Results(ResultsAction::ColLast),
         ]),
         (KeyCode::PageDown, _) => {
-            let mut actions = vec![Action::ClearPendingG, Action::ClearPendingD];
+            let mut actions = vec![
+                Action::Nav(NavAction::ClearPendingG),
+                Action::Nav(NavAction::ClearPendingD),
+            ];
             if state.results.data.has_next_page {
                 let next = state.results.current_page + 1;
                 actions.push(Action::SendCommand(sbql_core::CoreCommand::FetchPage {
@@ -95,7 +104,10 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
             Action::Batch(actions)
         }
         (KeyCode::PageUp, _) => {
-            let mut actions = vec![Action::ClearPendingG, Action::ClearPendingD];
+            let mut actions = vec![
+                Action::Nav(NavAction::ClearPendingG),
+                Action::Nav(NavAction::ClearPendingD),
+            ];
             if state.results.current_page > 0 {
                 let prev = state.results.current_page - 1;
                 actions.push(Action::SendCommand(sbql_core::CoreCommand::FetchPage {
@@ -106,34 +118,37 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
         }
         (KeyCode::Enter, KeyModifiers::NONE) | (KeyCode::Char('i'), KeyModifiers::NONE) => {
             Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::ClearPendingD,
-                Action::EnterCellEdit,
+                Action::Nav(NavAction::ClearPendingG),
+                Action::Nav(NavAction::ClearPendingD),
+                Action::CellEdit(CellEditAction::Enter),
             ])
         }
         _ if is_commit(&key) => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::ClearPendingD,
-            Action::CommitPending,
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+            Action::Results(ResultsAction::CommitPending),
         ]),
         (KeyCode::Char('o'), KeyModifiers::NONE) => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::ClearPendingD,
-            Action::ToggleSort,
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+            Action::Results(ResultsAction::ToggleSort),
         ]),
         (KeyCode::Char('/'), KeyModifiers::NONE) | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
             Action::Batch(vec![
-                Action::ClearPendingG,
-                Action::ClearPendingD,
-                Action::OpenFilter,
+                Action::Nav(NavAction::ClearPendingG),
+                Action::Nav(NavAction::ClearPendingD),
+                Action::Filter(FilterAction::Open),
             ])
         }
         (KeyCode::Esc, _) => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::ClearPendingD,
-            Action::DiscardPendingOrEsc,
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+            Action::Results(ResultsAction::DiscardPendingOrEsc),
         ]),
-        _ => Action::Batch(vec![Action::ClearPendingG, Action::ClearPendingD]),
+        _ => Action::Batch(vec![
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+        ]),
     }
 }
 

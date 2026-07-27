@@ -14,123 +14,207 @@ use sbql_core::CoreCommand;
 /// The event loop calls [`apply`] to execute them.
 #[derive(Debug)]
 pub enum Action {
-    // -- Navigation / focus --
-    FocusPanel(FocusedPanel),
-    SetNavMode(NavMode),
-    SetEditorMode(EditorMode),
-    ToggleSidebar,
+    /// Focus, modes, and pending vim prefixes.
+    Nav(NavAction),
+    /// Moving around and acting on the results grid.
+    Results(ResultsAction),
+    /// The single-cell edit overlay.
+    CellEdit(CellEditAction),
+    /// The SQL editor pane.
+    Editor(EditorAction),
+    /// The autocomplete popup.
+    Completion(CompletionAction),
+    /// The saved-connection list.
+    Connections(ConnectionsAction),
+    /// The add/edit connection form.
+    Form(FormAction),
+    /// The table browser.
+    Tables(TablesAction),
+    /// The results filter bar.
+    Filter(FilterAction),
+    /// The full-screen schema diagram.
+    Diagram(DiagramAction),
 
-    // -- Results grid navigation --
-    MoveRowDown,
-    MoveRowUp,
-    MoveColRight,
-    MoveColLeft,
-    MoveRowFirst,
-    MoveRowLast,
-    MoveHalfPageDown,
-    MoveHalfPageUp,
-    MoveColFirst,
-    MoveColLast,
-    SetResultsRow(usize),
-    SetResultsCol(usize),
-
-    // -- Results actions --
-    EnterCellEdit,
-    StageCellEdit,
-    CancelCellEdit,
-    CellEditInput(Input),
-    MarkRowForDeletion,
-    CommitPending,
-    DiscardPendingOrEsc,
-    ToggleSort,
-    OpenFilter,
-
-    // -- Editor --
-    EditorInput(Input),
-    EditorCursorMove(CursorMove),
-    RunQuery,
-
-    // -- Completion --
-    CompletionUp,
-    CompletionDown,
-    CompletionAccept,
-    CompletionDismiss,
-
-    // -- Connections --
-    ConnectSelected,
-    OpenNewConnForm,
-    OpenEditConnForm,
-    InitDeleteConnection,
-    ConfirmDeleteConnection,
-    CancelDeleteConnection,
-    DisconnectActive,
-
-    // -- Connection form --
-    FormClose,
-    FormNextField,
-    FormPrevField,
-    FormInput(char),
-    FormBackspace,
-    FormCycleBackend,
-    FormCycleSsl,
-    FormSubmit,
-
-    // -- Connections --
-    SelectConnection(usize),
-
-    // -- Tables --
-    SelectTable(usize),
-    OpenSelectedTable,
-
-    // -- Filter --
-    FilterCloseSuggestions,
-    FilterClose,
-    FilterInput(Input),
-    FilterSuggestionUp,
-    FilterSuggestionDown,
-    FilterApplySuggestion,
-    FilterApply,
-
-    // -- Diagram --
-    OpenDiagram,
-    CloseDiagram,
-    DiagramScroll { dx: i16, dy: i16 },
-    DiagramSelectNext,
-    DiagramSelectPrev,
-    DiagramSelectFirst,
-    DiagramSelectLast,
-    DiagramToggleFocus,
-    DiagramToggleGlyph,
-    DiagramJumpToTable,
-    DiagramSearchOpen,
-    DiagramSearchClose,
-    DiagramSearchInput(char),
-    DiagramSearchBackspace,
-    DiagramSearchConfirm,
-
-    // -- Vim state --
-    ClearPendingG,
-    SetPendingG,
-    ClearPendingD,
-    SetPendingD,
-    SetPendingLeader(bool),
-
-    // -- Status --
+    // -- Cross-cutting --
     SetStatus(Option<String>),
     SetError(Option<String>),
     Quit,
     Noop,
 
-    // -- Side effects --
+    /// Hand work to the core. The only way this layer performs I/O.
     SendCommand(CoreCommand),
+    /// Apply several actions in order.
     Batch(Vec<Action>),
 }
 
+#[derive(Debug)]
+pub enum NavAction {
+    FocusPanel(FocusedPanel),
+    SetNavMode(NavMode),
+    SetEditorMode(EditorMode),
+    ToggleSidebar,
+    ClearPendingG,
+    SetPendingG,
+    ClearPendingD,
+    SetPendingD,
+    SetPendingLeader(bool),
+}
+
+#[derive(Debug)]
+pub enum ResultsAction {
+    RowDown,
+    RowUp,
+    ColRight,
+    ColLeft,
+    RowFirst,
+    RowLast,
+    HalfPageDown,
+    HalfPageUp,
+    ColFirst,
+    ColLast,
+    SetRow(usize),
+    SetCol(usize),
+    ToggleSort,
+    MarkRowForDeletion,
+    CommitPending,
+    DiscardPendingOrEsc,
+}
+
+#[derive(Debug)]
+pub enum CellEditAction {
+    Enter,
+    Stage,
+    Cancel,
+    Input(Input),
+}
+
+#[derive(Debug)]
+pub enum EditorAction {
+    Input(Input),
+    CursorMove(CursorMove),
+    RunQuery,
+}
+
+#[derive(Debug)]
+pub enum CompletionAction {
+    Up,
+    Down,
+    Accept,
+    Dismiss,
+}
+
+#[derive(Debug)]
+pub enum ConnectionsAction {
+    Select(usize),
+    ConnectSelected,
+    DisconnectActive,
+    OpenNewForm,
+    OpenEditForm,
+    InitDelete,
+    ConfirmDelete,
+    CancelDelete,
+}
+
+#[derive(Debug)]
+pub enum FormAction {
+    Close,
+    NextField,
+    PrevField,
+    Input(char),
+    Backspace,
+    CycleBackend,
+    CycleSsl,
+    Submit,
+}
+
+#[derive(Debug)]
+pub enum TablesAction {
+    Select(usize),
+    OpenSelected,
+}
+
+#[derive(Debug)]
+pub enum FilterAction {
+    Open,
+    Close,
+    CloseSuggestions,
+    Input(Input),
+    SuggestionUp,
+    SuggestionDown,
+    ApplySuggestion,
+    Apply,
+}
+
+#[derive(Debug)]
+pub enum DiagramAction {
+    Open,
+    Close,
+    Scroll { dx: i16, dy: i16 },
+    SelectNext,
+    SelectPrev,
+    SelectFirst,
+    SelectLast,
+    ToggleFocus,
+    ToggleGlyph,
+    JumpToTable,
+    SearchOpen,
+    SearchClose,
+    SearchInput(char),
+    SearchBackspace,
+    SearchConfirm,
+}
+
 /// Apply an action to state and send any commands.
+/// Apply an action to state and send any commands.
+///
+/// This is only a router: each domain owns its own reducer below, so adding a
+/// case means touching one match instead of one 500-line one.
 pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCommand>) {
     match action {
+        Action::Nav(a) => apply_nav(a, state, cmd_tx),
+        Action::Results(a) => apply_results(a, state, cmd_tx),
+        Action::CellEdit(a) => apply_cell_edit(a, state, cmd_tx),
+        Action::Editor(a) => apply_editor(a, state, cmd_tx),
+        Action::Completion(a) => apply_completion_ui(a, state, cmd_tx),
+        Action::Connections(a) => apply_connections(a, state, cmd_tx),
+        Action::Form(a) => apply_form(a, state, cmd_tx),
+        Action::Tables(a) => apply_tables(a, state, cmd_tx),
+        Action::Filter(a) => apply_filter(a, state, cmd_tx),
+        Action::Diagram(a) => apply_diagram(a, state, cmd_tx),
+
+        // -- Status --
+        Action::SetStatus(msg) => {
+            state.status_msg = msg;
+        }
+
+        Action::SetError(msg) => {
+            state.error_msg = msg;
+        }
+
+        Action::Quit => {
+            state.should_quit = true;
+        }
+
+        Action::Noop => {}
+
+        // -- Side effects --
+        Action::SendCommand(cmd) => {
+            let _ = cmd_tx.send(cmd);
+        }
+
+        Action::Batch(actions) => {
+            for a in actions {
+                apply(a, state, cmd_tx);
+            }
+        }
+    }
+}
+
+/// Focus, editor/nav modes, and pending vim prefixes.
+fn apply_nav(action: NavAction, state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCommand>) {
+    match action {
         // -- Navigation --
-        Action::FocusPanel(p) => {
+        NavAction::FocusPanel(p) => {
             state.focused = if state.layout.sidebar_hidden
                 && (p == FocusedPanel::Connections || p == FocusedPanel::Tables)
             {
@@ -139,16 +223,19 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 p
             };
         }
-        Action::SetNavMode(m) => {
+
+        NavAction::SetNavMode(m) => {
             state.vim.nav_mode = m;
         }
-        Action::SetEditorMode(m) => {
+
+        NavAction::SetEditorMode(m) => {
             state.editor.mode = m;
             if m == EditorMode::Normal {
                 state.editor.completion.dismiss();
             }
         }
-        Action::ToggleSidebar => {
+
+        NavAction::ToggleSidebar => {
             state.layout.sidebar_hidden = !state.layout.sidebar_hidden;
             if state.layout.sidebar_hidden
                 && (state.focused == FocusedPanel::Connections
@@ -164,69 +251,95 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
             state.error_msg = None;
         }
 
+        // -- Vim state --
+        NavAction::ClearPendingG => {
+            state.vim.pending_g = false;
+        }
+
+        NavAction::SetPendingG => {
+            state.vim.pending_g = true;
+        }
+
+        NavAction::ClearPendingD => {
+            state.mutation.pending_d = false;
+        }
+
+        NavAction::SetPendingD => {
+            state.mutation.pending_d = true;
+        }
+
+        NavAction::SetPendingLeader(v) => {
+            state.vim.pending_leader = v;
+        }
+    }
+}
+
+/// Moving around and acting on the results grid.
+fn apply_results(
+    action: ResultsAction,
+    state: &mut AppState,
+    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
+) {
+    match action {
         // -- Results navigation --
-        Action::MoveRowDown => {
+        ResultsAction::RowDown => {
             if state.results.move_row_down_with_page_hint() {
                 let next = state.results.current_page + 1;
                 let _ = cmd_tx.send(CoreCommand::FetchPage { page: next });
             }
         }
-        Action::MoveRowUp => {
+
+        ResultsAction::RowUp => {
             state.results.move_row_up();
         }
-        Action::MoveColRight => {
+
+        ResultsAction::ColRight => {
             state.results.move_col_right();
         }
-        Action::MoveColLeft => {
+
+        ResultsAction::ColLeft => {
             state.results.move_col_left();
         }
-        Action::MoveRowFirst => {
+
+        ResultsAction::RowFirst => {
             state.results.move_row_first();
         }
-        Action::MoveRowLast => {
+
+        ResultsAction::RowLast => {
             state.results.move_row_last();
         }
-        Action::MoveHalfPageDown => {
+
+        ResultsAction::HalfPageDown => {
             if state.results.move_row_half_page_down() {
                 let next = state.results.current_page + 1;
                 let _ = cmd_tx.send(CoreCommand::FetchPage { page: next });
             }
         }
-        Action::MoveHalfPageUp => {
+
+        ResultsAction::HalfPageUp => {
             state.results.move_row_half_page_up();
         }
-        Action::MoveColFirst => {
+
+        ResultsAction::ColFirst => {
             state.results.move_col_first();
         }
-        Action::MoveColLast => {
+
+        ResultsAction::ColLast => {
             state.results.move_col_last();
         }
-        Action::SetResultsRow(row) => {
+
+        ResultsAction::SetRow(row) => {
             if row < state.results.data.rows.len() {
                 state.results.selected_row = row;
             }
         }
-        Action::SetResultsCol(col) => {
+
+        ResultsAction::SetCol(col) => {
             let max = state.results.data.columns.len().saturating_sub(1);
             state.results.selected_col = col.min(max);
         }
 
-        // -- Results actions --
-        Action::EnterCellEdit => {
-            apply_enter_cell_edit(state, cmd_tx);
-        }
-        Action::StageCellEdit => {
-            apply_stage_cell_edit(state);
-        }
-        Action::CancelCellEdit => {
-            state.mutation.cell_edit = None;
-        }
-        Action::CellEditInput(input) => {
-            if let Some(ce) = state.mutation.cell_edit.as_mut() {
-                ce.textarea.input(input);
-            }
-        }
-        Action::MarkRowForDeletion => {
+        ResultsAction::MarkRowForDeletion => {
             let row_idx = state.results.selected_row;
             let sql = state.editor.sql();
             let (schema, table) = crate::handlers::results::extract_schema_table_from_sql(&sql)
@@ -234,10 +347,12 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
             state.mutation.pending_delete_row = Some(row_idx);
             let _ = cmd_tx.send(CoreCommand::GetPrimaryKeys { schema, table });
         }
-        Action::CommitPending => {
+
+        ResultsAction::CommitPending => {
             apply_commit_pending(state, cmd_tx);
         }
-        Action::DiscardPendingOrEsc => {
+
+        ResultsAction::DiscardPendingOrEsc => {
             if !state.mutation.pending_edits.is_empty()
                 || !state.mutation.pending_deletes.is_empty()
             {
@@ -247,7 +362,8 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 state.focused = FocusedPanel::Editor;
             }
         }
-        Action::ToggleSort => {
+
+        ResultsAction::ToggleSort => {
             if let Some(col) = state.results.selected_column_name().map(str::to_owned) {
                 let (col, dir) = state.results.toggle_sort(&col);
                 match dir {
@@ -263,28 +379,57 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 }
             }
         }
-        Action::OpenFilter => {
-            state.filter.visible = true;
-            state.filter.textarea = tui_textarea::TextArea::default();
-            state.filter.suggestions.clear();
-            state.filter.suggestion_cursor.reset();
-            state.filter.show_suggestions = false;
-            state.filter.loading_suggestions = false;
-            state.filter.pending_live_apply_at = None;
-            state.filter.last_applied_query = state.active_filter.clone();
+    }
+}
+
+/// The single-cell edit overlay.
+fn apply_cell_edit(
+    action: CellEditAction,
+    state: &mut AppState,
+    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
+) {
+    match action {
+        // -- Results actions --
+        CellEditAction::Enter => {
+            apply_enter_cell_edit(state, cmd_tx);
         }
 
+        CellEditAction::Stage => {
+            apply_stage_cell_edit(state);
+        }
+
+        CellEditAction::Cancel => {
+            state.mutation.cell_edit = None;
+        }
+
+        CellEditAction::Input(input) => {
+            if let Some(ce) = state.mutation.cell_edit.as_mut() {
+                ce.textarea.input(input);
+            }
+        }
+    }
+}
+
+/// The SQL editor pane.
+fn apply_editor(
+    action: EditorAction,
+    state: &mut AppState,
+    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
+) {
+    match action {
         // -- Editor --
-        Action::EditorInput(input) => {
+        EditorAction::Input(input) => {
             state.editor.textarea.input(input);
             state.editor.invalidate_highlight();
             // Recompute completions inline
             recompute_completions(state);
         }
-        Action::EditorCursorMove(mv) => {
+
+        EditorAction::CursorMove(mv) => {
             state.editor.textarea.move_cursor(mv);
         }
-        Action::RunQuery => {
+
+        EditorAction::RunQuery => {
             let sql = state.editor.sql();
             if !sql.trim().is_empty() {
                 state.results.sort_state.clear();
@@ -294,15 +439,26 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 state.focused = FocusedPanel::Results;
             }
         }
+    }
+}
 
+/// The autocomplete popup.
+fn apply_completion_ui(
+    action: CompletionAction,
+    state: &mut AppState,
+    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
+) {
+    match action {
         // -- Completion --
-        Action::CompletionUp => {
+        CompletionAction::Up => {
             state.editor.completion.move_up();
         }
-        Action::CompletionDown => {
+
+        CompletionAction::Down => {
             state.editor.completion.move_down();
         }
-        Action::CompletionAccept => {
+
+        CompletionAction::Accept => {
             if let Some(item) = state.editor.completion.selected_item().cloned() {
                 let prefix_len = state.editor.completion.prefix.len();
                 // Delete the prefix by sending backspace inputs
@@ -327,31 +483,45 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 state.editor.completion.dismiss();
             }
         }
-        Action::CompletionDismiss => {
+
+        CompletionAction::Dismiss => {
             state.editor.completion.dismiss();
         }
+    }
+}
 
+/// The saved-connection list.
+fn apply_connections(
+    action: ConnectionsAction,
+    state: &mut AppState,
+    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
+) {
+    match action {
         // -- Connections --
-        Action::SelectConnection(idx) => {
+        ConnectionsAction::Select(idx) => {
             if !state.conn.connections.is_empty() {
                 state.conn.cursor.select(idx, state.conn.connections.len());
             }
         }
-        Action::ConnectSelected => {
+
+        ConnectionsAction::ConnectSelected => {
             if let Some(cfg) = state.conn.connections.get(state.conn.selected()) {
                 let id = cfg.id;
                 let _ = cmd_tx.send(CoreCommand::Connect(id));
             }
         }
-        Action::OpenNewConnForm => {
+
+        ConnectionsAction::OpenNewForm => {
             state.conn.form = ConnectionForm::open_new();
         }
-        Action::OpenEditConnForm => {
+
+        ConnectionsAction::OpenEditForm => {
             if let Some(cfg) = state.conn.connections.get(state.conn.selected()).cloned() {
                 state.conn.form = ConnectionForm::open_edit(&cfg);
             }
         }
-        Action::InitDeleteConnection => {
+
+        ConnectionsAction::InitDelete => {
             if let Some(cfg) = state.conn.connections.get(state.conn.selected()).cloned() {
                 state.conn.pending_delete = Some((cfg.id, cfg.name.clone()));
                 state.status_msg = Some(format!(
@@ -361,33 +531,47 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 state.error_msg = None;
             }
         }
-        Action::ConfirmDeleteConnection => {
+
+        ConnectionsAction::ConfirmDelete => {
             if let Some((id, name)) = state.conn.pending_delete.take() {
                 let _ = cmd_tx.send(CoreCommand::DeleteConnection(id));
                 state.status_msg = Some(format!("Deleted connection '{name}'."));
                 state.error_msg = None;
             }
         }
-        Action::CancelDeleteConnection => {
+
+        ConnectionsAction::CancelDelete => {
             state.conn.pending_delete = None;
             state.status_msg = Some("Delete cancelled.".into());
             state.error_msg = None;
         }
-        Action::DisconnectActive => {
+
+        ConnectionsAction::DisconnectActive => {
             if let Some(id) = state.conn.active_id {
                 let _ = cmd_tx.send(CoreCommand::Disconnect(id));
             }
         }
+    }
+}
 
+/// The add/edit connection form.
+fn apply_form(
+    action: FormAction,
+    state: &mut AppState,
+    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
+) {
+    match action {
         // -- Connection form --
-        Action::FormClose => {
+        FormAction::Close => {
             state.conn.form.visible = false;
         }
-        Action::FormNextField => {
+
+        FormAction::NextField => {
             let count = state.conn.form.field_count();
             state.conn.form.field_index = (state.conn.form.field_index + 1) % count;
         }
-        Action::FormPrevField => {
+
+        FormAction::PrevField => {
             let count = state.conn.form.field_count();
             state.conn.form.field_index = state
                 .conn
@@ -396,31 +580,46 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 .checked_sub(1)
                 .unwrap_or(count - 1);
         }
-        Action::FormInput(c) => {
+
+        FormAction::Input(c) => {
             if let Some(val) = state.conn.form.active_value_mut() {
                 val.push(c);
             }
         }
-        Action::FormBackspace => {
+
+        FormAction::Backspace => {
             if let Some(val) = state.conn.form.active_value_mut() {
                 val.pop();
             }
         }
-        Action::FormCycleBackend => {
+
+        FormAction::CycleBackend => {
             state.conn.form.cycle_backend();
         }
-        Action::FormCycleSsl => {
+
+        FormAction::CycleSsl => {
             state.conn.form.cycle_ssl_mode();
         }
-        Action::FormSubmit => {
+
+        FormAction::Submit => {
             apply_form_submit(state, cmd_tx);
         }
+    }
+}
 
+/// The table browser.
+fn apply_tables(
+    action: TablesAction,
+    state: &mut AppState,
+    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
+) {
+    match action {
         // -- Tables --
-        Action::SelectTable(idx) => {
+        TablesAction::Select(idx) => {
             state.tables.cursor.select(idx, state.tables.tables.len());
         }
-        Action::OpenSelectedTable => {
+
+        TablesAction::OpenSelected => {
             if let Some(t) = state.tables.tables.get(state.tables.selected()) {
                 let sql = sbql_core::query_builder::table_select_sql(
                     &t.schema,
@@ -445,13 +644,34 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 state.focused = FocusedPanel::Results;
             }
         }
+    }
+}
+
+/// The results filter bar.
+fn apply_filter(
+    action: FilterAction,
+    state: &mut AppState,
+    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
+) {
+    match action {
+        FilterAction::Open => {
+            state.filter.visible = true;
+            state.filter.textarea = tui_textarea::TextArea::default();
+            state.filter.suggestions.clear();
+            state.filter.suggestion_cursor.reset();
+            state.filter.show_suggestions = false;
+            state.filter.loading_suggestions = false;
+            state.filter.pending_live_apply_at = None;
+            state.filter.last_applied_query = state.active_filter.clone();
+        }
 
         // -- Filter --
-        Action::FilterCloseSuggestions => {
+        FilterAction::CloseSuggestions => {
             state.filter.show_suggestions = false;
             state.filter.loading_suggestions = false;
         }
-        Action::FilterClose => {
+
+        FilterAction::Close => {
             state.filter.visible = false;
             state.filter.show_suggestions = false;
             state.filter.loading_suggestions = false;
@@ -460,22 +680,33 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
             state.active_filter = None;
             let _ = cmd_tx.send(CoreCommand::ClearFilter);
         }
-        Action::FilterInput(input) => {
+
+        FilterAction::Input(input) => {
             state.filter.textarea.input(input);
             apply_refresh_filter_suggestions(state, cmd_tx);
         }
-        Action::FilterSuggestionUp => {
-            state.filter.suggestion_cursor.prev(state.filter.suggestions.len(), Overflow::Clamp);
+
+        FilterAction::SuggestionUp => {
+            state
+                .filter
+                .suggestion_cursor
+                .prev(state.filter.suggestions.len(), Overflow::Clamp);
         }
-        Action::FilterSuggestionDown => {
-            state.filter.suggestion_cursor.next(state.filter.suggestions.len(), Overflow::Clamp);
+
+        FilterAction::SuggestionDown => {
+            state
+                .filter
+                .suggestion_cursor
+                .next(state.filter.suggestions.len(), Overflow::Clamp);
         }
-        Action::FilterApplySuggestion => {
+
+        FilterAction::ApplySuggestion => {
             if apply_selected_filter_suggestion(state) {
                 apply_refresh_filter_suggestions(state, cmd_tx);
             }
         }
-        Action::FilterApply => {
+
+        FilterAction::Apply => {
             let query = state.filter.textarea.lines().join("");
             state.filter.visible = false;
             state.filter.show_suggestions = false;
@@ -491,9 +722,18 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 let _ = cmd_tx.send(CoreCommand::ApplyFilter { query });
             }
         }
+    }
+}
 
+/// The full-screen schema diagram.
+fn apply_diagram(
+    action: DiagramAction,
+    state: &mut AppState,
+    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
+) {
+    match action {
         // -- Diagram --
-        Action::OpenDiagram => {
+        DiagramAction::Open => {
             if state.conn.active_id.is_some() {
                 state.diagram_requested = true;
                 let _ = cmd_tx.send(CoreCommand::LoadDiagram);
@@ -502,10 +742,12 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                     Some("Connect to a database first (Enter on a connection).".into());
             }
         }
-        Action::CloseDiagram => {
+
+        DiagramAction::Close => {
             state.diagram = None;
         }
-        Action::DiagramScroll { dx, dy } => {
+
+        DiagramAction::Scroll { dx, dy } => {
             if let Some(ref mut diag) = state.diagram {
                 if dx > 0 {
                     diag.scroll_x = diag.scroll_x.saturating_add(dx as u16);
@@ -519,7 +761,8 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 }
             }
         }
-        Action::DiagramSelectNext => {
+
+        DiagramAction::SelectNext => {
             if let Some(ref mut diag) = state.diagram {
                 let visible = diagram_visible_table_indices(diag);
                 if !visible.is_empty() {
@@ -534,7 +777,8 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 }
             }
         }
-        Action::DiagramSelectPrev => {
+
+        DiagramAction::SelectPrev => {
             if let Some(ref mut diag) = state.diagram {
                 let visible = diagram_visible_table_indices(diag);
                 if !visible.is_empty() {
@@ -548,7 +792,8 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 }
             }
         }
-        Action::DiagramSelectFirst => {
+
+        DiagramAction::SelectFirst => {
             if let Some(ref mut diag) = state.diagram {
                 let visible = diagram_visible_table_indices(diag);
                 if !visible.is_empty() {
@@ -558,7 +803,8 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 diag.canvas_dirty = true;
             }
         }
-        Action::DiagramSelectLast => {
+
+        DiagramAction::SelectLast => {
             if let Some(ref mut diag) = state.diagram {
                 let visible = diagram_visible_table_indices(diag);
                 if !visible.is_empty() {
@@ -567,7 +813,8 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 diag.canvas_dirty = true;
             }
         }
-        Action::DiagramToggleFocus => {
+
+        DiagramAction::ToggleFocus => {
             if let Some(ref mut diag) = state.diagram {
                 diag.focus_mode = !diag.focus_mode;
                 diag.canvas_dirty = true;
@@ -579,7 +826,8 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 }
             }
         }
-        Action::DiagramToggleGlyph => {
+
+        DiagramAction::ToggleGlyph => {
             if let Some(ref mut diag) = state.diagram {
                 diag.glyph_mode = match diag.glyph_mode {
                     DiagramGlyphMode::Ascii => DiagramGlyphMode::Unicode,
@@ -588,7 +836,8 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 diag.canvas_dirty = true;
             }
         }
-        Action::DiagramJumpToTable => {
+
+        DiagramAction::JumpToTable => {
             if let Some(ref mut diag) = state.diagram {
                 if let Some(&(tx, ty)) = diag.table_positions.get(&diag.selected_table) {
                     let vw = diag.last_viewport_w as usize;
@@ -598,19 +847,22 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 }
             }
         }
-        Action::DiagramSearchOpen => {
+
+        DiagramAction::SearchOpen => {
             if let Some(ref mut diag) = state.diagram {
                 diag.search_active = true;
                 diag.search_query.clear();
             }
         }
-        Action::DiagramSearchClose => {
+
+        DiagramAction::SearchClose => {
             if let Some(ref mut diag) = state.diagram {
                 diag.search_active = false;
                 diag.search_query.clear();
             }
         }
-        Action::DiagramSearchInput(c) => {
+
+        DiagramAction::SearchInput(c) => {
             if let Some(ref mut diag) = state.diagram {
                 diag.search_query.push(c);
                 // Auto-select first matching table
@@ -628,7 +880,8 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 }
             }
         }
-        Action::DiagramSearchBackspace => {
+
+        DiagramAction::SearchBackspace => {
             if let Some(ref mut diag) = state.diagram {
                 diag.search_query.pop();
                 if !diag.search_query.is_empty() {
@@ -647,7 +900,8 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 }
             }
         }
-        Action::DiagramSearchConfirm => {
+
+        DiagramAction::SearchConfirm => {
             if let Some(ref mut diag) = state.diagram {
                 diag.search_active = false;
                 // Jump to the selected table
@@ -658,45 +912,6 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                     diag.scroll_y = (ty.saturating_sub(vh / 2)) as u16;
                 }
                 diag.search_query.clear();
-            }
-        }
-
-        // -- Vim state --
-        Action::ClearPendingG => {
-            state.vim.pending_g = false;
-        }
-        Action::SetPendingG => {
-            state.vim.pending_g = true;
-        }
-        Action::ClearPendingD => {
-            state.mutation.pending_d = false;
-        }
-        Action::SetPendingD => {
-            state.mutation.pending_d = true;
-        }
-        Action::SetPendingLeader(v) => {
-            state.vim.pending_leader = v;
-        }
-
-        // -- Status --
-        Action::SetStatus(msg) => {
-            state.status_msg = msg;
-        }
-        Action::SetError(msg) => {
-            state.error_msg = msg;
-        }
-        Action::Quit => {
-            state.should_quit = true;
-        }
-        Action::Noop => {}
-
-        // -- Side effects --
-        Action::SendCommand(cmd) => {
-            let _ = cmd_tx.send(cmd);
-        }
-        Action::Batch(actions) => {
-            for a in actions {
-                apply(a, state, cmd_tx);
             }
         }
     }
@@ -1105,7 +1320,11 @@ mod tests {
     fn focus_panel_normal() {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::FocusPanel(FocusedPanel::Results), &mut state, &tx);
+        apply(
+            Action::Nav(NavAction::FocusPanel(FocusedPanel::Results)),
+            &mut state,
+            &tx,
+        );
         assert_eq!(state.focused, FocusedPanel::Results);
     }
 
@@ -1115,7 +1334,7 @@ mod tests {
         state.layout.sidebar_hidden = true;
         let (tx, _rx) = cmd_channel();
         apply(
-            Action::FocusPanel(FocusedPanel::Connections),
+            Action::Nav(NavAction::FocusPanel(FocusedPanel::Connections)),
             &mut state,
             &tx,
         );
@@ -1127,7 +1346,11 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.layout.sidebar_hidden = true;
         let (tx, _rx) = cmd_channel();
-        apply(Action::FocusPanel(FocusedPanel::Tables), &mut state, &tx);
+        apply(
+            Action::Nav(NavAction::FocusPanel(FocusedPanel::Tables)),
+            &mut state,
+            &tx,
+        );
         assert_eq!(state.focused, FocusedPanel::Editor);
     }
 
@@ -1135,7 +1358,11 @@ mod tests {
     fn set_nav_mode() {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::SetNavMode(NavMode::Panel), &mut state, &tx);
+        apply(
+            Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
+            &mut state,
+            &tx,
+        );
         assert_eq!(state.vim.nav_mode, NavMode::Panel);
     }
 
@@ -1143,7 +1370,11 @@ mod tests {
     fn set_editor_mode() {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::SetEditorMode(EditorMode::Insert), &mut state, &tx);
+        apply(
+            Action::Nav(NavAction::SetEditorMode(EditorMode::Insert)),
+            &mut state,
+            &tx,
+        );
         assert_eq!(state.editor.mode, EditorMode::Insert);
     }
 
@@ -1151,7 +1382,7 @@ mod tests {
     fn toggle_sidebar_hides() {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::ToggleSidebar, &mut state, &tx);
+        apply(Action::Nav(NavAction::ToggleSidebar), &mut state, &tx);
         assert!(state.layout.sidebar_hidden);
         assert_eq!(state.status_msg, Some("Sidebar hidden".into()));
     }
@@ -1161,7 +1392,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.layout.sidebar_hidden = true;
         let (tx, _rx) = cmd_channel();
-        apply(Action::ToggleSidebar, &mut state, &tx);
+        apply(Action::Nav(NavAction::ToggleSidebar), &mut state, &tx);
         assert!(!state.layout.sidebar_hidden);
         assert_eq!(state.status_msg, Some("Sidebar shown".into()));
     }
@@ -1171,7 +1402,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.focused = FocusedPanel::Connections;
         let (tx, _rx) = cmd_channel();
-        apply(Action::ToggleSidebar, &mut state, &tx);
+        apply(Action::Nav(NavAction::ToggleSidebar), &mut state, &tx);
         assert_eq!(state.focused, FocusedPanel::Editor);
     }
 
@@ -1183,7 +1414,7 @@ mod tests {
     fn move_row_down() {
         let mut state = make_state_with_results();
         let (tx, _rx) = cmd_channel();
-        apply(Action::MoveRowDown, &mut state, &tx);
+        apply(Action::Results(ResultsAction::RowDown), &mut state, &tx);
         assert_eq!(state.results.selected_row, 1);
     }
 
@@ -1193,7 +1424,7 @@ mod tests {
         state.results.data.has_next_page = true;
         state.results.selected_row = 4; // last row
         let (tx, mut rx) = cmd_channel();
-        apply(Action::MoveRowDown, &mut state, &tx);
+        apply(Action::Results(ResultsAction::RowDown), &mut state, &tx);
         let cmd = rx.try_recv().unwrap();
         assert!(matches!(cmd, CoreCommand::FetchPage { page: 1 }));
     }
@@ -1203,7 +1434,7 @@ mod tests {
         let mut state = make_state_with_results();
         state.results.selected_row = 3;
         let (tx, _rx) = cmd_channel();
-        apply(Action::MoveRowUp, &mut state, &tx);
+        apply(Action::Results(ResultsAction::RowUp), &mut state, &tx);
         assert_eq!(state.results.selected_row, 2);
     }
 
@@ -1211,7 +1442,7 @@ mod tests {
     fn move_col_right() {
         let mut state = make_state_with_results();
         let (tx, _rx) = cmd_channel();
-        apply(Action::MoveColRight, &mut state, &tx);
+        apply(Action::Results(ResultsAction::ColRight), &mut state, &tx);
         assert_eq!(state.results.selected_col, 1);
     }
 
@@ -1220,7 +1451,7 @@ mod tests {
         let mut state = make_state_with_results();
         state.results.selected_col = 2;
         let (tx, _rx) = cmd_channel();
-        apply(Action::MoveColLeft, &mut state, &tx);
+        apply(Action::Results(ResultsAction::ColLeft), &mut state, &tx);
         assert_eq!(state.results.selected_col, 1);
     }
 
@@ -1229,7 +1460,7 @@ mod tests {
         let mut state = make_state_with_results();
         state.results.selected_row = 3;
         let (tx, _rx) = cmd_channel();
-        apply(Action::MoveRowFirst, &mut state, &tx);
+        apply(Action::Results(ResultsAction::RowFirst), &mut state, &tx);
         assert_eq!(state.results.selected_row, 0);
     }
 
@@ -1237,7 +1468,7 @@ mod tests {
     fn move_row_last() {
         let mut state = make_state_with_results();
         let (tx, _rx) = cmd_channel();
-        apply(Action::MoveRowLast, &mut state, &tx);
+        apply(Action::Results(ResultsAction::RowLast), &mut state, &tx);
         assert_eq!(state.results.selected_row, 4);
     }
 
@@ -1246,7 +1477,11 @@ mod tests {
         let mut state = make_state_with_results();
         state.results.viewport_height = 4;
         let (tx, _rx) = cmd_channel();
-        apply(Action::MoveHalfPageDown, &mut state, &tx);
+        apply(
+            Action::Results(ResultsAction::HalfPageDown),
+            &mut state,
+            &tx,
+        );
         assert_eq!(state.results.selected_row, 2);
     }
 
@@ -1256,7 +1491,7 @@ mod tests {
         state.results.selected_row = 4;
         state.results.viewport_height = 4;
         let (tx, _rx) = cmd_channel();
-        apply(Action::MoveHalfPageUp, &mut state, &tx);
+        apply(Action::Results(ResultsAction::HalfPageUp), &mut state, &tx);
         assert_eq!(state.results.selected_row, 2);
     }
 
@@ -1265,7 +1500,7 @@ mod tests {
         let mut state = make_state_with_results();
         state.results.selected_col = 2;
         let (tx, _rx) = cmd_channel();
-        apply(Action::MoveColFirst, &mut state, &tx);
+        apply(Action::Results(ResultsAction::ColFirst), &mut state, &tx);
         assert_eq!(state.results.selected_col, 0);
     }
 
@@ -1273,7 +1508,7 @@ mod tests {
     fn move_col_last() {
         let mut state = make_state_with_results();
         let (tx, _rx) = cmd_channel();
-        apply(Action::MoveColLast, &mut state, &tx);
+        apply(Action::Results(ResultsAction::ColLast), &mut state, &tx);
         assert_eq!(state.results.selected_col, 2);
     }
 
@@ -1281,7 +1516,7 @@ mod tests {
     fn set_results_row_in_bounds() {
         let mut state = make_state_with_results();
         let (tx, _rx) = cmd_channel();
-        apply(Action::SetResultsRow(3), &mut state, &tx);
+        apply(Action::Results(ResultsAction::SetRow(3)), &mut state, &tx);
         assert_eq!(state.results.selected_row, 3);
     }
 
@@ -1289,7 +1524,7 @@ mod tests {
     fn set_results_row_out_of_bounds_no_change() {
         let mut state = make_state_with_results();
         let (tx, _rx) = cmd_channel();
-        apply(Action::SetResultsRow(100), &mut state, &tx);
+        apply(Action::Results(ResultsAction::SetRow(100)), &mut state, &tx);
         assert_eq!(state.results.selected_row, 0);
     }
 
@@ -1297,7 +1532,7 @@ mod tests {
     fn set_results_col_clamped() {
         let mut state = make_state_with_results();
         let (tx, _rx) = cmd_channel();
-        apply(Action::SetResultsCol(100), &mut state, &tx);
+        apply(Action::Results(ResultsAction::SetCol(100)), &mut state, &tx);
         assert_eq!(state.results.selected_col, 2); // max col = 2
     }
 
@@ -1319,7 +1554,7 @@ mod tests {
             "1".into(),
         ));
         let (tx, _rx) = cmd_channel();
-        apply(Action::CancelCellEdit, &mut state, &tx);
+        apply(Action::CellEdit(CellEditAction::Cancel), &mut state, &tx);
         assert!(state.mutation.cell_edit.is_none());
     }
 
@@ -1340,7 +1575,7 @@ mod tests {
         ce.textarea.insert_str("999");
         state.mutation.cell_edit = Some(ce);
         let (tx, _rx) = cmd_channel();
-        apply(Action::StageCellEdit, &mut state, &tx);
+        apply(Action::CellEdit(CellEditAction::Stage), &mut state, &tx);
         assert!(state.mutation.cell_edit.is_none());
         assert_eq!(state.mutation.pending_edits.len(), 1);
     }
@@ -1360,7 +1595,7 @@ mod tests {
         );
         state.mutation.cell_edit = Some(ce);
         let (tx, _rx) = cmd_channel();
-        apply(Action::StageCellEdit, &mut state, &tx);
+        apply(Action::CellEdit(CellEditAction::Stage), &mut state, &tx);
         assert!(state.mutation.pending_edits.is_empty());
         assert_eq!(
             state.status_msg,
@@ -1376,7 +1611,11 @@ mod tests {
     fn commit_pending_empty_shows_error() {
         let mut state = make_state_with_results();
         let (tx, _rx) = cmd_channel();
-        apply(Action::CommitPending, &mut state, &tx);
+        apply(
+            Action::Results(ResultsAction::CommitPending),
+            &mut state,
+            &tx,
+        );
         assert!(state.error_msg.is_some());
     }
 
@@ -1404,7 +1643,11 @@ mod tests {
             },
         );
         let (tx, mut rx) = cmd_channel();
-        apply(Action::CommitPending, &mut state, &tx);
+        apply(
+            Action::Results(ResultsAction::CommitPending),
+            &mut state,
+            &tx,
+        );
         assert!(state.mutation.pending_edits.is_empty());
         assert!(state.mutation.pending_deletes.is_empty());
         // Should have sent UpdateCell, DeleteRow, FetchPage
@@ -1434,7 +1677,11 @@ mod tests {
             },
         );
         let (tx, _rx) = cmd_channel();
-        apply(Action::DiscardPendingOrEsc, &mut state, &tx);
+        apply(
+            Action::Results(ResultsAction::DiscardPendingOrEsc),
+            &mut state,
+            &tx,
+        );
         assert!(state.mutation.pending_edits.is_empty());
         assert!(state.status_msg.unwrap().contains("discarded"));
     }
@@ -1444,7 +1691,11 @@ mod tests {
         let mut state = make_state_with_results();
         state.focused = FocusedPanel::Results;
         let (tx, _rx) = cmd_channel();
-        apply(Action::DiscardPendingOrEsc, &mut state, &tx);
+        apply(
+            Action::Results(ResultsAction::DiscardPendingOrEsc),
+            &mut state,
+            &tx,
+        );
         assert_eq!(state.focused, FocusedPanel::Editor);
     }
 
@@ -1457,7 +1708,7 @@ mod tests {
         let mut state = make_state_with_results();
         state.editor.textarea.insert_str("SELECT 1");
         let (tx, mut rx) = cmd_channel();
-        apply(Action::RunQuery, &mut state, &tx);
+        apply(Action::Editor(EditorAction::RunQuery), &mut state, &tx);
         assert_eq!(state.focused, FocusedPanel::Results);
         let cmd = rx.try_recv().unwrap();
         assert!(matches!(cmd, CoreCommand::ExecuteQuery { .. }));
@@ -1468,7 +1719,7 @@ mod tests {
         let mut state = make_state_with_results();
         state.focused = FocusedPanel::Editor;
         let (tx, mut rx) = cmd_channel();
-        apply(Action::RunQuery, &mut state, &tx);
+        apply(Action::Editor(EditorAction::RunQuery), &mut state, &tx);
         assert!(rx.try_recv().is_err());
         assert_eq!(state.focused, FocusedPanel::Editor);
     }
@@ -1484,7 +1735,11 @@ mod tests {
             sbql_core::ConnectionConfig::new_postgres("b", "h", 5432, "u", "d"),
         ]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::SelectConnection(1), &mut state, &tx);
+        apply(
+            Action::Connections(ConnectionsAction::Select(1)),
+            &mut state,
+            &tx,
+        );
         assert_eq!(state.conn.selected(), 1);
     }
 
@@ -1494,7 +1749,11 @@ mod tests {
             "a", "h", 5432, "u", "d",
         )]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::SelectConnection(10), &mut state, &tx);
+        apply(
+            Action::Connections(ConnectionsAction::Select(10)),
+            &mut state,
+            &tx,
+        );
         assert_eq!(state.conn.selected(), 0);
     }
 
@@ -1504,7 +1763,11 @@ mod tests {
         let id = cfg.id;
         let mut state = AppState::new(vec![cfg]);
         let (tx, mut rx) = cmd_channel();
-        apply(Action::ConnectSelected, &mut state, &tx);
+        apply(
+            Action::Connections(ConnectionsAction::ConnectSelected),
+            &mut state,
+            &tx,
+        );
         let cmd = rx.try_recv().unwrap();
         assert!(matches!(cmd, CoreCommand::Connect(cid) if cid == id));
     }
@@ -1513,7 +1776,11 @@ mod tests {
     fn open_new_form() {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::OpenNewConnForm, &mut state, &tx);
+        apply(
+            Action::Connections(ConnectionsAction::OpenNewForm),
+            &mut state,
+            &tx,
+        );
         assert!(state.conn.form.visible);
     }
 
@@ -1527,7 +1794,11 @@ mod tests {
             "d",
         )]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::OpenEditConnForm, &mut state, &tx);
+        apply(
+            Action::Connections(ConnectionsAction::OpenEditForm),
+            &mut state,
+            &tx,
+        );
         assert!(state.conn.form.visible);
         assert_eq!(state.conn.form.draft.name, "a");
     }
@@ -1538,7 +1809,11 @@ mod tests {
             "myconn", "h", 5432, "u", "d",
         )]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::InitDeleteConnection, &mut state, &tx);
+        apply(
+            Action::Connections(ConnectionsAction::InitDelete),
+            &mut state,
+            &tx,
+        );
         assert!(state.conn.pending_delete.is_some());
     }
 
@@ -1547,7 +1822,11 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.conn.pending_delete = Some((uuid::Uuid::new_v4(), "test".into()));
         let (tx, mut rx) = cmd_channel();
-        apply(Action::ConfirmDeleteConnection, &mut state, &tx);
+        apply(
+            Action::Connections(ConnectionsAction::ConfirmDelete),
+            &mut state,
+            &tx,
+        );
         assert!(state.conn.pending_delete.is_none());
         assert!(rx.try_recv().is_ok());
     }
@@ -1557,7 +1836,11 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.conn.pending_delete = Some((uuid::Uuid::new_v4(), "test".into()));
         let (tx, _rx) = cmd_channel();
-        apply(Action::CancelDeleteConnection, &mut state, &tx);
+        apply(
+            Action::Connections(ConnectionsAction::CancelDelete),
+            &mut state,
+            &tx,
+        );
         assert!(state.conn.pending_delete.is_none());
     }
 
@@ -1567,7 +1850,11 @@ mod tests {
         let id = uuid::Uuid::new_v4();
         state.conn.active_id = Some(id);
         let (tx, mut rx) = cmd_channel();
-        apply(Action::DisconnectActive, &mut state, &tx);
+        apply(
+            Action::Connections(ConnectionsAction::DisconnectActive),
+            &mut state,
+            &tx,
+        );
         let cmd = rx.try_recv().unwrap();
         assert!(matches!(cmd, CoreCommand::Disconnect(d) if d == id));
     }
@@ -1581,7 +1868,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.conn.form.visible = true;
         let (tx, _rx) = cmd_channel();
-        apply(Action::FormClose, &mut state, &tx);
+        apply(Action::Form(FormAction::Close), &mut state, &tx);
         assert!(!state.conn.form.visible);
     }
 
@@ -1590,7 +1877,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.conn.form.field_index = 7; // last PG field (SSL Mode)
         let (tx, _rx) = cmd_channel();
-        apply(Action::FormNextField, &mut state, &tx);
+        apply(Action::Form(FormAction::NextField), &mut state, &tx);
         assert_eq!(state.conn.form.field_index, 0);
     }
 
@@ -1599,7 +1886,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.conn.form.field_index = 0;
         let (tx, _rx) = cmd_channel();
-        apply(Action::FormPrevField, &mut state, &tx);
+        apply(Action::Form(FormAction::PrevField), &mut state, &tx);
         assert_eq!(state.conn.form.field_index, 7); // wraps to last PG field
     }
 
@@ -1608,7 +1895,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.conn.form.field_index = 1; // Name field
         let (tx, _rx) = cmd_channel();
-        apply(Action::FormInput('a'), &mut state, &tx);
+        apply(Action::Form(FormAction::Input('a')), &mut state, &tx);
         assert_eq!(state.conn.form.draft.name, "a");
     }
 
@@ -1618,7 +1905,7 @@ mod tests {
         state.conn.form.draft.name = "ab".into();
         state.conn.form.field_index = 1; // Name field
         let (tx, _rx) = cmd_channel();
-        apply(Action::FormBackspace, &mut state, &tx);
+        apply(Action::Form(FormAction::Backspace), &mut state, &tx);
         assert_eq!(state.conn.form.draft.name, "a");
     }
 
@@ -1626,7 +1913,7 @@ mod tests {
     fn form_cycle_ssl() {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::FormCycleSsl, &mut state, &tx);
+        apply(Action::Form(FormAction::CycleSsl), &mut state, &tx);
         assert_eq!(state.conn.form.draft.ssl_mode, sbql_core::SslMode::Require);
     }
 
@@ -1640,7 +1927,7 @@ mod tests {
         state.conn.form.draft.user = "postgres".into();
         state.conn.form.draft.database = "testdb".into();
         let (tx, mut rx) = cmd_channel();
-        apply(Action::FormSubmit, &mut state, &tx);
+        apply(Action::Form(FormAction::Submit), &mut state, &tx);
         assert!(!state.conn.form.visible);
         assert!(rx.try_recv().is_ok());
     }
@@ -1651,7 +1938,7 @@ mod tests {
         state.conn.form.visible = true;
         state.conn.form.draft.name = "".into();
         let (tx, _rx) = cmd_channel();
-        apply(Action::FormSubmit, &mut state, &tx);
+        apply(Action::Form(FormAction::Submit), &mut state, &tx);
         assert!(state.conn.form.error.is_some());
         assert!(state.conn.form.visible);
     }
@@ -1666,7 +1953,7 @@ mod tests {
         state.conn.form.draft.user = "u".into();
         state.conn.form.draft.database = "d".into();
         let (tx, _rx) = cmd_channel();
-        apply(Action::FormSubmit, &mut state, &tx);
+        apply(Action::Form(FormAction::Submit), &mut state, &tx);
         assert!(state.conn.form.error.unwrap().contains("Port"));
     }
 
@@ -1680,7 +1967,7 @@ mod tests {
         state.conn.form.draft.port = "6379".into();
         state.conn.form.draft.database = "0".into();
         let (tx, mut rx) = cmd_channel();
-        apply(Action::FormSubmit, &mut state, &tx);
+        apply(Action::Form(FormAction::Submit), &mut state, &tx);
         assert!(!state.conn.form.visible);
         assert!(state.conn.form.error.is_none());
         assert!(rx.try_recv().is_ok());
@@ -1695,7 +1982,7 @@ mod tests {
         state.conn.form.draft.host = "".into();
         state.conn.form.draft.port = "6379".into();
         let (tx, _rx) = cmd_channel();
-        apply(Action::FormSubmit, &mut state, &tx);
+        apply(Action::Form(FormAction::Submit), &mut state, &tx);
         assert!(state.conn.form.visible);
         assert!(state.conn.form.error.as_ref().unwrap().contains("Host"));
     }
@@ -1709,7 +1996,7 @@ mod tests {
         state.conn.form.draft.host = "localhost".into();
         state.conn.form.draft.port = "abc".into();
         let (tx, _rx) = cmd_channel();
-        apply(Action::FormSubmit, &mut state, &tx);
+        apply(Action::Form(FormAction::Submit), &mut state, &tx);
         assert!(state.conn.form.visible);
         assert!(state.conn.form.error.as_ref().unwrap().contains("Port"));
     }
@@ -1728,7 +2015,7 @@ mod tests {
             })
             .collect();
         let (tx, _rx) = cmd_channel();
-        apply(Action::SelectTable(5), &mut state, &tx);
+        apply(Action::Tables(TablesAction::Select(5)), &mut state, &tx);
         assert_eq!(state.tables.selected(), 5);
     }
 
@@ -1742,7 +2029,7 @@ mod tests {
             name: "only".into(),
         }];
         let (tx, _rx) = cmd_channel();
-        apply(Action::SelectTable(99), &mut state, &tx);
+        apply(Action::Tables(TablesAction::Select(99)), &mut state, &tx);
         assert_eq!(state.tables.selected(), 0);
         assert!(state.tables.tables.get(state.tables.selected()).is_some());
     }
@@ -1751,7 +2038,7 @@ mod tests {
     fn select_table_in_an_empty_list_stays_at_zero() {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::SelectTable(5), &mut state, &tx);
+        apply(Action::Tables(TablesAction::Select(5)), &mut state, &tx);
         assert_eq!(state.tables.selected(), 0);
     }
 
@@ -1763,7 +2050,7 @@ mod tests {
     fn open_filter() {
         let mut state = make_state_with_results();
         let (tx, _rx) = cmd_channel();
-        apply(Action::OpenFilter, &mut state, &tx);
+        apply(Action::Filter(FilterAction::Open), &mut state, &tx);
         assert!(state.filter.visible);
     }
 
@@ -1772,7 +2059,7 @@ mod tests {
         let mut state = make_state_with_results();
         state.filter.visible = true;
         let (tx, mut rx) = cmd_channel();
-        apply(Action::FilterClose, &mut state, &tx);
+        apply(Action::Filter(FilterAction::Close), &mut state, &tx);
         assert!(!state.filter.visible);
         let cmd = rx.try_recv().unwrap();
         assert!(matches!(cmd, CoreCommand::ClearFilter));
@@ -1783,7 +2070,11 @@ mod tests {
         let mut state = make_state_with_results();
         state.filter.show_suggestions = true;
         let (tx, _rx) = cmd_channel();
-        apply(Action::FilterCloseSuggestions, &mut state, &tx);
+        apply(
+            Action::Filter(FilterAction::CloseSuggestions),
+            &mut state,
+            &tx,
+        );
         assert!(!state.filter.show_suggestions);
     }
 
@@ -1793,7 +2084,7 @@ mod tests {
         state.filter.suggestions = vec!["a".into(), "b".into(), "c".into()];
         state.filter.suggestion_cursor.select(2, 3);
         let (tx, _rx) = cmd_channel();
-        apply(Action::FilterSuggestionUp, &mut state, &tx);
+        apply(Action::Filter(FilterAction::SuggestionUp), &mut state, &tx);
         assert_eq!(state.filter.suggestion_cursor.index(), 1);
     }
 
@@ -1803,7 +2094,11 @@ mod tests {
         state.filter.suggestions = vec!["a".into(), "b".into(), "c".into()];
         state.filter.suggestion_cursor.reset();
         let (tx, _rx) = cmd_channel();
-        apply(Action::FilterSuggestionDown, &mut state, &tx);
+        apply(
+            Action::Filter(FilterAction::SuggestionDown),
+            &mut state,
+            &tx,
+        );
         assert_eq!(state.filter.suggestion_cursor.index(), 1);
     }
 
@@ -1814,7 +2109,7 @@ mod tests {
         state.filter.textarea = tui_textarea::TextArea::default();
         state.filter.textarea.insert_str("name:Alice");
         let (tx, mut rx) = cmd_channel();
-        apply(Action::FilterApply, &mut state, &tx);
+        apply(Action::Filter(FilterAction::Apply), &mut state, &tx);
         assert!(!state.filter.visible);
         assert_eq!(state.active_filter, Some("name:Alice".into()));
         let cmd = rx.try_recv().unwrap();
@@ -1827,7 +2122,7 @@ mod tests {
         state.filter.visible = true;
         state.active_filter = Some("old".into());
         let (tx, mut rx) = cmd_channel();
-        apply(Action::FilterApply, &mut state, &tx);
+        apply(Action::Filter(FilterAction::Apply), &mut state, &tx);
         assert!(state.active_filter.is_none());
         let cmd = rx.try_recv().unwrap();
         assert!(matches!(cmd, CoreCommand::ClearFilter));
@@ -1841,7 +2136,7 @@ mod tests {
     fn open_diagram_without_connection_shows_error() {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::OpenDiagram, &mut state, &tx);
+        apply(Action::Diagram(DiagramAction::Open), &mut state, &tx);
         assert!(state.error_msg.is_some());
     }
 
@@ -1850,7 +2145,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.conn.active_id = Some(uuid::Uuid::new_v4());
         let (tx, mut rx) = cmd_channel();
-        apply(Action::OpenDiagram, &mut state, &tx);
+        apply(Action::Diagram(DiagramAction::Open), &mut state, &tx);
         let cmd = rx.try_recv().unwrap();
         assert!(matches!(cmd, CoreCommand::LoadDiagram));
     }
@@ -1860,7 +2155,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.diagram = Some(DiagramState::new(DiagramData::default()));
         let (tx, _rx) = cmd_channel();
-        apply(Action::CloseDiagram, &mut state, &tx);
+        apply(Action::Diagram(DiagramAction::Close), &mut state, &tx);
         assert!(state.diagram.is_none());
     }
 
@@ -1869,7 +2164,11 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.diagram = Some(DiagramState::new(DiagramData::default()));
         let (tx, _rx) = cmd_channel();
-        apply(Action::DiagramScroll { dx: 5, dy: 3 }, &mut state, &tx);
+        apply(
+            Action::Diagram(DiagramAction::Scroll { dx: 5, dy: 3 }),
+            &mut state,
+            &tx,
+        );
         assert_eq!(state.diagram.as_ref().unwrap().scroll_x, 5);
         assert_eq!(state.diagram.as_ref().unwrap().scroll_y, 3);
     }
@@ -1879,7 +2178,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.diagram = Some(DiagramState::new(DiagramData::default()));
         let (tx, _rx) = cmd_channel();
-        apply(Action::DiagramToggleGlyph, &mut state, &tx);
+        apply(Action::Diagram(DiagramAction::ToggleGlyph), &mut state, &tx);
         assert_eq!(
             state.diagram.as_ref().unwrap().glyph_mode,
             DiagramGlyphMode::Unicode
@@ -1891,7 +2190,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.diagram = Some(DiagramState::new(DiagramData::default()));
         let (tx, _rx) = cmd_channel();
-        apply(Action::DiagramToggleFocus, &mut state, &tx);
+        apply(Action::Diagram(DiagramAction::ToggleFocus), &mut state, &tx);
         assert!(state.diagram.as_ref().unwrap().focus_mode);
     }
 
@@ -1903,7 +2202,7 @@ mod tests {
     fn set_pending_g() {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::SetPendingG, &mut state, &tx);
+        apply(Action::Nav(NavAction::SetPendingG), &mut state, &tx);
         assert!(state.vim.pending_g);
     }
 
@@ -1912,7 +2211,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.vim.pending_g = true;
         let (tx, _rx) = cmd_channel();
-        apply(Action::ClearPendingG, &mut state, &tx);
+        apply(Action::Nav(NavAction::ClearPendingG), &mut state, &tx);
         assert!(!state.vim.pending_g);
     }
 
@@ -1920,7 +2219,7 @@ mod tests {
     fn set_pending_d() {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::SetPendingD, &mut state, &tx);
+        apply(Action::Nav(NavAction::SetPendingD), &mut state, &tx);
         assert!(state.mutation.pending_d);
     }
 
@@ -1929,7 +2228,7 @@ mod tests {
         let mut state = AppState::new(vec![]);
         state.mutation.pending_d = true;
         let (tx, _rx) = cmd_channel();
-        apply(Action::ClearPendingD, &mut state, &tx);
+        apply(Action::Nav(NavAction::ClearPendingD), &mut state, &tx);
         assert!(!state.mutation.pending_d);
     }
 
@@ -1937,7 +2236,11 @@ mod tests {
     fn set_pending_leader() {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
-        apply(Action::SetPendingLeader(true), &mut state, &tx);
+        apply(
+            Action::Nav(NavAction::SetPendingLeader(true)),
+            &mut state,
+            &tx,
+        );
         assert!(state.vim.pending_leader);
     }
 
@@ -1982,7 +2285,10 @@ mod tests {
         let mut state = AppState::new(vec![]);
         let (tx, _rx) = cmd_channel();
         apply(
-            Action::Batch(vec![Action::SetPendingG, Action::SetPendingD]),
+            Action::Batch(vec![
+                Action::Nav(NavAction::SetPendingG),
+                Action::Nav(NavAction::SetPendingD),
+            ]),
             &mut state,
             &tx,
         );

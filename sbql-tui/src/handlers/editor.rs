@@ -1,61 +1,71 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tui_textarea::{CursorMove, Input};
 
-use crate::action::Action;
+use crate::action::{Action, CompletionAction, EditorAction, NavAction};
 use crate::app::{AppState, EditorMode};
 use crate::events::is_run_query;
 
 pub fn handle(state: &AppState, key: KeyEvent) -> Action {
     match state.editor.mode {
         EditorMode::Normal => match (key.code, key.modifiers) {
-            (KeyCode::Char('i'), KeyModifiers::NONE) => Action::SetEditorMode(EditorMode::Insert),
+            (KeyCode::Char('i'), KeyModifiers::NONE) => {
+                Action::Nav(NavAction::SetEditorMode(EditorMode::Insert))
+            }
             (KeyCode::Char('h') | KeyCode::Left, KeyModifiers::NONE) => {
-                Action::EditorCursorMove(CursorMove::Back)
+                Action::Editor(EditorAction::CursorMove(CursorMove::Back))
             }
             (KeyCode::Char('l') | KeyCode::Right, KeyModifiers::NONE) => {
-                Action::EditorCursorMove(CursorMove::Forward)
+                Action::Editor(EditorAction::CursorMove(CursorMove::Forward))
             }
             (KeyCode::Char('j') | KeyCode::Down, KeyModifiers::NONE) => {
-                Action::EditorCursorMove(CursorMove::Down)
+                Action::Editor(EditorAction::CursorMove(CursorMove::Down))
             }
             (KeyCode::Char('k') | KeyCode::Up, KeyModifiers::NONE) => {
-                Action::EditorCursorMove(CursorMove::Up)
+                Action::Editor(EditorAction::CursorMove(CursorMove::Up))
             }
             (KeyCode::Char('w'), KeyModifiers::NONE) => {
-                Action::EditorCursorMove(CursorMove::WordForward)
+                Action::Editor(EditorAction::CursorMove(CursorMove::WordForward))
             }
             (KeyCode::Char('b'), KeyModifiers::NONE) => {
-                Action::EditorCursorMove(CursorMove::WordBack)
+                Action::Editor(EditorAction::CursorMove(CursorMove::WordBack))
             }
-            (KeyCode::Char('0'), KeyModifiers::NONE) => Action::EditorCursorMove(CursorMove::Head),
-            (KeyCode::Char('$'), KeyModifiers::NONE) => Action::EditorCursorMove(CursorMove::End),
-            (KeyCode::Char('g'), KeyModifiers::NONE) => Action::EditorCursorMove(CursorMove::Top),
-            (KeyCode::Char('G'), _) => Action::EditorCursorMove(CursorMove::Bottom),
-            _ if is_run_query(&key) => Action::RunQuery,
+            (KeyCode::Char('0'), KeyModifiers::NONE) => {
+                Action::Editor(EditorAction::CursorMove(CursorMove::Head))
+            }
+            (KeyCode::Char('$'), KeyModifiers::NONE) => {
+                Action::Editor(EditorAction::CursorMove(CursorMove::End))
+            }
+            (KeyCode::Char('g'), KeyModifiers::NONE) => {
+                Action::Editor(EditorAction::CursorMove(CursorMove::Top))
+            }
+            (KeyCode::Char('G'), _) => Action::Editor(EditorAction::CursorMove(CursorMove::Bottom)),
+            _ if is_run_query(&key) => Action::Editor(EditorAction::RunQuery),
             (KeyCode::Esc, _) => Action::Noop,
             _ => Action::Noop,
         },
         EditorMode::Insert => {
             if is_run_query(&key) {
-                return Action::RunQuery;
+                return Action::Editor(EditorAction::RunQuery);
             }
             if state.editor.completion.visible {
                 match key.code {
-                    KeyCode::Up => return Action::CompletionUp,
-                    KeyCode::Down => return Action::CompletionDown,
-                    KeyCode::Tab | KeyCode::Enter => return Action::CompletionAccept,
+                    KeyCode::Up => return Action::Completion(CompletionAction::Up),
+                    KeyCode::Down => return Action::Completion(CompletionAction::Down),
+                    KeyCode::Tab | KeyCode::Enter => {
+                        return Action::Completion(CompletionAction::Accept)
+                    }
                     KeyCode::Esc => {
                         return Action::Batch(vec![
-                            Action::CompletionDismiss,
-                            Action::SetEditorMode(EditorMode::Normal),
+                            Action::Completion(CompletionAction::Dismiss),
+                            Action::Nav(NavAction::SetEditorMode(EditorMode::Normal)),
                         ]);
                     }
                     _ => {} // fall through to normal editor input
                 }
             } else if key.code == KeyCode::Esc {
-                return Action::SetEditorMode(EditorMode::Normal);
+                return Action::Nav(NavAction::SetEditorMode(EditorMode::Normal));
             }
-            Action::EditorInput(Input::from(key))
+            Action::Editor(EditorAction::Input(Input::from(key)))
         }
     }
 }
@@ -84,35 +94,50 @@ mod tests {
     fn normal_i_enters_insert() {
         let state = normal_state();
         let act = handle(&state, key(KeyCode::Char('i')));
-        assert!(matches!(act, Action::SetEditorMode(EditorMode::Insert)));
+        assert!(matches!(
+            act,
+            Action::Nav(NavAction::SetEditorMode(EditorMode::Insert))
+        ));
     }
 
     #[test]
     fn normal_h_moves_back() {
         let state = normal_state();
         let act = handle(&state, key(KeyCode::Char('h')));
-        assert!(matches!(act, Action::EditorCursorMove(CursorMove::Back)));
+        assert!(matches!(
+            act,
+            Action::Editor(EditorAction::CursorMove(CursorMove::Back))
+        ));
     }
 
     #[test]
     fn normal_l_moves_forward() {
         let state = normal_state();
         let act = handle(&state, key(KeyCode::Char('l')));
-        assert!(matches!(act, Action::EditorCursorMove(CursorMove::Forward)));
+        assert!(matches!(
+            act,
+            Action::Editor(EditorAction::CursorMove(CursorMove::Forward))
+        ));
     }
 
     #[test]
     fn normal_j_moves_down() {
         let state = normal_state();
         let act = handle(&state, key(KeyCode::Char('j')));
-        assert!(matches!(act, Action::EditorCursorMove(CursorMove::Down)));
+        assert!(matches!(
+            act,
+            Action::Editor(EditorAction::CursorMove(CursorMove::Down))
+        ));
     }
 
     #[test]
     fn normal_k_moves_up() {
         let state = normal_state();
         let act = handle(&state, key(KeyCode::Char('k')));
-        assert!(matches!(act, Action::EditorCursorMove(CursorMove::Up)));
+        assert!(matches!(
+            act,
+            Action::Editor(EditorAction::CursorMove(CursorMove::Up))
+        ));
     }
 
     #[test]
@@ -121,7 +146,7 @@ mod tests {
         let act = handle(&state, key(KeyCode::Char('w')));
         assert!(matches!(
             act,
-            Action::EditorCursorMove(CursorMove::WordForward)
+            Action::Editor(EditorAction::CursorMove(CursorMove::WordForward))
         ));
     }
 
@@ -131,7 +156,7 @@ mod tests {
         let act = handle(&state, key(KeyCode::Char('b')));
         assert!(matches!(
             act,
-            Action::EditorCursorMove(CursorMove::WordBack)
+            Action::Editor(EditorAction::CursorMove(CursorMove::WordBack))
         ));
     }
 
@@ -139,42 +164,54 @@ mod tests {
     fn normal_0_head() {
         let state = normal_state();
         let act = handle(&state, key(KeyCode::Char('0')));
-        assert!(matches!(act, Action::EditorCursorMove(CursorMove::Head)));
+        assert!(matches!(
+            act,
+            Action::Editor(EditorAction::CursorMove(CursorMove::Head))
+        ));
     }
 
     #[test]
     fn normal_dollar_end() {
         let state = normal_state();
         let act = handle(&state, key(KeyCode::Char('$')));
-        assert!(matches!(act, Action::EditorCursorMove(CursorMove::End)));
+        assert!(matches!(
+            act,
+            Action::Editor(EditorAction::CursorMove(CursorMove::End))
+        ));
     }
 
     #[test]
     fn normal_g_top() {
         let state = normal_state();
         let act = handle(&state, key(KeyCode::Char('g')));
-        assert!(matches!(act, Action::EditorCursorMove(CursorMove::Top)));
+        assert!(matches!(
+            act,
+            Action::Editor(EditorAction::CursorMove(CursorMove::Top))
+        ));
     }
 
     #[test]
     fn normal_shift_g_bottom() {
         let state = normal_state();
         let act = handle(&state, key(KeyCode::Char('G')));
-        assert!(matches!(act, Action::EditorCursorMove(CursorMove::Bottom)));
+        assert!(matches!(
+            act,
+            Action::Editor(EditorAction::CursorMove(CursorMove::Bottom))
+        ));
     }
 
     #[test]
     fn normal_ctrl_s_runs_query() {
         let state = normal_state();
         let act = handle(&state, key_mod(KeyCode::Char('s'), KeyModifiers::CONTROL));
-        assert!(matches!(act, Action::RunQuery));
+        assert!(matches!(act, Action::Editor(EditorAction::RunQuery)));
     }
 
     #[test]
     fn normal_f5_runs_query() {
         let state = normal_state();
         let act = handle(&state, key(KeyCode::F(5)));
-        assert!(matches!(act, Action::RunQuery));
+        assert!(matches!(act, Action::Editor(EditorAction::RunQuery)));
     }
 
     // -- Insert mode --
@@ -183,27 +220,30 @@ mod tests {
     fn insert_esc_returns_normal() {
         let state = insert_state();
         let act = handle(&state, key(KeyCode::Esc));
-        assert!(matches!(act, Action::SetEditorMode(EditorMode::Normal)));
+        assert!(matches!(
+            act,
+            Action::Nav(NavAction::SetEditorMode(EditorMode::Normal))
+        ));
     }
 
     #[test]
     fn insert_ctrl_s_runs_query() {
         let state = insert_state();
         let act = handle(&state, key_mod(KeyCode::Char('s'), KeyModifiers::CONTROL));
-        assert!(matches!(act, Action::RunQuery));
+        assert!(matches!(act, Action::Editor(EditorAction::RunQuery)));
     }
 
     #[test]
     fn insert_f5_runs_query() {
         let state = insert_state();
         let act = handle(&state, key(KeyCode::F(5)));
-        assert!(matches!(act, Action::RunQuery));
+        assert!(matches!(act, Action::Editor(EditorAction::RunQuery)));
     }
 
     #[test]
     fn insert_char_produces_editor_input() {
         let state = insert_state();
         let act = handle(&state, key(KeyCode::Char('x')));
-        assert!(matches!(act, Action::EditorInput(_)));
+        assert!(matches!(act, Action::Editor(EditorAction::Input(_))));
     }
 }

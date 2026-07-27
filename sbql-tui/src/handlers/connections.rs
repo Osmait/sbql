@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::action::Action;
+use crate::action::{Action, ConnectionsAction, FormAction, NavAction};
 use crate::app::{AppState, FocusedPanel};
 
 pub fn handle(state: &AppState, key: KeyEvent) -> Action {
@@ -8,51 +8,78 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
         KeyCode::Down | KeyCode::Char('j') => {
             if !state.conn.connections.is_empty() {
                 let next = state.conn.selected() + 1;
-                Action::Batch(vec![Action::ClearPendingG, Action::SelectConnection(next)])
+                Action::Batch(vec![
+                    Action::Nav(NavAction::ClearPendingG),
+                    Action::Connections(ConnectionsAction::Select(next)),
+                ])
             } else {
-                Action::ClearPendingG
+                Action::Nav(NavAction::ClearPendingG)
             }
         }
         KeyCode::Up | KeyCode::Char('k') => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::SelectConnection(state.conn.selected().saturating_sub(1)),
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Connections(ConnectionsAction::Select(
+                state.conn.selected().saturating_sub(1),
+            )),
         ]),
         KeyCode::Char('G') => {
             if !state.conn.connections.is_empty() {
                 Action::Batch(vec![
-                    Action::ClearPendingG,
-                    Action::SelectConnection(state.conn.connections.len() - 1),
+                    Action::Nav(NavAction::ClearPendingG),
+                    Action::Connections(ConnectionsAction::Select(
+                        state.conn.connections.len() - 1,
+                    )),
                 ])
             } else {
-                Action::ClearPendingG
+                Action::Nav(NavAction::ClearPendingG)
             }
         }
         KeyCode::Char('g') => {
             if state.vim.pending_g {
-                Action::Batch(vec![Action::ClearPendingG, Action::SelectConnection(0)])
+                Action::Batch(vec![
+                    Action::Nav(NavAction::ClearPendingG),
+                    Action::Connections(ConnectionsAction::Select(0)),
+                ])
             } else {
-                Action::SetPendingG
+                Action::Nav(NavAction::SetPendingG)
             }
         }
-        KeyCode::Enter => Action::Batch(vec![Action::ClearPendingG, Action::ConnectSelected]),
-        KeyCode::Char('n') => Action::Batch(vec![Action::ClearPendingG, Action::OpenNewConnForm]),
-        KeyCode::Char('e') => Action::Batch(vec![Action::ClearPendingG, Action::OpenEditConnForm]),
-        KeyCode::Char('d') => {
-            Action::Batch(vec![Action::ClearPendingG, Action::InitDeleteConnection])
-        }
-        KeyCode::Char('x') => Action::Batch(vec![Action::ClearPendingG, Action::DisconnectActive]),
-        KeyCode::Esc => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::FocusPanel(FocusedPanel::Editor),
+        KeyCode::Enter => Action::Batch(vec![
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Connections(ConnectionsAction::ConnectSelected),
         ]),
-        _ => Action::ClearPendingG,
+        KeyCode::Char('n') => Action::Batch(vec![
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Connections(ConnectionsAction::OpenNewForm),
+        ]),
+        KeyCode::Char('e') => Action::Batch(vec![
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Connections(ConnectionsAction::OpenEditForm),
+        ]),
+        KeyCode::Char('d') => Action::Batch(vec![
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Connections(ConnectionsAction::InitDelete),
+        ]),
+        KeyCode::Char('x') => Action::Batch(vec![
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Connections(ConnectionsAction::DisconnectActive),
+        ]),
+        KeyCode::Esc => Action::Batch(vec![
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::FocusPanel(FocusedPanel::Editor)),
+        ]),
+        _ => Action::Nav(NavAction::ClearPendingG),
     }
 }
 
 pub fn handle_confirm_delete(_state: &AppState, key: KeyEvent) -> Action {
     match key.code {
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => Action::ConfirmDeleteConnection,
-        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => Action::CancelDeleteConnection,
+        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+            Action::Connections(ConnectionsAction::ConfirmDelete)
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            Action::Connections(ConnectionsAction::CancelDelete)
+        }
         _ => Action::Noop,
     }
 }
@@ -60,22 +87,22 @@ pub fn handle_confirm_delete(_state: &AppState, key: KeyEvent) -> Action {
 pub fn handle_form(state: &AppState, key: KeyEvent) -> Action {
     let form = &state.conn.form;
     match key.code {
-        KeyCode::Esc => Action::FormClose,
-        KeyCode::Tab | KeyCode::Down => Action::FormNextField,
-        KeyCode::BackTab | KeyCode::Up => Action::FormPrevField,
-        KeyCode::Enter => Action::FormSubmit,
+        KeyCode::Esc => Action::Form(FormAction::Close),
+        KeyCode::Tab | KeyCode::Down => Action::Form(FormAction::NextField),
+        KeyCode::BackTab | KeyCode::Up => Action::Form(FormAction::PrevField),
+        KeyCode::Enter => Action::Form(FormAction::Submit),
         // Space cycles whichever choice row is active — which row that is comes
         // from the backend's field list, not from hard-coded indices.
-        KeyCode::Char(' ') if form.field_index == 0 => Action::FormCycleBackend,
+        KeyCode::Char(' ') if form.field_index == 0 => Action::Form(FormAction::CycleBackend),
         KeyCode::Char(' ')
             if form
                 .field_at(form.field_index)
                 .is_some_and(|s| s.field == sbql_core::ConnectionField::SslMode) =>
         {
-            Action::FormCycleSsl
+            Action::Form(FormAction::CycleSsl)
         }
-        KeyCode::Backspace => Action::FormBackspace,
-        KeyCode::Char(c) => Action::FormInput(c),
+        KeyCode::Backspace => Action::Form(FormAction::Backspace),
+        KeyCode::Char(c) => Action::Form(FormAction::Input(c)),
         _ => Action::Noop,
     }
 }
@@ -114,7 +141,7 @@ mod tests {
     fn handle_j_empty_list_clears_pending() {
         let state = state_with_conns(0);
         let act = handle(&state, key(KeyCode::Char('j')));
-        assert!(matches!(act, Action::ClearPendingG));
+        assert!(matches!(act, Action::Nav(NavAction::ClearPendingG)));
     }
 
     #[test]
@@ -128,7 +155,7 @@ mod tests {
     fn handle_g_without_pending_sets_pending() {
         let state = state_with_conns(3);
         let act = handle(&state, key(KeyCode::Char('g')));
-        assert!(matches!(act, Action::SetPendingG));
+        assert!(matches!(act, Action::Nav(NavAction::SetPendingG)));
     }
 
     #[test]
@@ -185,7 +212,7 @@ mod tests {
     fn handle_unknown_clears_pending() {
         let state = state_with_conns(1);
         let act = handle(&state, key(KeyCode::Char('z')));
-        assert!(matches!(act, Action::ClearPendingG));
+        assert!(matches!(act, Action::Nav(NavAction::ClearPendingG)));
     }
 
     // -- handle_confirm_delete --
@@ -194,28 +221,40 @@ mod tests {
     fn confirm_delete_y() {
         let state = state_with_conns(0);
         let act = handle_confirm_delete(&state, key(KeyCode::Char('y')));
-        assert!(matches!(act, Action::ConfirmDeleteConnection));
+        assert!(matches!(
+            act,
+            Action::Connections(ConnectionsAction::ConfirmDelete)
+        ));
     }
 
     #[test]
     fn confirm_delete_enter() {
         let state = state_with_conns(0);
         let act = handle_confirm_delete(&state, key(KeyCode::Enter));
-        assert!(matches!(act, Action::ConfirmDeleteConnection));
+        assert!(matches!(
+            act,
+            Action::Connections(ConnectionsAction::ConfirmDelete)
+        ));
     }
 
     #[test]
     fn cancel_delete_n() {
         let state = state_with_conns(0);
         let act = handle_confirm_delete(&state, key(KeyCode::Char('n')));
-        assert!(matches!(act, Action::CancelDeleteConnection));
+        assert!(matches!(
+            act,
+            Action::Connections(ConnectionsAction::CancelDelete)
+        ));
     }
 
     #[test]
     fn cancel_delete_esc() {
         let state = state_with_conns(0);
         let act = handle_confirm_delete(&state, key(KeyCode::Esc));
-        assert!(matches!(act, Action::CancelDeleteConnection));
+        assert!(matches!(
+            act,
+            Action::Connections(ConnectionsAction::CancelDelete)
+        ));
     }
 
     #[test]
@@ -232,7 +271,7 @@ mod tests {
         let mut state = state_with_conns(0);
         state.conn.form.visible = true;
         let act = handle_form(&state, key(KeyCode::Esc));
-        assert!(matches!(act, Action::FormClose));
+        assert!(matches!(act, Action::Form(FormAction::Close)));
     }
 
     #[test]
@@ -240,7 +279,7 @@ mod tests {
         let mut state = state_with_conns(0);
         state.conn.form.visible = true;
         let act = handle_form(&state, key(KeyCode::Tab));
-        assert!(matches!(act, Action::FormNextField));
+        assert!(matches!(act, Action::Form(FormAction::NextField)));
     }
 
     #[test]
@@ -248,7 +287,7 @@ mod tests {
         let mut state = state_with_conns(0);
         state.conn.form.visible = true;
         let act = handle_form(&state, key(KeyCode::BackTab));
-        assert!(matches!(act, Action::FormPrevField));
+        assert!(matches!(act, Action::Form(FormAction::PrevField)));
     }
 
     #[test]
@@ -257,7 +296,7 @@ mod tests {
         state.conn.form.visible = true;
         state.conn.form.field_index = 0;
         let act = handle_form(&state, key(KeyCode::Char(' ')));
-        assert!(matches!(act, Action::FormCycleBackend));
+        assert!(matches!(act, Action::Form(FormAction::CycleBackend)));
     }
 
     #[test]
@@ -266,7 +305,7 @@ mod tests {
         state.conn.form.visible = true;
         state.conn.form.field_index = 7;
         let act = handle_form(&state, key(KeyCode::Char(' ')));
-        assert!(matches!(act, Action::FormCycleSsl));
+        assert!(matches!(act, Action::Form(FormAction::CycleSsl)));
     }
 
     #[test]
@@ -274,7 +313,7 @@ mod tests {
         let mut state = state_with_conns(0);
         state.conn.form.visible = true;
         let act = handle_form(&state, key(KeyCode::Enter));
-        assert!(matches!(act, Action::FormSubmit));
+        assert!(matches!(act, Action::Form(FormAction::Submit)));
     }
 
     #[test]
@@ -282,7 +321,7 @@ mod tests {
         let mut state = state_with_conns(0);
         state.conn.form.visible = true;
         let act = handle_form(&state, key(KeyCode::Char('a')));
-        assert!(matches!(act, Action::FormInput('a')));
+        assert!(matches!(act, Action::Form(FormAction::Input('a'))));
     }
 
     #[test]
@@ -290,6 +329,6 @@ mod tests {
         let mut state = state_with_conns(0);
         state.conn.form.visible = true;
         let act = handle_form(&state, key(KeyCode::Backspace));
-        assert!(matches!(act, Action::FormBackspace));
+        assert!(matches!(act, Action::Form(FormAction::Backspace)));
     }
 }

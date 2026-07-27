@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::action::Action;
+use crate::action::{Action, NavAction};
 use crate::app::{AppState, FocusedPanel};
 
 pub fn try_navigate_panels(state: &AppState, key: KeyEvent) -> Option<Action> {
@@ -12,7 +12,7 @@ pub fn try_navigate_panels(state: &AppState, key: KeyEvent) -> Option<Action> {
                 FocusedPanel::Tables => Some(FocusedPanel::Results),
                 _ => None,
             };
-            target.map(Action::FocusPanel)
+            target.map(|p| Action::Nav(NavAction::FocusPanel(p)))
         }
         KeyCode::Char('h') | KeyCode::Left => {
             if sidebar {
@@ -21,7 +21,7 @@ pub fn try_navigate_panels(state: &AppState, key: KeyEvent) -> Option<Action> {
                     FocusedPanel::Results => Some(FocusedPanel::Tables),
                     _ => None,
                 };
-                target.map(Action::FocusPanel)
+                target.map(|p| Action::Nav(NavAction::FocusPanel(p)))
             } else {
                 None
             }
@@ -32,7 +32,7 @@ pub fn try_navigate_panels(state: &AppState, key: KeyEvent) -> Option<Action> {
                 FocusedPanel::Editor => Some(FocusedPanel::Results),
                 _ => None,
             };
-            target.map(Action::FocusPanel)
+            target.map(|p| Action::Nav(NavAction::FocusPanel(p)))
         }
         KeyCode::Char('k') | KeyCode::Up => {
             let target = match state.focused {
@@ -40,7 +40,7 @@ pub fn try_navigate_panels(state: &AppState, key: KeyEvent) -> Option<Action> {
                 FocusedPanel::Results => Some(FocusedPanel::Editor),
                 _ => None,
             };
-            target.map(Action::FocusPanel)
+            target.map(|p| Action::Nav(NavAction::FocusPanel(p)))
         }
         _ => None,
     }

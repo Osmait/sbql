@@ -11,8 +11,8 @@ use tui_textarea::TextArea;
 use uuid::Uuid;
 
 use crate::completion::CompletionState;
-use crate::list_cursor::ListCursor;
 use crate::highlight::SqlHighlighter;
+use crate::list_cursor::ListCursor;
 
 // ---------------------------------------------------------------------------
 // Focus model
@@ -861,7 +861,9 @@ impl AppState {
                         self.filter.suggestions = merged;
                     }
                     self.filter.show_suggestions = !self.filter.suggestions.is_empty();
-                    self.filter.suggestion_cursor.clamp(self.filter.suggestions.len());
+                    self.filter
+                        .suggestion_cursor
+                        .clamp(self.filter.suggestions.len());
                     self.filter.loading_suggestions = false;
                 }
             }
@@ -976,9 +978,9 @@ mod tests {
         ]);
         state.conn.cursor.select(1, state.conn.connections.len());
         // Now replace with just 1 connection
-        state.apply_core_event(CoreEvent::ConnectionList(vec![ConnectionConfig::new_postgres(
-            "a", "h", 5432, "u", "d",
-        )]));
+        state.apply_core_event(CoreEvent::ConnectionList(vec![
+            ConnectionConfig::new_postgres("a", "h", 5432, "u", "d"),
+        ]));
         assert_eq!(state.conn.selected(), 0);
     }
 

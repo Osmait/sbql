@@ -10,7 +10,9 @@ pub mod tables;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::action::Action;
+use crate::action::{
+    Action, CellEditAction, ConnectionsAction, DiagramAction, FilterAction, FormAction, NavAction,
+};
 use crate::app::{AppState, EditorMode, FocusedPanel, NavMode};
 use crate::events::is_quit;
 
@@ -58,16 +60,16 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
 
     // Ctrl+\ — toggle sidebar visibility
     if key.code == KeyCode::Char('\\') && key.modifiers == KeyModifiers::CONTROL {
-        return Action::ToggleSidebar;
+        return Action::Nav(NavAction::ToggleSidebar);
     }
 
     // In Editor Insert mode, keep typing local to editor.
     if state.editor.mode == EditorMode::Insert && state.focused == FocusedPanel::Editor {
         if key.code == KeyCode::Esc {
             return Action::Batch(vec![
-                Action::SetEditorMode(EditorMode::Normal),
-                Action::SetNavMode(NavMode::Panel),
-                Action::SetPendingLeader(false),
+                Action::Nav(NavAction::SetEditorMode(EditorMode::Normal)),
+                Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
+                Action::Nav(NavAction::SetPendingLeader(false)),
             ]);
         }
         return editor::handle(state, key);
@@ -76,11 +78,11 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
     // Esc leaves panel mode and returns to global mode.
     if key.code == KeyCode::Esc {
         let mut actions = vec![
-            Action::SetPendingLeader(false),
-            Action::SetEditorMode(EditorMode::Normal),
+            Action::Nav(NavAction::SetPendingLeader(false)),
+            Action::Nav(NavAction::SetEditorMode(EditorMode::Normal)),
         ];
         if state.vim.nav_mode == NavMode::Panel {
-            actions.push(Action::SetNavMode(NavMode::Global));
+            actions.push(Action::Nav(NavAction::SetNavMode(NavMode::Global)));
             actions.push(Action::SetStatus(Some("Global mode".into())));
             actions.push(Action::SetError(None));
         }
@@ -104,36 +106,37 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
         _ => None,
     };
     if let Some(target) = focus_target {
-        return Action::FocusPanel(target);
+        return Action::Nav(NavAction::FocusPanel(target));
     }
 
     // Shift+D = open database diagram
     if key.code == KeyCode::Char('D') {
-        return Action::OpenDiagram;
+        return Action::Diagram(DiagramAction::Open);
     }
 
     // Tab / BackTab cycles focus
     if key.code == KeyCode::Tab && key.modifiers == KeyModifiers::NONE {
-        return Action::FocusPanel(navigation::tab_next(
+        return Action::Nav(NavAction::FocusPanel(navigation::tab_next(
             state.focused,
             state.layout.sidebar_hidden,
-        ));
+        )));
     }
     if key.code == KeyCode::BackTab {
-        return Action::FocusPanel(navigation::tab_prev(
+        return Action::Nav(NavAction::FocusPanel(navigation::tab_prev(
             state.focused,
             state.layout.sidebar_hidden,
-        ));
+        )));
     }
 
     if state.vim.nav_mode == NavMode::Global {
         if state.vim.pending_leader {
             return match (key.code, key.modifiers) {
-                (KeyCode::Char('e'), KeyModifiers::NONE) => {
-                    Action::Batch(vec![Action::SetPendingLeader(false), Action::ToggleSidebar])
-                }
+                (KeyCode::Char('e'), KeyModifiers::NONE) => Action::Batch(vec![
+                    Action::Nav(NavAction::SetPendingLeader(false)),
+                    Action::Nav(NavAction::ToggleSidebar),
+                ]),
                 _ => Action::Batch(vec![
-                    Action::SetPendingLeader(false),
+                    Action::Nav(NavAction::SetPendingLeader(false)),
                     Action::SetStatus(Some("Unknown leader combo. Try: Space e".into())),
                 ]),
             };
@@ -141,7 +144,7 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
 
         if key.code == KeyCode::Char(' ') && key.modifiers == KeyModifiers::NONE {
             return Action::Batch(vec![
-                Action::SetPendingLeader(true),
+                Action::Nav(NavAction::SetPendingLeader(true)),
                 Action::SetStatus(Some("Leader: _  (e: toggle sidebar)".into())),
                 Action::SetError(None),
             ]);
@@ -150,24 +153,24 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
         if key.code == KeyCode::Char('i') && key.modifiers == KeyModifiers::NONE {
             return match state.focused {
                 FocusedPanel::Results => Action::Batch(vec![
-                    Action::SetNavMode(NavMode::Panel),
-                    Action::EnterCellEdit,
+                    Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
+                    Action::CellEdit(CellEditAction::Enter),
                 ]),
                 FocusedPanel::Editor => Action::Batch(vec![
-                    Action::SetNavMode(NavMode::Panel),
-                    Action::SetEditorMode(EditorMode::Insert),
+                    Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
+                    Action::Nav(NavAction::SetEditorMode(EditorMode::Insert)),
                 ]),
                 FocusedPanel::Connections | FocusedPanel::Tables => Action::Batch(vec![
-                    Action::FocusPanel(FocusedPanel::Editor),
-                    Action::SetNavMode(NavMode::Panel),
-                    Action::SetEditorMode(EditorMode::Insert),
+                    Action::Nav(NavAction::FocusPanel(FocusedPanel::Editor)),
+                    Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
+                    Action::Nav(NavAction::SetEditorMode(EditorMode::Insert)),
                 ]),
             };
         }
 
         if key.code == KeyCode::Enter {
             return Action::Batch(vec![
-                Action::SetNavMode(NavMode::Panel),
+                Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
                 Action::SetStatus(Some("Panel mode".into())),
                 Action::SetError(None),
             ]);
@@ -193,7 +196,7 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
         && key.modifiers == KeyModifiers::NONE
         && state.editor.mode == EditorMode::Normal
     {
-        return Action::SetEditorMode(EditorMode::Insert);
+        return Action::Nav(NavAction::SetEditorMode(EditorMode::Insert));
     }
 
     match state.focused {
@@ -218,7 +221,7 @@ mod tests {
         let mut state = make_state_with_results();
         state.diagram = Some(DiagramState::new(DiagramData::default()));
         let act = handle_key(&state, key(KeyCode::Char('q')));
-        assert!(matches!(act, Action::CloseDiagram));
+        assert!(matches!(act, Action::Diagram(DiagramAction::Close)));
     }
 
     // -- Priority: cell edit --
@@ -237,7 +240,7 @@ mod tests {
             "1".into(),
         ));
         let act = handle_key(&state, key(KeyCode::Esc));
-        assert!(matches!(act, Action::CancelCellEdit));
+        assert!(matches!(act, Action::CellEdit(CellEditAction::Cancel)));
     }
 
     // -- Priority: filter --
@@ -247,7 +250,7 @@ mod tests {
         let mut state = make_state_with_results();
         state.filter.visible = true;
         let act = handle_key(&state, key(KeyCode::Esc));
-        assert!(matches!(act, Action::FilterClose));
+        assert!(matches!(act, Action::Filter(FilterAction::Close)));
     }
 
     // -- Priority: connection form --
@@ -257,7 +260,7 @@ mod tests {
         let mut state = make_state_with_results();
         state.conn.form.visible = true;
         let act = handle_key(&state, key(KeyCode::Esc));
-        assert!(matches!(act, Action::FormClose));
+        assert!(matches!(act, Action::Form(FormAction::Close)));
     }
 
     // -- Priority: delete confirm --
@@ -267,7 +270,10 @@ mod tests {
         let mut state = make_state_with_results();
         state.conn.pending_delete = Some((uuid::Uuid::new_v4(), "test".into()));
         let act = handle_key(&state, key(KeyCode::Char('y')));
-        assert!(matches!(act, Action::ConfirmDeleteConnection));
+        assert!(matches!(
+            act,
+            Action::Connections(ConnectionsAction::ConfirmDelete)
+        ));
     }
 
     // -- Quit --
@@ -292,7 +298,7 @@ mod tests {
     fn ctrl_backslash_toggles_sidebar() {
         let state = make_state_with_results();
         let act = handle_key(&state, key_mod(KeyCode::Char('\\'), KeyModifiers::CONTROL));
-        assert!(matches!(act, Action::ToggleSidebar));
+        assert!(matches!(act, Action::Nav(NavAction::ToggleSidebar)));
     }
 
     // -- Editor insert mode stays local --
@@ -313,28 +319,40 @@ mod tests {
         let mut state = make_state_with_results();
         state.focused = FocusedPanel::Editor;
         let act = handle_key(&state, key(KeyCode::F(1)));
-        assert!(matches!(act, Action::FocusPanel(FocusedPanel::Connections)));
+        assert!(matches!(
+            act,
+            Action::Nav(NavAction::FocusPanel(FocusedPanel::Connections))
+        ));
     }
 
     #[test]
     fn f2_focuses_tables() {
         let state = make_state_with_results();
         let act = handle_key(&state, key(KeyCode::F(2)));
-        assert!(matches!(act, Action::FocusPanel(FocusedPanel::Tables)));
+        assert!(matches!(
+            act,
+            Action::Nav(NavAction::FocusPanel(FocusedPanel::Tables))
+        ));
     }
 
     #[test]
     fn f3_focuses_editor() {
         let state = make_state_with_results();
         let act = handle_key(&state, key(KeyCode::F(3)));
-        assert!(matches!(act, Action::FocusPanel(FocusedPanel::Editor)));
+        assert!(matches!(
+            act,
+            Action::Nav(NavAction::FocusPanel(FocusedPanel::Editor))
+        ));
     }
 
     #[test]
     fn f4_focuses_results() {
         let state = make_state_with_results();
         let act = handle_key(&state, key(KeyCode::F(4)));
-        assert!(matches!(act, Action::FocusPanel(FocusedPanel::Results)));
+        assert!(matches!(
+            act,
+            Action::Nav(NavAction::FocusPanel(FocusedPanel::Results))
+        ));
     }
 
     // -- Tab cycles --
@@ -344,7 +362,10 @@ mod tests {
         let mut state = make_state_with_results();
         state.focused = FocusedPanel::Connections;
         let act = handle_key(&state, key(KeyCode::Tab));
-        assert!(matches!(act, Action::FocusPanel(FocusedPanel::Tables)));
+        assert!(matches!(
+            act,
+            Action::Nav(NavAction::FocusPanel(FocusedPanel::Tables))
+        ));
     }
 
     #[test]
@@ -352,7 +373,10 @@ mod tests {
         let mut state = make_state_with_results();
         state.focused = FocusedPanel::Tables;
         let act = handle_key(&state, key(KeyCode::BackTab));
-        assert!(matches!(act, Action::FocusPanel(FocusedPanel::Connections)));
+        assert!(matches!(
+            act,
+            Action::Nav(NavAction::FocusPanel(FocusedPanel::Connections))
+        ));
     }
 
     // -- Shift+D opens diagram --
@@ -361,7 +385,7 @@ mod tests {
     fn shift_d_opens_diagram() {
         let state = make_state_with_results();
         let act = handle_key(&state, key(KeyCode::Char('D')));
-        assert!(matches!(act, Action::OpenDiagram));
+        assert!(matches!(act, Action::Diagram(DiagramAction::Open)));
     }
 
     // -- Global mode: Space leader --
@@ -421,7 +445,10 @@ mod tests {
         state.vim.nav_mode = NavMode::Panel;
         state.focused = FocusedPanel::Connections;
         let act = handle_key(&state, key_mod(KeyCode::Char('l'), KeyModifiers::ALT));
-        assert!(matches!(act, Action::FocusPanel(FocusedPanel::Editor)));
+        assert!(matches!(
+            act,
+            Action::Nav(NavAction::FocusPanel(FocusedPanel::Editor))
+        ));
     }
 
     // -- Panel mode: i enters insert in editor --
@@ -433,7 +460,10 @@ mod tests {
         state.focused = FocusedPanel::Editor;
         state.editor.mode = EditorMode::Normal;
         let act = handle_key(&state, key(KeyCode::Char('i')));
-        assert!(matches!(act, Action::SetEditorMode(EditorMode::Insert)));
+        assert!(matches!(
+            act,
+            Action::Nav(NavAction::SetEditorMode(EditorMode::Insert))
+        ));
     }
 
     // -- Esc in panel mode returns to global --

@@ -20,10 +20,10 @@ use tokio::sync::mpsc;
 mod action;
 mod app;
 mod completion;
-mod list_cursor;
 mod events;
 mod handlers;
 mod highlight;
+mod list_cursor;
 #[cfg(test)]
 mod test_helpers;
 mod ui;

@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::action::Action;
+use crate::action::{Action, NavAction, TablesAction};
 use crate::app::{AppState, FocusedPanel};
 
 pub fn handle(state: &AppState, key: KeyEvent) -> Action {
@@ -8,38 +8,49 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
         KeyCode::Down | KeyCode::Char('j') => {
             if !state.tables.tables.is_empty() {
                 let next = state.tables.selected() + 1;
-                Action::Batch(vec![Action::ClearPendingG, Action::SelectTable(next)])
+                Action::Batch(vec![
+                    Action::Nav(NavAction::ClearPendingG),
+                    Action::Tables(TablesAction::Select(next)),
+                ])
             } else {
-                Action::ClearPendingG
+                Action::Nav(NavAction::ClearPendingG)
             }
         }
         KeyCode::Up | KeyCode::Char('k') => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::SelectTable(state.tables.selected().saturating_sub(1)),
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Tables(TablesAction::Select(
+                state.tables.selected().saturating_sub(1),
+            )),
         ]),
         KeyCode::Char('G') => {
             if !state.tables.tables.is_empty() {
                 Action::Batch(vec![
-                    Action::ClearPendingG,
-                    Action::SelectTable(state.tables.tables.len() - 1),
+                    Action::Nav(NavAction::ClearPendingG),
+                    Action::Tables(TablesAction::Select(state.tables.tables.len() - 1)),
                 ])
             } else {
-                Action::ClearPendingG
+                Action::Nav(NavAction::ClearPendingG)
             }
         }
         KeyCode::Char('g') => {
             if state.vim.pending_g {
-                Action::Batch(vec![Action::ClearPendingG, Action::SelectTable(0)])
+                Action::Batch(vec![
+                    Action::Nav(NavAction::ClearPendingG),
+                    Action::Tables(TablesAction::Select(0)),
+                ])
             } else {
-                Action::SetPendingG
+                Action::Nav(NavAction::SetPendingG)
             }
         }
-        KeyCode::Enter => Action::Batch(vec![Action::ClearPendingG, Action::OpenSelectedTable]),
-        KeyCode::Esc => Action::Batch(vec![
-            Action::ClearPendingG,
-            Action::FocusPanel(FocusedPanel::Editor),
+        KeyCode::Enter => Action::Batch(vec![
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Tables(TablesAction::OpenSelected),
         ]),
-        _ => Action::ClearPendingG,
+        KeyCode::Esc => Action::Batch(vec![
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::FocusPanel(FocusedPanel::Editor)),
+        ]),
+        _ => Action::Nav(NavAction::ClearPendingG),
     }
 }
 
@@ -71,7 +82,7 @@ mod tests {
     fn j_empty_clears_pending() {
         let state = state_with_tables(0);
         let act = handle(&state, key(KeyCode::Char('j')));
-        assert!(matches!(act, Action::ClearPendingG));
+        assert!(matches!(act, Action::Nav(NavAction::ClearPendingG)));
     }
 
     #[test]
@@ -101,7 +112,7 @@ mod tests {
     fn g_sets_pending() {
         let state = state_with_tables(3);
         let act = handle(&state, key(KeyCode::Char('g')));
-        assert!(matches!(act, Action::SetPendingG));
+        assert!(matches!(act, Action::Nav(NavAction::SetPendingG)));
     }
 
     #[test]

@@ -186,7 +186,9 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
             Style::default().fg(theme::OVERLAY0)
         };
         let title_style = if is_active {
-            Style::default().fg(theme::BLUE).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::BLUE)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::OVERLAY2)
         };
@@ -195,9 +197,7 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect) {
         // (row 0) and any choice field the backend declares, e.g. SSL Mode.
         let choice = match form.field_at(i) {
             None => Some(form.draft.backend.label().to_owned()),
-            Some(spec) if !spec.field.is_text() => {
-                Some(form.draft.value(spec.field).to_owned())
-            }
+            Some(spec) if !spec.field.is_text() => Some(form.draft.value(spec.field).to_owned()),
             Some(_) => None,
         };
 
