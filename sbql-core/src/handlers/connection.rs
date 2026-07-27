@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use crate::{save_connections, ConnectionConfig, Core, CoreEvent, SbqlError};
+use crate::{save_connections, ConnectionConfig, Core, CoreError, CoreEvent, ErrorKind, SbqlError};
 
 pub(crate) async fn save(
     core: &mut Core,
@@ -11,7 +11,10 @@ pub(crate) async fn save(
     // types, but they are not trusted to — a client that forgets (as the macOS
     // app did) would otherwise write a connection that can never open.
     if let Err(e) = config.validate() {
-        return vec![CoreEvent::Error(e.to_string())];
+        return vec![CoreEvent::Error(CoreError::new(
+            ErrorKind::Config,
+            e.to_string(),
+        ))];
     }
 
     // A keyring that refuses the write is not fatal — the connection is still
@@ -21,15 +24,22 @@ pub(crate) async fn save(
     if let Some(ref pw) = password {
         if let Err(e) = config.save_password(pw) {
             tracing::warn!("Keyring save failed (will use in-memory cache): {e}");
-            // The status bar is one line, so lead with what went wrong and keep
-            // the cause short — `e` already carries a fix-it hint.
-            let detail = match &e {
-                SbqlError::Keyring(msg) => msg.as_str(),
-                _ => "the credential store rejected it",
-            };
-            warning = Some(format!(
-                "Connection saved, password NOT stored (session only): {detail}"
-            ));
+            // Reported as a *warning*, not an error: the connection was saved
+            // and the password works for this session. Sent as a plain error it
+            // was painted like a lost write, which is the opposite of true.
+            //
+            // The summary stays one line for a status bar; the store's own
+            // complaint (which carries the fix-it hint) rides along in `detail`.
+            warning = Some(
+                CoreError::warning(
+                    ErrorKind::Credentials,
+                    "Connection saved, password NOT stored (session only)",
+                )
+                .with_detail(match &e {
+                    SbqlError::Keyring(msg) => msg.clone(),
+                    other => other.to_string(),
+                }),
+            );
         }
         core.password_cache.insert(config.id, pw.clone());
     } else {
@@ -47,14 +57,14 @@ pub(crate) async fn save(
     }
 
     if let Err(e) = save_connections(&core.connections) {
-        return vec![CoreEvent::Error(e.to_string())];
+        return vec![CoreEvent::error(&e)];
     }
 
     // The list stays first so existing consumers keep seeing it at index 0; the
     // warning is applied afterwards and is what the user ends up reading.
     let mut events = vec![CoreEvent::ConnectionList(core.connections.clone())];
-    if let Some(msg) = warning {
-        events.push(CoreEvent::Error(msg));
+    if let Some(warning) = warning {
+        events.push(CoreEvent::Error(warning));
     }
     events
 }
@@ -66,7 +76,7 @@ pub(crate) async fn delete(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
         core.manager.disconnect(id).await;
     }
     if let Err(e) = save_connections(&core.connections) {
-        return vec![CoreEvent::Error(e.to_string())];
+        return vec![CoreEvent::error(&e)];
     }
     vec![CoreEvent::ConnectionList(core.connections.clone())]
 }
@@ -74,7 +84,11 @@ pub(crate) async fn delete(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
 pub(crate) async fn connect(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
     let cfg = match core.connections.iter().find(|c| c.id == id) {
         Some(c) => c.clone(),
-        None => return vec![CoreEvent::Error(format!("Connection {} not found", id))],
+        None => {
+            return vec![CoreEvent::error(SbqlError::ConnectionNotFound(
+                id.to_string(),
+            ))]
+        }
     };
 
     let password = if let Some(pw) = core.password_cache.get(&id).cloned() {
@@ -106,7 +120,7 @@ pub(crate) async fn connect(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
         Ok(p) => p,
         Err(e) => {
             tracing::error!("Password lookup failed for '{}': {}", cfg.name, e);
-            return vec![CoreEvent::Error(e.to_string())];
+            return vec![CoreEvent::error(&e)];
         }
     };
 
@@ -118,7 +132,7 @@ pub(crate) async fn connect(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
         }
         Err(e) => {
             tracing::error!("Connect failed for '{}': {}", cfg.name, e);
-            vec![CoreEvent::Error(e.to_string())]
+            vec![CoreEvent::error(&e)]
         }
     }
 }
@@ -133,7 +147,9 @@ pub(crate) async fn disconnect(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{config::CONFIG_DIR_ENV, ConnectionConfig, Core, CoreCommand, CoreEvent};
+    use crate::{
+        config::CONFIG_DIR_ENV, ConnectionConfig, Core, CoreCommand, CoreEvent, ErrorKind,
+    };
     use std::sync::OnceLock;
 
     /// Keep the test suite away from the developer's machine.
@@ -220,7 +236,10 @@ mod tests {
             .await;
 
         match &events[0] {
-            CoreEvent::Error(msg) => assert!(msg.contains("Host is required"), "{msg}"),
+            CoreEvent::Error(e) => {
+                assert!(e.message.contains("Host is required"), "{e}");
+                assert_eq!(e.kind, ErrorKind::Config);
+            }
             other => panic!("expected a validation error, got {other:?}"),
         }
         assert!(
@@ -261,16 +280,26 @@ mod tests {
         let warning = events
             .iter()
             .find_map(|e| match e {
-                CoreEvent::Error(msg) => Some(msg.clone()),
+                CoreEvent::Error(err) => Some(err.clone()),
                 _ => None,
             })
             .expect("expected a warning when the keyring is unusable");
-        assert!(warning.contains("password NOT stored"), "{warning}");
-        // It has to fit a single-line status bar.
+
+        // Reported as a warning, not a failure: the save itself worked, and a
+        // client that paints this red is telling the user something false.
+        assert!(warning.is_warning(), "{warning:?}");
+        assert_eq!(warning.kind, ErrorKind::Credentials);
+        assert!(warning.message.contains("password NOT stored"), "{warning}");
+        // The summary has to fit a single-line status bar; anything longer
+        // belongs in `detail`, which the client shows on request.
         assert!(
-            warning.len() < 160,
-            "warning too long ({}): {warning}",
-            warning.len()
+            warning.message.len() < 160,
+            "summary too long ({}): {warning}",
+            warning.message.len()
+        );
+        assert!(
+            warning.detail.is_some(),
+            "the store's own complaint should survive: {warning:?}"
         );
     }
 

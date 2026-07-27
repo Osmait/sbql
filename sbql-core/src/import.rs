@@ -117,7 +117,7 @@ fn read_json(path: &str) -> Result<(Vec<String>, Vec<Vec<String>>)> {
             let mut found: Option<&[serde_json::Value]> = None;
             for (_key, val) in map {
                 if let serde_json::Value::Array(arr) = val {
-                    if arr.first().map_or(false, |v| v.is_object()) {
+                    if arr.first().is_some_and(|v| v.is_object()) {
                         found = Some(arr.as_slice());
                         break;
                     }

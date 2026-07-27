@@ -29,6 +29,9 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
     // without deciding what it does with a key press.
     match state.mode() {
         Mode::Diagram => return diagram::handle(state, key),
+        // A reader, not an editor: any key closes it, so it is not another
+        // mode the user has to find their way out of.
+        Mode::NoticeDetail => return Action::CloseNoticeDetail,
         Mode::CellEdit => return cell_edit::handle(state, key),
         Mode::Filter => return filter::handle(state, key),
         Mode::ConnectionForm => return connections::handle_form(state, key),
@@ -45,6 +48,13 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
     // Ctrl+\ — toggle sidebar visibility
     if key.code == KeyCode::Char('\\') && key.modifiers == KeyModifiers::CONTROL {
         return Action::Nav(NavAction::ToggleSidebar);
+    }
+
+    // Ctrl+E — the rest of the message in the status bar. The bar is one row
+    // wide, so a database error longer than the terminal used to be cut off
+    // with no way to read the end of it.
+    if key.code == KeyCode::Char('e') && key.modifiers == KeyModifiers::CONTROL {
+        return Action::ShowNoticeDetail;
     }
 
     // In Editor Insert mode, keep typing local to editor.
@@ -64,11 +74,14 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
         let mut actions = vec![
             Action::Nav(NavAction::SetPendingLeader(false)),
             Action::Nav(NavAction::SetEditorMode(EditorMode::Normal)),
+            // Failures do not time out, so Esc is how they go. Without this
+            // the only way to clear one was to do something unrelated that
+            // happened to overwrite it.
+            Action::DismissNotice,
         ];
         if state.vim.nav_mode == NavMode::Panel {
             actions.push(Action::Nav(NavAction::SetNavMode(NavMode::Global)));
-            actions.push(Action::SetStatus(Some("Global mode".into())));
-            actions.push(Action::SetError(None));
+            actions.push(Action::Inform("Global mode".into()));
         }
         return Action::Batch(actions);
     }
@@ -121,7 +134,7 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
                 ]),
                 _ => Action::Batch(vec![
                     Action::Nav(NavAction::SetPendingLeader(false)),
-                    Action::SetStatus(Some("Unknown leader combo. Try: Space e".into())),
+                    Action::Inform("Unknown leader combo. Try: Space e".into()),
                 ]),
             };
         }
@@ -129,8 +142,7 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
         if key.code == KeyCode::Char(' ') && key.modifiers == KeyModifiers::NONE {
             return Action::Batch(vec![
                 Action::Nav(NavAction::SetPendingLeader(true)),
-                Action::SetStatus(Some("Leader: _  (e: toggle sidebar)".into())),
-                Action::SetError(None),
+                Action::Inform("Leader: _  (e: toggle sidebar)".into()),
             ]);
         }
 
@@ -155,8 +167,7 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
         if key.code == KeyCode::Enter {
             return Action::Batch(vec![
                 Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
-                Action::SetStatus(Some("Panel mode".into())),
-                Action::SetError(None),
+                Action::Inform("Panel mode".into()),
             ]);
         }
 

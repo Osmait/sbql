@@ -1,0 +1,9 @@
+# The panic lints in `Cargo.toml`'s `[workspace.lints.clippy]` are aimed at the
+# shipped binary, where a panic means a garbled terminal. In a test an `unwrap`
+# that fails is a test failure, which is exactly what it is there for — so the
+# lints stand down inside `#[cfg(test)]` rather than being suppressed by hand in
+# every test module.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true

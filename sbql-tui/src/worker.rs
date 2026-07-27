@@ -5,7 +5,6 @@
 
 use sbql_core::{Core, CoreCommand, CoreEvent};
 use tokio::sync::mpsc;
-use tracing::error;
 
 /// Spawn the worker task.
 ///
@@ -22,9 +21,11 @@ pub fn spawn_worker() -> (
     tokio::spawn(async move {
         let mut core = Core::new();
 
-        // Send the initial connection list so the UI can populate itself.
-        let initial = core.connections.clone();
-        let _ = event_tx.send(CoreEvent::ConnectionList(initial));
+        // Whatever the core wants said before the first command: the connection
+        // list, and any reason it came back empty.
+        for ev in core.startup_events() {
+            let _ = event_tx.send(ev);
+        }
 
         while let Some(cmd) = cmd_rx.recv().await {
             // Each command declares whether it is worth a spinner, so adding
@@ -43,7 +44,11 @@ pub fn spawn_worker() -> (
             }
         }
 
-        error!("Worker command channel closed unexpectedly");
+        // Not an error: this is what quitting looks like from in here. The UI
+        // drops the sender on the way out, `recv` returns `None`, and the
+        // worker is done. Logged at error level it sent every future
+        // investigation looking for a fault at shutdown.
+        tracing::debug!("Command channel closed, worker shutting down");
     });
 
     (cmd_tx, event_rx)
@@ -86,7 +91,9 @@ mod tests {
         // Since we are not connected, we should get an error next
         let error_event = event_rx.recv().await.expect("Expected event");
         match error_event {
-            CoreEvent::Error(msg) => assert!(msg.contains("No active connection")),
+            CoreEvent::Error(e) => {
+                assert_eq!(e.kind, sbql_core::ErrorKind::NoActiveConnection);
+            }
             _ => panic!("Expected Error event, got {:?}", error_event),
         }
     }

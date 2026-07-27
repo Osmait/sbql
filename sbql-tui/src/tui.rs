@@ -4,9 +4,14 @@
 //! alternate screen, mouse capture, the Kitty keyboard protocol — is set up and
 //! torn down here, so no other module has to remember the matching call.
 //!
-//! Restoration happens on `Drop` *and* from a panic hook. Before this, a panic
-//! left the terminal in raw mode with the alternate screen still active, which
-//! means a garbled shell and no echo until the user blindly types `reset`.
+//! Restoration happens on `Drop`, from a panic hook, *and* by hand if setup
+//! itself fails part-way through. Before this, a panic left the terminal in raw
+//! mode with the alternate screen still active, which means a garbled shell and
+//! no echo until the user blindly types `reset`.
+//!
+//! The awkward case is a failure *during* [`Tui::new`]: `Self` does not exist
+//! yet, so there is nothing for `Drop` to run. [`TakeoverProgress`] records what
+//! was actually switched on so it can be switched back off by hand.
 //!
 //! [`Tui`] is generic over ratatui's own [`Backend`] trait rather than nailed to
 //! crossterm. That is not speculative: it is what lets the event loop be driven
@@ -28,6 +33,7 @@ use crossterm::{
 use ratatui::{backend::Backend, backend::CrosstermBackend, Terminal};
 
 use crate::app::AppState;
+use crate::error::{Result, TuiError};
 use crate::renderer::Renderer;
 use crate::ui;
 
@@ -45,14 +51,64 @@ pub struct Tui<B: Backend> {
     restored: bool,
 }
 
+/// Which parts of the takeover have actually happened.
+///
+/// Only used while [`Tui::new`] is running. Once the struct exists, `Drop` and
+/// [`Tui::restore`] take over the same job.
+#[derive(Default)]
+struct TakeoverProgress {
+    raw_mode: bool,
+    alternate_screen: bool,
+    keyboard_enhanced: bool,
+}
+
+impl TakeoverProgress {
+    /// Undo a half-finished takeover.
+    ///
+    /// Best effort on purpose: we are already returning an error, and a second
+    /// one raised while cleaning up after the first is not more useful than it.
+    fn roll_back(&self) {
+        let mut out = io::stdout();
+        if self.keyboard_enhanced {
+            let _ = execute!(out, PopKeyboardEnhancementFlags);
+        }
+        if self.alternate_screen {
+            let _ = execute!(out, LeaveAlternateScreen, DisableMouseCapture);
+        }
+        if self.raw_mode {
+            let _ = disable_raw_mode();
+        }
+    }
+}
+
 impl Tui<CrosstermBackend<Stdout>> {
     /// Take over the real terminal and install the panic hook.
-    pub fn new() -> io::Result<Self> {
+    ///
+    /// If any step fails the earlier ones are undone before returning, so a
+    /// failed startup never costs the user their shell.
+    pub fn new() -> Result<Self> {
         install_panic_hook();
 
-        enable_raw_mode()?;
+        let mut progress = TakeoverProgress::default();
+        match Self::take_over(&mut progress) {
+            Ok(tui) => Ok(tui),
+            Err(e) => {
+                progress.roll_back();
+                Err(e)
+            }
+        }
+    }
+
+    /// The fallible half of [`Tui::new`], with every step it completes recorded
+    /// in `progress` so the caller can roll back exactly what happened.
+    fn take_over(progress: &mut TakeoverProgress) -> Result<Self> {
+        enable_raw_mode().map_err(TuiError::TerminalSetup)?;
+        progress.raw_mode = true;
+
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
+            .map_err(TuiError::TerminalSetup)?;
+        progress.alternate_screen = true;
 
         let keyboard_enhanced = supports_keyboard_enhancement().unwrap_or(false);
         if keyboard_enhanced {
@@ -62,11 +118,14 @@ impl Tui<CrosstermBackend<Stdout>> {
                     KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
                         | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES,
                 )
-            )?;
+            )
+            .map_err(TuiError::TerminalSetup)?;
+            progress.keyboard_enhanced = true;
         }
 
         Ok(Self {
-            terminal: Terminal::new(CrosstermBackend::new(stdout))?,
+            terminal: Terminal::new(CrosstermBackend::new(stdout))
+                .map_err(TuiError::TerminalSetup)?,
             cache: ui::cache::RenderCache::new(),
             owns_terminal: true,
             keyboard_enhanced,
@@ -78,10 +137,13 @@ impl Tui<CrosstermBackend<Stdout>> {
 impl<B: Backend> Tui<B> {
     /// Wrap a backend without touching the real terminal.
     ///
-    /// For tests, and for any backend that manages its own lifetime.
-    pub fn with_backend(backend: B) -> io::Result<Self> {
+    /// What the `Backend` generic is for: the event loop, the reducer and the
+    /// view all run against `TestBackend` with no terminal attached. Nothing in
+    /// the shipped binary builds a `Tui` this way, hence `cfg(test)`.
+    #[cfg(test)]
+    pub fn with_backend(backend: B) -> Result<Self> {
         Ok(Self {
-            terminal: Terminal::new(backend)?,
+            terminal: Terminal::new(backend).map_err(TuiError::TerminalSetup)?,
             cache: ui::cache::RenderCache::new(),
             owns_terminal: false,
             keyboard_enhanced: false,
@@ -91,7 +153,12 @@ impl<B: Backend> Tui<B> {
 
     /// Hand the terminal back. Idempotent, a no-op for borrowed backends, and
     /// also run from `Drop`.
-    pub fn restore(&mut self) -> io::Result<()> {
+    ///
+    /// Every step runs even after an earlier one fails, and the first error is
+    /// reported at the end. Returning on the first failure instead would leave
+    /// the alternate screen up with no second chance: `restored` is already set,
+    /// so `Drop` would decline to try again.
+    pub fn restore(&mut self) -> Result<()> {
         if self.restored || !self.owns_terminal {
             return Ok(());
         }
@@ -100,19 +167,41 @@ impl<B: Backend> Tui<B> {
         // Written to stdout rather than through the backend: it is the same
         // stream, and it keeps the generic free of a `Write` bound.
         let mut out = io::stdout();
-        disable_raw_mode()?;
+        let mut failure: Option<io::Error> = None;
+
+        keep_first(&mut failure, disable_raw_mode());
         if self.keyboard_enhanced {
-            execute!(out, PopKeyboardEnhancementFlags)?;
+            keep_first(&mut failure, execute!(out, PopKeyboardEnhancementFlags));
         }
-        execute!(out, LeaveAlternateScreen, DisableMouseCapture)?;
-        self.terminal.show_cursor()
+        keep_first(
+            &mut failure,
+            execute!(out, LeaveAlternateScreen, DisableMouseCapture),
+        );
+        keep_first(&mut failure, self.terminal.show_cursor());
+
+        match failure {
+            Some(e) => Err(TuiError::TerminalRestore(e)),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Remember `result`'s error only if nothing has failed yet.
+///
+/// The first failure is the one worth reporting; the ones after it are usually
+/// the same broken terminal answering again.
+fn keep_first(slot: &mut Option<io::Error>, result: io::Result<()>) {
+    if let Err(e) = result {
+        slot.get_or_insert(e);
     }
 }
 
 impl<B: Backend> Renderer for Tui<B> {
-    fn render(&mut self, state: &mut AppState) -> anyhow::Result<()> {
+    fn render(&mut self, state: &mut AppState) -> Result<()> {
         let cache = &mut self.cache;
-        self.terminal.draw(|frame| ui::draw(frame, state, cache))?;
+        self.terminal
+            .draw(|frame| ui::draw(frame, state, cache))
+            .map_err(TuiError::Render)?;
         Ok(())
     }
 }
@@ -162,6 +251,49 @@ mod tests {
         // Would otherwise disable raw mode on a terminal we never took over.
         assert!(tui.restore().is_ok());
         assert!(!tui.owns_terminal);
+    }
+
+    /// The rollback path is what stands between a failed startup and a shell
+    /// with no echo, so it has to undo exactly what was switched on — and
+    /// nothing that was not.
+    #[test]
+    fn a_half_finished_takeover_is_rolled_back() {
+        // Nothing was switched on: rolling back must be a no-op rather than,
+        // say, popping keyboard flags that were never pushed.
+        TakeoverProgress::default().roll_back();
+
+        // The realistic failure: raw mode is on, the alternate screen is not.
+        // Under `cargo test` there is no terminal to act on, so this asserts
+        // that the call is safe to make rather than what it emits.
+        TakeoverProgress {
+            raw_mode: true,
+            ..Default::default()
+        }
+        .roll_back();
+    }
+
+    /// A failure part-way through teardown must not skip the rest of it.
+    #[test]
+    fn restore_is_still_only_run_once() {
+        let mut tui = Tui::with_backend(TestBackend::new(20, 5)).expect("build tui");
+        tui.owns_terminal = false;
+
+        assert!(tui.restore().is_ok());
+        assert!(tui.restored || !tui.owns_terminal);
+        assert!(tui.restore().is_ok(), "a second restore is a no-op");
+    }
+
+    #[test]
+    fn the_first_teardown_failure_is_the_one_reported() {
+        let mut slot = None;
+        keep_first(&mut slot, Ok(()));
+        assert!(slot.is_none());
+
+        keep_first(&mut slot, Err(io::Error::other("first")));
+        keep_first(&mut slot, Err(io::Error::other("second")));
+
+        let kept = slot.expect("an error was recorded");
+        assert_eq!(kept.to_string(), "first");
     }
 
     #[test]

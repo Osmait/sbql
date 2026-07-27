@@ -12,6 +12,22 @@ edition = "2021"
 authors = ["sbql contributors"]
 license = "MIT"
 
+# Keeping panics out of a full-screen terminal app, mechanically.
+#
+# A panic here is not a stack trace on stderr: it is a garbled shell. The panic
+# hook in `sbql-tui::tui` restores the terminal first, but that is damage
+# control — these lints are what stop the panic being written in the first
+# place. Warn rather than deny so a work-in-progress still builds; CI is where
+# they are meant to bite. Test code is exempted in `clippy.toml`.
+#
+# Not enabled: `indexing_slicing`. `x[i]` panics as readily as `unwrap` and
+# reads as though it cannot, but the diagram canvas indexes heavily and would
+# have to be reworked first.
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+
 [workspace.dependencies]
 # Local workspace crate.
 # `default-features = false` has to live here: Cargo ignores a member's

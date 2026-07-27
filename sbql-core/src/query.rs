@@ -1508,15 +1508,11 @@ async fn export_all_pg(
             write_header(&mut writer, &cols, format, table_name)?;
             columns = Some(cols);
         }
+        // Filled from the first row just above, so the closure never runs.
+        // `unwrap()` here was provably safe and still read as a panic site.
+        let cols = columns.get_or_insert_with(Vec::new);
         let values = pg_row_to_strings(&row);
-        write_row(
-            &mut writer,
-            columns.as_ref().unwrap(),
-            &values,
-            format,
-            table_name,
-            count,
-        )?;
+        write_row(&mut writer, cols, &values, format, table_name, count)?;
         count += 1;
     }
     write_footer(&mut writer, format)?;
@@ -1544,15 +1540,11 @@ async fn export_all_sqlite(
             write_header(&mut writer, &cols, format, table_name)?;
             columns = Some(cols);
         }
+        // Filled from the first row just above, so the closure never runs.
+        // `unwrap()` here was provably safe and still read as a panic site.
+        let cols = columns.get_or_insert_with(Vec::new);
         let values = sqlite_row_to_strings(&row);
-        write_row(
-            &mut writer,
-            columns.as_ref().unwrap(),
-            &values,
-            format,
-            table_name,
-            count,
-        )?;
+        write_row(&mut writer, cols, &values, format, table_name, count)?;
         count += 1;
     }
     write_footer(&mut writer, format)?;
@@ -1580,15 +1572,11 @@ async fn export_all_mysql(
             write_header(&mut writer, &cols, format, table_name)?;
             columns = Some(cols);
         }
+        // Filled from the first row just above, so the closure never runs.
+        // `unwrap()` here was provably safe and still read as a panic site.
+        let cols = columns.get_or_insert_with(Vec::new);
         let values = mysql_row_to_strings(&row);
-        write_row(
-            &mut writer,
-            columns.as_ref().unwrap(),
-            &values,
-            format,
-            table_name,
-            count,
-        )?;
+        write_row(&mut writer, cols, &values, format, table_name, count)?;
         count += 1;
     }
     write_footer(&mut writer, format)?;
@@ -1618,7 +1606,7 @@ fn write_header(
             )
         }
         ExportFormat::Json => {
-            write!(w, "[\n")
+            writeln!(w, "[")
         }
         ExportFormat::SqlInsert => Ok(()), // no header needed
     }
@@ -1646,7 +1634,7 @@ fn write_row(
         }
         ExportFormat::Json => {
             if row_idx > 0 {
-                write!(w, ",\n")?;
+                writeln!(w, ",")?;
             }
             write!(w, "  {{")?;
             for (i, (col, val)) in cols.iter().zip(values.iter()).enumerate() {

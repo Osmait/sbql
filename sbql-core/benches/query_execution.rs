@@ -1,6 +1,11 @@
 //! Async SQLite integration benchmarks for query execution, schema introspection,
 //! and the full query lifecycle.
 
+// Benchmark harness: `unwrap` on setup is how a bench reports it cannot run.
+// `clippy.toml` exempts `#[cfg(test)]` modules from the workspace panic lints,
+// but not benches or examples.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use criterion::{criterion_group, criterion_main, Criterion};
 use sqlx::SqlitePool;
 use tokio::runtime::Runtime;

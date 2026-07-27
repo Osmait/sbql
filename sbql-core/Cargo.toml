@@ -93,3 +93,6 @@ harness = false
 [[bench]]
 name = "redis_integration"
 harness = false
+
+[lints]
+workspace = true

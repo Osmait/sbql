@@ -40,26 +40,23 @@ pub(super) fn apply(
                 let pending = (cfg.id, cfg.name.clone());
                 state.close_overlays();
                 state.conn.pending_delete = Some(pending);
-                state.status_msg = Some(format!(
+                state.inform(format!(
                     "Confirm delete connection '{}': y/Enter = confirm, n/Esc = cancel.",
                     cfg.name
                 ));
-                state.error_msg = None;
             }
         }
 
         ConnectionsAction::ConfirmDelete => {
             if let Some((id, name)) = state.conn.pending_delete.take() {
                 let _ = cmd_tx.send(CoreCommand::DeleteConnection(id));
-                state.status_msg = Some(format!("Deleted connection '{name}'."));
-                state.error_msg = None;
+                state.inform(format!("Deleted connection '{name}'."));
             }
         }
 
         ConnectionsAction::CancelDelete => {
             state.conn.pending_delete = None;
-            state.status_msg = Some("Delete cancelled.".into());
-            state.error_msg = None;
+            state.inform("Delete cancelled.");
         }
 
         ConnectionsAction::DisconnectActive => {

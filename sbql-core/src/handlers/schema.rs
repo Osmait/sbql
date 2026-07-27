@@ -3,11 +3,11 @@ use crate::{schema, Core, CoreEvent};
 pub(crate) async fn list_tables(core: &mut Core) -> Vec<CoreEvent> {
     let pool = match core.active_pool().await {
         Ok(p) => p,
-        Err(e) => return vec![CoreEvent::Error(e.to_string())],
+        Err(e) => return vec![CoreEvent::error(&e)],
     };
     match schema::list_tables(&pool).await {
         Ok(tables) => vec![CoreEvent::TableList(tables)],
-        Err(e) => vec![CoreEvent::Error(e.to_string())],
+        Err(e) => vec![CoreEvent::error(&e)],
     }
 }
 
@@ -18,7 +18,7 @@ pub(crate) async fn get_primary_keys(
 ) -> Vec<CoreEvent> {
     let pool = match core.active_pool().await {
         Ok(p) => p,
-        Err(e) => return vec![CoreEvent::Error(e.to_string())],
+        Err(e) => return vec![CoreEvent::error(&e)],
     };
     match schema::get_primary_keys(&pool, &schema_name, &table).await {
         Ok(columns) => vec![CoreEvent::PrimaryKeys {
@@ -26,18 +26,18 @@ pub(crate) async fn get_primary_keys(
             table,
             columns,
         }],
-        Err(e) => vec![CoreEvent::Error(e.to_string())],
+        Err(e) => vec![CoreEvent::error(&e)],
     }
 }
 
 pub(crate) async fn load_diagram(core: &mut Core) -> Vec<CoreEvent> {
     let pool = match core.active_pool().await {
         Ok(p) => p,
-        Err(e) => return vec![CoreEvent::Error(e.to_string())],
+        Err(e) => return vec![CoreEvent::error(&e)],
     };
     match schema::load_diagram(&pool).await {
         Ok(data) => vec![CoreEvent::DiagramLoaded(data)],
-        Err(e) => vec![CoreEvent::Error(e.to_string())],
+        Err(e) => vec![CoreEvent::error(&e)],
     }
 }
 
@@ -50,7 +50,7 @@ mod tests {
         let mut core = Core::default();
         let events = core.handle(CoreCommand::ListTables).await;
         assert!(
-            matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection"))
+            matches!(&events[0], CoreEvent::Error(e) if e.message.contains("No active connection"))
         );
     }
 
@@ -64,7 +64,7 @@ mod tests {
             })
             .await;
         assert!(
-            matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection"))
+            matches!(&events[0], CoreEvent::Error(e) if e.message.contains("No active connection"))
         );
     }
 
@@ -73,7 +73,7 @@ mod tests {
         let mut core = Core::default();
         let events = core.handle(CoreCommand::LoadDiagram).await;
         assert!(
-            matches!(&events[0], CoreEvent::Error(msg) if msg.contains("No active connection"))
+            matches!(&events[0], CoreEvent::Error(e) if e.message.contains("No active connection"))
         );
     }
 }

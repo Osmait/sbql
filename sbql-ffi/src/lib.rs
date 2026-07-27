@@ -170,6 +170,12 @@ impl SbqlEngine {
     /// Create a new engine, loading saved connections from disk.
     #[uniffi::constructor]
     pub fn new() -> Self {
+        // The one panic we keep. A `#[uniffi::constructor]` cannot return a
+        // `Result` here, and an engine with no runtime cannot answer a single
+        // call — there is nothing to degrade to. In practice this only fails
+        // if the OS refuses to spawn threads, at which point the process is
+        // over anyway.
+        #[allow(clippy::expect_used)]
         let runtime = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -265,10 +271,8 @@ impl SbqlEngine {
     pub async fn list_tables(&self) -> Result<Vec<FfiTableEntry>, SbqlFfiError> {
         let mut core = self.core.lock().await;
         let events = core.handle(sbql_core::CoreCommand::ListTables).await;
-        for ev in &events {
-            if let sbql_core::CoreEvent::Error(msg) = ev {
-                return Err(SbqlFfiError::core(msg));
-            }
+        if let Some(failure) = first_failure(&events) {
+            return Err(failure);
         }
         for ev in events {
             if let sbql_core::CoreEvent::TableList(tables) = ev {
@@ -289,10 +293,8 @@ impl SbqlEngine {
         let events = core
             .handle(sbql_core::CoreCommand::GetPrimaryKeys { schema, table })
             .await;
-        for ev in &events {
-            if let sbql_core::CoreEvent::Error(msg) = ev {
-                return Err(SbqlFfiError::core(msg));
-            }
+        if let Some(failure) = first_failure(&events) {
+            return Err(failure);
         }
         for ev in events {
             if let sbql_core::CoreEvent::PrimaryKeys { columns, .. } = ev {
@@ -307,10 +309,8 @@ impl SbqlEngine {
     pub async fn load_diagram(&self) -> Result<FfiDiagramData, SbqlFfiError> {
         let mut core = self.core.lock().await;
         let events = core.handle(sbql_core::CoreCommand::LoadDiagram).await;
-        for ev in &events {
-            if let sbql_core::CoreEvent::Error(msg) = ev {
-                return Err(SbqlFfiError::core(msg));
-            }
+        if let Some(failure) = first_failure(&events) {
+            return Err(failure);
         }
         for ev in events {
             if let sbql_core::CoreEvent::DiagramLoaded(data) = ev {
@@ -414,10 +414,8 @@ impl SbqlEngine {
                 token,
             })
             .await;
-        for ev in &events {
-            if let sbql_core::CoreEvent::Error(msg) = ev {
-                return Err(SbqlFfiError::core(msg));
-            }
+        if let Some(failure) = first_failure(&events) {
+            return Err(failure);
         }
         for ev in events {
             if let sbql_core::CoreEvent::FilterSuggestions { items, token } = ev {
@@ -543,13 +541,29 @@ fn parse_uuid(id: &str) -> Result<uuid::Uuid, SbqlFfiError> {
     })
 }
 
+/// The first genuine failure in `events`, if there is one.
+///
+/// Warnings are deliberately skipped. `CoreEvent::Error` also carries the
+/// "it worked, but…" case — saving a connection whose password the keyring
+/// refused, say — and throwing that across the FFI tells the caller their save
+/// failed when the connection is sitting on disk. Before `CoreError` had a
+/// severity there was no way to tell the two apart here.
+fn first_failure(events: &[sbql_core::CoreEvent]) -> Option<SbqlFfiError> {
+    events.iter().find_map(|ev| match ev {
+        sbql_core::CoreEvent::Error(e) if !e.is_warning() => {
+            // `Display` includes the cause chain, which is the part worth
+            // showing: the summary alone is often just "Database error".
+            Some(SbqlFfiError::core(e.to_string()))
+        }
+        _ => None,
+    })
+}
+
 fn extract_connection_list(
     events: Vec<sbql_core::CoreEvent>,
 ) -> Result<Vec<FfiConnectionConfig>, SbqlFfiError> {
-    for ev in &events {
-        if let sbql_core::CoreEvent::Error(msg) = ev {
-            return Err(SbqlFfiError::core(msg));
-        }
+    if let Some(failure) = first_failure(&events) {
+        return Err(failure);
     }
     for ev in events {
         if let sbql_core::CoreEvent::ConnectionList(list) = ev {
@@ -560,10 +574,8 @@ fn extract_connection_list(
 }
 
 fn extract_query_result(events: Vec<sbql_core::CoreEvent>) -> Result<FfiQueryResult, SbqlFfiError> {
-    for ev in &events {
-        if let sbql_core::CoreEvent::Error(msg) = ev {
-            return Err(SbqlFfiError::core(msg));
-        }
+    if let Some(failure) = first_failure(&events) {
+        return Err(failure);
     }
     for ev in events {
         if let sbql_core::CoreEvent::QueryResult(r) = ev {
@@ -582,10 +594,8 @@ fn extract_query_result(events: Vec<sbql_core::CoreEvent>) -> Result<FfiQueryRes
 }
 
 fn check_for_error(events: Vec<sbql_core::CoreEvent>) -> Result<(), SbqlFfiError> {
-    for ev in events {
-        if let sbql_core::CoreEvent::Error(msg) = ev {
-            return Err(SbqlFfiError::core(msg));
-        }
+    if let Some(failure) = first_failure(&events) {
+        return Err(failure);
     }
     Ok(())
 }
@@ -620,7 +630,10 @@ mod tests {
 
     #[test]
     fn extract_connection_list_with_error() {
-        let events = vec![sbql_core::CoreEvent::Error("boom".into())];
+        let events = vec![sbql_core::CoreEvent::Error(sbql_core::CoreError::new(
+            sbql_core::ErrorKind::Other,
+            "boom",
+        ))];
         let result = extract_connection_list(events);
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -631,7 +644,8 @@ mod tests {
 
     #[test]
     fn extract_connection_list_with_list() {
-        let config = sbql_core::ConnectionConfig::new_postgres("test", "localhost", 5432, "user", "db");
+        let config =
+            sbql_core::ConnectionConfig::new_postgres("test", "localhost", 5432, "user", "db");
         let events = vec![sbql_core::CoreEvent::ConnectionList(vec![config.clone()])];
         let result = extract_connection_list(events).unwrap();
         assert_eq!(result.len(), 1);
@@ -649,7 +663,10 @@ mod tests {
 
     #[test]
     fn extract_query_result_with_error() {
-        let events = vec![sbql_core::CoreEvent::Error("query failed".into())];
+        let events = vec![sbql_core::CoreEvent::Error(sbql_core::CoreError::new(
+            sbql_core::ErrorKind::Query,
+            "query failed",
+        ))];
         let result = extract_query_result(events);
         assert!(result.is_err());
     }
@@ -691,7 +708,10 @@ mod tests {
     fn check_for_error_with_error() {
         let events = vec![
             sbql_core::CoreEvent::CellUpdated,
-            sbql_core::CoreEvent::Error("failed".into()),
+            sbql_core::CoreEvent::Error(sbql_core::CoreError::new(
+                sbql_core::ErrorKind::Other,
+                "failed",
+            )),
         ];
         assert!(check_for_error(events).is_err());
     }

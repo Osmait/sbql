@@ -1,5 +1,10 @@
 //! Pure CPU benchmarks for query manipulation functions (no database required).
 
+// Benchmark harness: `unwrap` on setup is how a bench reports it cannot run.
+// `clippy.toml` exempts `#[cfg(test)]` modules from the workspace panic lints,
+// but not benches or examples.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use sbql_core::pool::DbBackend;
