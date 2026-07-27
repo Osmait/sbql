@@ -76,8 +76,8 @@ pub fn measure(results: &ResultsState, area: Rect) -> ResultsLayout {
 
     let mut visible_end = col_scroll;
     let mut used_width = 0usize;
-    for ci in col_scroll..total_cols {
-        let w = col_widths[ci] as usize + COL_SPACING as usize;
+    for (ci, width) in col_widths.iter().enumerate().skip(col_scroll) {
+        let w = *width as usize + COL_SPACING as usize;
         if used_width + w > inner_width && visible_end > col_scroll {
             break;
         }
@@ -109,7 +109,6 @@ pub fn draw(frame: &mut Frame, view: &ResultsView, layout: &ResultsLayout, area:
         has_active_connection,
     } = *view;
     let is_focused = focused == FocusedPanel::Results;
-    let viewport_height = layout.viewport_height;
 
     let border_style = if is_focused {
         Style::default().fg(theme::GREEN)

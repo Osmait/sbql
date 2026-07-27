@@ -109,6 +109,41 @@ pub enum CoreCommand {
     },
 }
 
+
+impl CoreCommand {
+    /// Whether the UI should show a progress indicator while this runs.
+    ///
+    /// The match is exhaustive on purpose. This used to be a blacklist in the
+    /// TUI worker, so every new command silently defaulted to blanking the
+    /// results pane until someone remembered to add it — a background lookup
+    /// would flicker the whole UI. Now a new command cannot compile without
+    /// saying which kind it is.
+    pub fn shows_progress(&self) -> bool {
+        match self {
+            // Background lookups. Fast, and not what the user is waiting on,
+            // so they must not blank the UI.
+            CoreCommand::GetPrimaryKeys { .. }
+            | CoreCommand::Disconnect(_)
+            | CoreCommand::LoadDiagram
+            | CoreCommand::SuggestFilterValues { .. } => false,
+
+            // Work the user asked for and is waiting on.
+            CoreCommand::SaveConnection { .. }
+            | CoreCommand::DeleteConnection(_)
+            | CoreCommand::Connect(_)
+            | CoreCommand::ListTables
+            | CoreCommand::ExecuteQuery { .. }
+            | CoreCommand::FetchPage { .. }
+            | CoreCommand::ApplyOrder { .. }
+            | CoreCommand::ClearOrder
+            | CoreCommand::ApplyFilter { .. }
+            | CoreCommand::ClearFilter
+            | CoreCommand::UpdateCell { .. }
+            | CoreCommand::DeleteRow { .. } => true,
+        }
+    }
+}
+
 /// Events sent from Core → UI.
 #[derive(Debug, Clone)]
 pub enum CoreEvent {
