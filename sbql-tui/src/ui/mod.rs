@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod cell_edit;
 pub mod connections;
 pub mod diagram;
@@ -16,10 +17,14 @@ use ratatui::{
 use crate::app::{AppState, EditorMode, LastAreas, NavMode};
 
 /// Root draw function — dispatches to each panel.
-pub fn draw(frame: &mut Frame, state: &mut AppState) {
+pub fn draw(frame: &mut Frame, state: &mut AppState, cache: &mut cache::RenderCache) {
     // Diagram mode replaces the entire layout when active.
     if let Some(ref mut diag) = state.diagram {
-        diagram::draw(frame, diag);
+        // Measure first: this settles the canvas cache and clamps scroll, so
+        // rendering below is a pure read.
+        let full = frame.area();
+        diagram::measure(diag, cache, full);
+        diagram::draw(frame, diag, cache);
         return;
     }
 
@@ -43,30 +48,36 @@ pub fn draw(frame: &mut Frame, state: &mut AppState) {
             areas.tables,
         );
     }
+    // The diagram is closed, so a canvas from a previous one must not linger.
+    cache.clear_diagram_canvas();
+
     editor::draw(
         frame,
+        cache,
         &mut state.editor,
         &state.conn,
         state.focused,
         areas.editor,
     );
-    let output = results::draw(
-        frame,
-        &state.results,
-        &state.mutation,
-        state.focused,
-        state.active_filter.as_deref(),
-        state.filter.visible,
-        state.layout.spinner_frame,
-        state.conn.active_id.is_some(),
-        areas.results,
-    );
-    // Write back computed values from the draw cycle
-    state.results.viewport_height = output.viewport_height;
-    state.results.viewport_cols = output.viewport_cols;
-    state.layout.last_col_widths = output.col_widths.clone();
-    state.results.cached_col_widths = output.col_widths;
+    // Measure first, then render. Drawing no longer produces state the caller
+    // has to copy back out of it.
+    let results_layout = results::measure(&state.results, areas.results);
+    state.results.viewport_height = results_layout.viewport_height;
+    state.results.viewport_cols = results_layout.viewport_cols;
+    state.layout.last_col_widths = results_layout.col_widths.clone();
+    state.results.cached_col_widths = results_layout.col_widths.clone();
     state.results.col_widths_dirty = false;
+
+    let results_view = results::ResultsView {
+        results: &state.results,
+        mutation: &state.mutation,
+        focused: state.focused,
+        active_filter: state.active_filter.as_deref(),
+        filter_visible: state.filter.visible,
+        spinner_frame: state.layout.spinner_frame,
+        has_active_connection: state.conn.active_id.is_some(),
+    };
+    results::draw(frame, &results_view, &results_layout, areas.results);
 
     // Overlays (drawn on top)
     if state.conn.form.visible {
@@ -162,10 +173,12 @@ mod tests {
             ],
             page: 0,
             has_next_page: false,
+            total_count: None,
         };
         state.apply_core_event(CoreEvent::QueryResult(result));
 
-        terminal.draw(|f| draw(f, &mut state)).unwrap();
+        let mut cache = cache::RenderCache::new();
+        terminal.draw(|f| draw(f, &mut state, &mut cache)).unwrap();
 
         let buffer = terminal.backend().buffer();
         let mut content = String::new();
@@ -199,7 +212,8 @@ mod tests {
 
         state.apply_core_event(CoreEvent::Connected(uuid::Uuid::new_v4()));
 
-        terminal.draw(|f| draw(f, &mut state)).unwrap();
+        let mut cache = cache::RenderCache::new();
+        terminal.draw(|f| draw(f, &mut state, &mut cache)).unwrap();
         let buffer = terminal.backend().buffer();
 
         let mut content = String::new();

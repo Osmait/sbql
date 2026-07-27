@@ -12,6 +12,7 @@
 
 pub mod config;
 pub mod connection;
+pub mod connection_spec;
 pub mod error;
 mod handlers;
 pub mod import;
@@ -24,14 +25,17 @@ pub mod tunnel;
 
 // Re-export the most commonly used types at the crate root.
 pub use config::{
-    config_path, load_connections, load_connections_from, save_connections, save_connections_to,
-    ConnectionConfig, SslMode,
+    config_path, keyring_enabled, load_connections, load_connections_from, save_connections,
+    save_connections_to, ConnectionConfig, SslMode, CONFIG_DIR_ENV, NO_KEYRING_ENV,
+};
+pub use connection_spec::{
+    BackendSpec, ConnectionDraft, ConnectionField, FieldSpec, ValidationError,
 };
 pub use error::{Result, SbqlError};
-pub use pool::{DbBackend, DbPool};
 pub use import::ImportFormat;
+pub use pool::{DbBackend, DbPool};
 pub use query::{ExportFormat, QueryResult, PAGE_SIZE};
-pub use query_builder::{SortDirection, format_sql};
+pub use query_builder::{format_sql, SortDirection};
 pub use schema::{ColumnInfo, DiagramData, ForeignKey, TableEntry, TableSchema};
 
 use std::collections::HashMap;
@@ -103,6 +107,40 @@ pub enum CoreCommand {
         pk_col: String,
         pk_val: String,
     },
+}
+
+impl CoreCommand {
+    /// Whether the UI should show a progress indicator while this runs.
+    ///
+    /// The match is exhaustive on purpose. This used to be a blacklist in the
+    /// TUI worker, so every new command silently defaulted to blanking the
+    /// results pane until someone remembered to add it — a background lookup
+    /// would flicker the whole UI. Now a new command cannot compile without
+    /// saying which kind it is.
+    pub fn shows_progress(&self) -> bool {
+        match self {
+            // Background lookups. Fast, and not what the user is waiting on,
+            // so they must not blank the UI.
+            CoreCommand::GetPrimaryKeys { .. }
+            | CoreCommand::Disconnect(_)
+            | CoreCommand::LoadDiagram
+            | CoreCommand::SuggestFilterValues { .. } => false,
+
+            // Work the user asked for and is waiting on.
+            CoreCommand::SaveConnection { .. }
+            | CoreCommand::DeleteConnection(_)
+            | CoreCommand::Connect(_)
+            | CoreCommand::ListTables
+            | CoreCommand::ExecuteQuery { .. }
+            | CoreCommand::FetchPage { .. }
+            | CoreCommand::ApplyOrder { .. }
+            | CoreCommand::ClearOrder
+            | CoreCommand::ApplyFilter { .. }
+            | CoreCommand::ClearFilter
+            | CoreCommand::UpdateCell { .. }
+            | CoreCommand::DeleteRow { .. } => true,
+        }
+    }
 }
 
 /// Events sent from Core → UI.
@@ -258,7 +296,9 @@ impl Core {
         format: ExportFormat,
         table_name: &str,
     ) -> Result<u64> {
-        let sql = self.effective_sql.as_ref()
+        let sql = self
+            .effective_sql
+            .as_ref()
             .ok_or(SbqlError::Config("No active query".into()))?;
         let pool = self.active_pool().await?;
         query::export_all(&pool, sql, path, format, table_name).await

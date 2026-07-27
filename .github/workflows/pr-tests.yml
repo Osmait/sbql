@@ -16,6 +16,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Linux build dependencies
+        # keyring links the Secret Service client against libdbus on Linux.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -24,3 +30,14 @@ jobs:
 
       - name: Run workspace tests
         run: cargo test --workspace --all-targets
+
+      # The keyring is optional; without this the no-keyring path silently rots.
+      # Only the feature-gated tests run here — the container suites above
+      # already cover the database code and are too slow to repeat.
+      - name: Build and test without the keyring feature
+        run: |
+          cargo test -p sbql-core --no-default-features --lib
+          cargo test -p sbql-core --no-default-features \
+            --test keyring_integration --test sqlite_workflow
+          cargo test -p sbql-tui --no-default-features
+          cargo build -p sbql-tui --no-default-features

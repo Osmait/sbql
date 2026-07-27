@@ -27,16 +27,9 @@ pub fn spawn_worker() -> (
         let _ = event_tx.send(CoreEvent::ConnectionList(initial));
 
         while let Some(cmd) = cmd_rx.recv().await {
-            // Only signal "loading" for operations that take noticeable time.
-            // Fast background lookups (PK introspection) must not blank the UI.
-            let show_loading = !matches!(
-                cmd,
-                CoreCommand::GetPrimaryKeys { .. }
-                    | CoreCommand::Disconnect(_)
-                    | CoreCommand::LoadDiagram
-                    | CoreCommand::SuggestFilterValues { .. }
-            );
-            if show_loading {
+            // Each command declares whether it is worth a spinner, so adding
+            // one here cannot accidentally blank the results pane.
+            if cmd.shows_progress() {
                 let _ = event_tx.send(CoreEvent::Loading);
             }
 

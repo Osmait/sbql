@@ -20,28 +20,95 @@ const MIN_COL_WIDTH: u16 = 6;
 const COL_SPACING: u16 = 1;
 
 /// Values computed during draw that the caller needs to write back.
-pub struct DrawOutput {
+/// Geometry of the results grid for a given area.
+///
+/// Computed without a `Frame`, so the viewport arithmetic the scrolling and
+/// paging logic depends on can be tested without rendering anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultsLayout {
+    /// Width of every column, not just the visible ones.
     pub col_widths: Vec<u16>,
+    /// Rows that fit below the header.
     pub viewport_height: usize,
+    /// Columns that fit across, at least one even if it overflows.
     pub viewport_cols: usize,
+    /// First visible column, clamped into the data.
+    pub col_scroll: usize,
+    /// One past the last visible column.
+    pub visible_end: usize,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn draw(
-    frame: &mut Frame,
-    results: &ResultsState,
-    mutation: &MutationState,
-    focused: FocusedPanel,
-    active_filter: Option<&str>,
-    filter_visible: bool,
-    spinner_frame: usize,
-    has_active_connection: bool,
-    area: Rect,
-) -> DrawOutput {
-    let is_focused = focused == FocusedPanel::Results;
+/// Everything the results panel needs to render, gathered in one place so the
+/// draw call does not take nine positional arguments.
+pub struct ResultsView<'a> {
+    pub results: &'a ResultsState,
+    pub mutation: &'a MutationState,
+    pub focused: FocusedPanel,
+    pub active_filter: Option<&'a str>,
+    pub filter_visible: bool,
+    pub spinner_frame: usize,
+    pub has_active_connection: bool,
+}
 
-    let viewport_height = area.height.saturating_sub(3) as usize;
-    let viewport_height = viewport_height.max(1);
+/// Work out the grid geometry. Pure: no rendering, no state mutation.
+pub fn measure(results: &ResultsState, area: Rect) -> ResultsLayout {
+    let viewport_height = (area.height.saturating_sub(3) as usize).max(1);
+
+    if results.data.columns.is_empty() {
+        return ResultsLayout {
+            col_widths: Vec::new(),
+            viewport_height,
+            viewport_cols: 1,
+            col_scroll: 0,
+            visible_end: 0,
+        };
+    }
+
+    let col_widths = if results.col_widths_dirty || results.cached_col_widths.is_empty() {
+        compute_col_widths(&results.data.columns, &results.data.rows)
+    } else {
+        results.cached_col_widths.clone()
+    };
+
+    let total_cols = results.data.columns.len();
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let col_scroll = results.col_scroll.min(total_cols.saturating_sub(1));
+
+    let mut visible_end = col_scroll;
+    let mut used_width = 0usize;
+    for (ci, width) in col_widths.iter().enumerate().skip(col_scroll) {
+        let w = *width as usize + COL_SPACING as usize;
+        if used_width + w > inner_width && visible_end > col_scroll {
+            break;
+        }
+        used_width += w;
+        visible_end = ci + 1;
+    }
+
+    ResultsLayout {
+        viewport_cols: (visible_end - col_scroll).max(1),
+        col_widths,
+        viewport_height,
+        col_scroll,
+        visible_end,
+    }
+}
+
+/// Render the results grid using a layout from [`measure`].
+///
+/// Takes the geometry rather than computing it, so drawing has no results the
+/// caller has to read back out of it.
+pub fn draw(frame: &mut Frame, view: &ResultsView, layout: &ResultsLayout, area: Rect) {
+    let ResultsView {
+        results,
+        mutation,
+        focused,
+        active_filter,
+        filter_visible,
+        spinner_frame,
+        has_active_connection,
+    } = *view;
+    let is_focused = focused == FocusedPanel::Results;
 
     let border_style = if is_focused {
         Style::default().fg(theme::GREEN)
@@ -138,37 +205,14 @@ pub fn draw(
                 .border_style(border_style),
         );
         frame.render_widget(para, area);
-        return DrawOutput {
-            col_widths: Vec::new(),
-            viewport_height,
-            viewport_cols: 1,
-        };
+        return;
     }
 
-    // --- Compute column widths for ALL columns (cached when data hasn't changed) ---
-    let all_col_widths = if results.col_widths_dirty || results.cached_col_widths.is_empty() {
-        compute_col_widths(&results.data.columns, &results.data.rows)
-    } else {
-        results.cached_col_widths.clone()
-    };
+    let all_col_widths = &layout.col_widths;
+    let visible_col_count = layout.visible_end - layout.col_scroll;
     let total_cols = results.data.columns.len();
-
-    let inner_width = area.width.saturating_sub(2) as usize;
-
-    let col_scroll = results.col_scroll.min(total_cols.saturating_sub(1));
-    let mut visible_end = col_scroll;
-    let mut used_width = 0usize;
-    #[allow(clippy::needless_range_loop)]
-    for ci in col_scroll..total_cols {
-        let w = all_col_widths[ci] as usize + COL_SPACING as usize;
-        if used_width + w > inner_width && visible_end > col_scroll {
-            break;
-        }
-        used_width += w;
-        visible_end = ci + 1;
-    }
-    let visible_col_count = visible_end - col_scroll;
-    let viewport_cols = visible_col_count.max(1);
+    let col_scroll = layout.col_scroll;
+    let visible_end = layout.visible_end;
 
     let left_arrow = if col_scroll > 0 { " ◀ " } else { "" };
     let right_arrow = if visible_end < total_cols {
@@ -321,12 +365,6 @@ pub fn draw(
     });
 
     frame.render_stateful_widget(table, area, &mut tbl_state);
-
-    DrawOutput {
-        col_widths: all_col_widths,
-        viewport_height,
-        viewport_cols,
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -374,7 +412,7 @@ pub fn draw_filter_bar(frame: &mut Frame, filter: &mut FilterBar, results_area: 
 
         let mut lines = Vec::new();
         for (i, item) in filter.suggestions.iter().take(max_items).enumerate() {
-            let style = if i == filter.selected_suggestion {
+            let style = if i == filter.suggestion_cursor.index() {
                 Style::default().fg(theme::BASE).bg(theme::BLUE)
             } else {
                 Style::default().fg(theme::TEXT)
@@ -426,5 +464,101 @@ fn truncate(s: &str, max_chars: usize) -> String {
     } else {
         let truncated: String = chars[..max_chars.saturating_sub(1)].iter().collect();
         format!("{}…", truncated)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sbql_core::QueryResult;
+
+    fn state_with(columns: &[&str], rows: usize) -> ResultsState {
+        let mut s = ResultsState::default();
+        s.data = QueryResult {
+            columns: columns.iter().map(|c| c.to_string()).collect(),
+            rows: (0..rows)
+                .map(|r| columns.iter().map(|c| format!("{c}{r}")).collect())
+                .collect(),
+            page: 0,
+            has_next_page: false,
+            total_count: None,
+        };
+        s.col_widths_dirty = true;
+        s
+    }
+
+    fn area(width: u16, height: u16) -> Rect {
+        Rect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        }
+    }
+
+    /// Border and header take three rows; the rest is the scrollable viewport.
+    #[test]
+    fn viewport_height_excludes_the_chrome() {
+        let s = state_with(&["a"], 50);
+        assert_eq!(measure(&s, area(80, 23)).viewport_height, 20);
+    }
+
+    /// A pane too short for any row still reports one, so paging arithmetic
+    /// never divides by zero.
+    #[test]
+    fn viewport_height_is_never_zero() {
+        let s = state_with(&["a"], 50);
+        for h in 0..=3 {
+            assert_eq!(measure(&s, area(80, h)).viewport_height, 1, "height {h}");
+        }
+    }
+
+    #[test]
+    fn an_empty_result_measures_to_nothing_visible() {
+        let s = ResultsState::default();
+        let l = measure(&s, area(80, 24));
+        assert!(l.col_widths.is_empty());
+        assert_eq!(l.visible_end, 0);
+        assert_eq!(l.viewport_cols, 1);
+    }
+
+    /// Only the columns that fit are visible, and the count follows the width.
+    #[test]
+    fn visible_columns_follow_the_available_width() {
+        let s = state_with(&["aaaa", "bbbb", "cccc", "dddd"], 3);
+        let wide = measure(&s, area(200, 24));
+        assert_eq!(wide.viewport_cols, 4, "all four fit in 200 columns");
+
+        let narrow = measure(&s, area(20, 24));
+        assert!(
+            narrow.viewport_cols < 4,
+            "expected fewer columns in a 20-wide pane, got {}",
+            narrow.viewport_cols
+        );
+        assert_eq!(narrow.col_widths.len(), 4, "widths cover every column");
+    }
+
+    /// One column always renders even when it cannot fit, otherwise the grid
+    /// would come out blank on a very narrow terminal.
+    #[test]
+    fn at_least_one_column_is_visible_however_narrow() {
+        let s = state_with(&["a_very_long_column_name"], 3);
+        assert_eq!(measure(&s, area(4, 24)).viewport_cols, 1);
+    }
+
+    /// Horizontal scroll past the last column is pulled back into range.
+    #[test]
+    fn column_scroll_is_clamped_into_the_data() {
+        let mut s = state_with(&["a", "b", "c"], 3);
+        s.col_scroll = 99;
+        assert_eq!(measure(&s, area(80, 24)).col_scroll, 2);
+    }
+
+    /// Measuring is pure — the same inputs give the same answer, and nothing
+    /// about the state changes.
+    #[test]
+    fn measuring_twice_gives_the_same_layout() {
+        let s = state_with(&["a", "b"], 5);
+        assert_eq!(measure(&s, area(80, 24)), measure(&s, area(80, 24)));
     }
 }

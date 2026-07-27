@@ -65,9 +65,12 @@ impl ConnectionManager {
                     .acquire_timeout(std::time::Duration::from_secs(10))
                     .connect(&url)
                     .await
-                    .map_err(|e| SbqlError::Connection(format!(
-                        "Failed to connect to '{}': {e}", config.name
-                    )))?;
+                    .map_err(|e| {
+                        SbqlError::Connection(format!(
+                            "Failed to connect to '{}': {e}",
+                            config.name
+                        ))
+                    })?;
                 DbPool::Postgres(pg)
             }
             DbBackend::Sqlite => {
@@ -84,9 +87,12 @@ impl ConnectionManager {
                     })
                     .connect(&url)
                     .await
-                    .map_err(|e| SbqlError::Connection(format!(
-                        "Failed to connect to '{}': {e}", config.name
-                    )))?;
+                    .map_err(|e| {
+                        SbqlError::Connection(format!(
+                            "Failed to connect to '{}': {e}",
+                            config.name
+                        ))
+                    })?;
                 DbPool::Sqlite(sq)
             }
             DbBackend::Mysql => {
@@ -95,20 +101,26 @@ impl ConnectionManager {
                     .acquire_timeout(std::time::Duration::from_secs(10))
                     .connect(&url)
                     .await
-                    .map_err(|e| SbqlError::Connection(format!(
-                        "Failed to connect to '{}': {e}", config.name
-                    )))?;
+                    .map_err(|e| {
+                        SbqlError::Connection(format!(
+                            "Failed to connect to '{}': {e}",
+                            config.name
+                        ))
+                    })?;
                 DbPool::Mysql(my)
             }
             DbBackend::Redis => {
-                let client = redis::Client::open(url.as_str())
-                    .map_err(|e| SbqlError::Connection(format!(
-                        "Failed to connect to '{}': {e}", config.name
-                    )))?;
-                let cm = redis::aio::ConnectionManager::new(client).await
-                    .map_err(|e| SbqlError::Connection(format!(
-                        "Failed to connect to '{}': {e}", config.name
-                    )))?;
+                let client = redis::Client::open(url.as_str()).map_err(|e| {
+                    SbqlError::Connection(format!("Failed to connect to '{}': {e}", config.name))
+                })?;
+                let cm = redis::aio::ConnectionManager::new(client)
+                    .await
+                    .map_err(|e| {
+                        SbqlError::Connection(format!(
+                            "Failed to connect to '{}': {e}",
+                            config.name
+                        ))
+                    })?;
                 DbPool::Redis(Box::new(cm))
             }
             DbBackend::DynamoDb => {
@@ -121,39 +133,35 @@ impl ConnectionManager {
                     .region(aws_config::Region::new(region));
 
                 if !access_key.is_empty() && !secret_key.is_empty() {
-                    loader = loader.credentials_provider(
-                        aws_sdk_dynamodb::config::Credentials::new(
-                            access_key,
-                            secret_key,
-                            None,
-                            None,
-                            "sbql",
-                        ),
-                    );
+                    loader =
+                        loader.credentials_provider(aws_sdk_dynamodb::config::Credentials::new(
+                            access_key, secret_key, None, None, "sbql",
+                        ));
                 }
 
                 let sdk_config = loader.load().await;
-                let mut dynamo_config =
-                    aws_sdk_dynamodb::config::Builder::from(&sdk_config);
+                let mut dynamo_config = aws_sdk_dynamodb::config::Builder::from(&sdk_config);
 
                 if !endpoint.is_empty() && endpoint != "http://:0" {
                     dynamo_config = dynamo_config.endpoint_url(&endpoint);
                 }
 
-                let client =
-                    aws_sdk_dynamodb::Client::from_conf(dynamo_config.build());
+                let client = aws_sdk_dynamodb::Client::from_conf(dynamo_config.build());
                 DbPool::DynamoDb(Box::new(client))
             }
             DbBackend::MongoDb => {
-                let client_options = mongodb::options::ClientOptions::parse(&url)
-                    .await
-                    .map_err(|e| SbqlError::Connection(format!(
-                        "Failed to connect to '{}': {e}", config.name
-                    )))?;
-                let client = mongodb::Client::with_options(client_options)
-                    .map_err(|e| SbqlError::Connection(format!(
-                        "Failed to connect to '{}': {e}", config.name
-                    )))?;
+                let client_options =
+                    mongodb::options::ClientOptions::parse(&url)
+                        .await
+                        .map_err(|e| {
+                            SbqlError::Connection(format!(
+                                "Failed to connect to '{}': {e}",
+                                config.name
+                            ))
+                        })?;
+                let client = mongodb::Client::with_options(client_options).map_err(|e| {
+                    SbqlError::Connection(format!("Failed to connect to '{}': {e}", config.name))
+                })?;
                 let db = client.database(&config.database);
                 DbPool::MongoDb(Box::new(db))
             }
@@ -162,10 +170,7 @@ impl ConnectionManager {
                 tib_config.host(&effective_config.host);
                 tib_config.port(effective_config.port);
                 tib_config.database(&config.database);
-                tib_config.authentication(tiberius::AuthMethod::sql_server(
-                    &config.user,
-                    password,
-                ));
+                tib_config.authentication(tiberius::AuthMethod::sql_server(&config.user, password));
                 tib_config.trust_cert();
                 let mgr = bb8_tiberius::ConnectionManager::new(tib_config);
                 let pool = bb8::Pool::builder()
@@ -173,9 +178,12 @@ impl ConnectionManager {
                     .connection_timeout(std::time::Duration::from_secs(10))
                     .build(mgr)
                     .await
-                    .map_err(|e| SbqlError::Connection(format!(
-                        "Failed to connect to '{}': {e}", config.name
-                    )))?;
+                    .map_err(|e| {
+                        SbqlError::Connection(format!(
+                            "Failed to connect to '{}': {e}",
+                            config.name
+                        ))
+                    })?;
                 DbPool::SqlServer(Box::new(pool))
             }
         };

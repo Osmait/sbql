@@ -118,7 +118,8 @@ async fn main() {
 
     // --- Redis tokenizer (pure CPU) ---
     for _ in 0..100 {
-        let _ = tokenize_redis_command("HSET user:1000 name \"John Doe\" email \"john@example.com\"");
+        let _ =
+            tokenize_redis_command("HSET user:1000 name \"John Doe\" email \"john@example.com\"");
     }
 
     println!("Profiling workload complete.");

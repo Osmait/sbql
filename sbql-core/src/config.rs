@@ -1,13 +1,197 @@
 use std::path::PathBuf;
 
-use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{Result, SbqlError};
 use crate::pool::DbBackend;
 
-const KEYRING_SERVICE: &str = "sbql";
+/// Environment variable that relocates the connection file away from the
+/// default `~/.config/sbql` (`~/Library/Application Support/sbql` on macOS).
+pub const CONFIG_DIR_ENV: &str = "SBQL_CONFIG_DIR";
+
+/// Set this to `1` (or `true`) to skip the OS credential store entirely.
+/// Passwords then live in memory for the session and are never written anywhere.
+pub const NO_KEYRING_ENV: &str = "SBQL_NO_KEYRING";
+
+/// Fault injection for tests in other modules of this crate.
+#[cfg(test)]
+pub(crate) use store::fault as store_fault;
+
+/// Whether passwords are persisted at all.
+///
+/// False when the crate was built without the `keyring` feature, or when
+/// [`NO_KEYRING_ENV`] is set. Callers use this to phrase the UI honestly rather
+/// than reporting an unusable store as a failure.
+pub fn keyring_enabled() -> bool {
+    cfg!(feature = "keyring") && !opted_out_of_keyring()
+}
+
+fn opted_out_of_keyring() -> bool {
+    matches!(
+        std::env::var(NO_KEYRING_ENV).as_deref(),
+        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes")
+    )
+}
+
+/// The credential store itself, isolated so the rest of the file never has to
+/// care whether the `keyring` feature is compiled in.
+mod store {
+    use super::{opted_out_of_keyring, Result, SbqlError};
+
+    pub(super) const SERVICE: &str = "sbql";
+    pub(super) const SSH_SERVICE: &str = "sbql-ssh";
+
+    /// Pretend the credential store is broken, for tests that need to exercise
+    /// the failure path without a real one.
+    ///
+    /// Thread-local rather than global: the test suite runs in parallel, and a
+    /// process-wide flag would leak into whatever else is running.
+    #[cfg(test)]
+    pub(crate) mod fault {
+        use std::cell::Cell;
+
+        thread_local! {
+            static FORCED: Cell<bool> = const { Cell::new(false) };
+        }
+
+        /// Make every store operation on this thread fail until dropped.
+        pub(crate) struct ForcedFailure;
+
+        impl ForcedFailure {
+            pub(crate) fn new() -> Self {
+                FORCED.with(|f| f.set(true));
+                Self
+            }
+        }
+
+        impl Drop for ForcedFailure {
+            fn drop(&mut self) {
+                FORCED.with(|f| f.set(false));
+            }
+        }
+
+        pub(super) fn active() -> bool {
+            FORCED.with(|f| f.get())
+        }
+    }
+
+    #[cfg(test)]
+    fn forced_failure() -> Option<SbqlError> {
+        fault::active()
+            .then(|| SbqlError::Keyring("credential store unavailable (test)".to_string()))
+    }
+
+    #[cfg(not(test))]
+    fn forced_failure() -> Option<SbqlError> {
+        None
+    }
+
+    #[cfg(feature = "keyring")]
+    mod backend {
+        use super::*;
+        use keyring::Entry;
+
+        /// What to tell the user when the OS credential store cannot be reached.
+        ///
+        /// `keyring` surfaces this as a low-level platform error — on Linux a raw
+        /// D-Bus message like "The name is not activatable" — which says nothing
+        /// about what to do next. This lands in a single-line status bar, so it
+        /// has to stay short; the underlying cause goes to the log instead.
+        #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))]
+        const NO_STORE_HINT: &str =
+            "Secret Service unavailable or locked — see 'Linux credential storage' in the README";
+
+        #[cfg(target_os = "macos")]
+        const NO_STORE_HINT: &str = "the macOS Keychain could not be reached";
+
+        #[cfg(not(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "macos"
+        )))]
+        const NO_STORE_HINT: &str = "no keyring backend is available on this platform";
+
+        fn map_err(e: keyring::Error) -> SbqlError {
+            match e {
+                keyring::Error::PlatformFailure(ref cause)
+                | keyring::Error::NoStorageAccess(ref cause) => {
+                    tracing::warn!("credential store unreachable: {cause}");
+                    SbqlError::Keyring(NO_STORE_HINT.to_string())
+                }
+                other => SbqlError::Keyring(other.to_string()),
+            }
+        }
+
+        pub(super) fn set(service: &str, user: &str, password: &str) -> Result<()> {
+            let entry = Entry::new(service, user).map_err(map_err)?;
+            entry.set_password(password).map_err(map_err)
+        }
+
+        pub(super) fn get(service: &str, user: &str, label: &str) -> Result<String> {
+            let entry = Entry::new(service, user).map_err(map_err)?;
+            entry.get_password().map_err(|e| match e {
+                keyring::Error::NoEntry => SbqlError::PasswordNotFound(label.to_string()),
+                other => map_err(other),
+            })
+        }
+
+        pub(super) fn delete(service: &str, user: &str) -> Result<()> {
+            let entry = Entry::new(service, user).map_err(map_err)?;
+            entry.delete_credential().map_err(map_err)
+        }
+    }
+
+    /// Built without the `keyring` feature: nothing is stored, and nothing is
+    /// reported as broken — the absence is the configured behaviour.
+    #[cfg(not(feature = "keyring"))]
+    mod backend {
+        use super::*;
+
+        pub(super) fn set(_service: &str, _user: &str, _password: &str) -> Result<()> {
+            Ok(())
+        }
+
+        pub(super) fn get(_service: &str, _user: &str, label: &str) -> Result<String> {
+            Err(SbqlError::PasswordNotFound(label.to_string()))
+        }
+
+        pub(super) fn delete(_service: &str, _user: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    pub(super) fn set(service: &str, user: &str, password: &str) -> Result<()> {
+        if let Some(e) = forced_failure() {
+            return Err(e);
+        }
+        if opted_out_of_keyring() {
+            return Ok(());
+        }
+        backend::set(service, user, password)
+    }
+
+    pub(super) fn get(service: &str, user: &str, label: &str) -> Result<String> {
+        if let Some(e) = forced_failure() {
+            return Err(e);
+        }
+        if opted_out_of_keyring() {
+            return Err(SbqlError::PasswordNotFound(label.to_string()));
+        }
+        backend::get(service, user, label)
+    }
+
+    pub(super) fn delete(service: &str, user: &str) -> Result<()> {
+        if let Some(e) = forced_failure() {
+            return Err(e);
+        }
+        if opted_out_of_keyring() {
+            return Ok(());
+        }
+        backend::delete(service, user)
+    }
+}
 
 /// SSL connection mode for PostgreSQL.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -309,10 +493,7 @@ impl ConnectionConfig {
                         self.database,
                     )
                 } else {
-                    format!(
-                        "mongodb://{}:{}/{}",
-                        self.host, self.port, self.database,
-                    )
+                    format!("mongodb://{}:{}/{}", self.host, self.port, self.database,)
                 }
             }
             DbBackend::SqlServer => {
@@ -342,11 +523,7 @@ impl ConnectionConfig {
         {
             return Ok(());
         }
-        let entry = Entry::new(KEYRING_SERVICE, &self.keyring_user())
-            .map_err(|e| SbqlError::Keyring(e.to_string()))?;
-        entry
-            .set_password(password)
-            .map_err(|e| SbqlError::Keyring(e.to_string()))
+        store::set(store::SERVICE, &self.keyring_user(), password)
     }
 
     /// Retrieve the password from the OS keyring. Returns empty string for SQLite.
@@ -354,11 +531,7 @@ impl ConnectionConfig {
         if self.backend == DbBackend::Sqlite {
             return Ok(String::new());
         }
-        let entry = Entry::new(KEYRING_SERVICE, &self.keyring_user())
-            .map_err(|e| SbqlError::Keyring(e.to_string()))?;
-        entry.get_password().map_err(|e| {
-            SbqlError::Keyring(format!("password not found for '{}': {}", self.name, e))
-        })
+        store::get(store::SERVICE, &self.keyring_user(), &self.name)
     }
 
     /// Delete the password from the OS keyring. No-op for SQLite.
@@ -366,11 +539,7 @@ impl ConnectionConfig {
         if self.backend == DbBackend::Sqlite {
             return Ok(());
         }
-        let entry = Entry::new(KEYRING_SERVICE, &self.keyring_user())
-            .map_err(|e| SbqlError::Keyring(e.to_string()))?;
-        entry
-            .delete_credential()
-            .map_err(|e| SbqlError::Keyring(e.to_string()))
+        store::delete(store::SERVICE, &self.keyring_user())
     }
 
     /// Store the SSH password in the OS keyring.
@@ -378,18 +547,12 @@ impl ConnectionConfig {
         if password.is_empty() {
             return Ok(());
         }
-        let entry = Entry::new("sbql-ssh", &self.id.to_string())
-            .map_err(|e| SbqlError::Keyring(e.to_string()))?;
-        entry
-            .set_password(password)
-            .map_err(|e| SbqlError::Keyring(e.to_string()))
+        store::set(store::SSH_SERVICE, &self.id.to_string(), password)
     }
 
     /// Retrieve the SSH password from the OS keyring.
     pub fn load_ssh_password(&self) -> String {
-        Entry::new("sbql-ssh", &self.id.to_string())
-            .and_then(|e| e.get_password())
-            .unwrap_or_default()
+        store::get(store::SSH_SERVICE, &self.id.to_string(), &self.name).unwrap_or_default()
     }
 }
 
@@ -404,12 +567,24 @@ struct ConfigFile {
 
 /// Returns `~/.config/sbql/connections.toml`, creating parent dirs if needed.
 pub fn config_path() -> Result<PathBuf> {
+    let dir = config_dir();
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir.join("connections.toml"))
+}
+
+/// Directory holding the connection file.
+///
+/// `SBQL_CONFIG_DIR` overrides it — the test suite relies on that so it never
+/// overwrites the developer's real connections, and it lets users keep several
+/// profiles side by side.
+fn config_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os(CONFIG_DIR_ENV) {
+        return PathBuf::from(dir);
+    }
     let base = dirs::config_dir().unwrap_or_else(|| {
         PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config")
     });
-    let dir = base.join("sbql");
-    std::fs::create_dir_all(&dir)?;
-    Ok(dir.join("connections.toml"))
+    base.join("sbql")
 }
 
 /// Load all saved connections from disk.
@@ -482,7 +657,8 @@ mod tests {
 
     #[test]
     fn test_connection_config_new() {
-        let conn = ConnectionConfig::new_postgres("local", "localhost", 5432, "postgres", "postgres");
+        let conn =
+            ConnectionConfig::new_postgres("local", "localhost", 5432, "postgres", "postgres");
         assert_eq!(conn.name, "local");
         assert_eq!(conn.host, "localhost");
         assert_eq!(conn.port, 5432);

@@ -61,7 +61,9 @@ async fn setup_db(user_count: usize, post_count: usize) -> DbPool {
         sqlx::query("INSERT INTO posts (user_id, title, body) VALUES (?, ?, ?)")
             .bind(user_id as i64)
             .bind(format!("Post title {i}"))
-            .bind(format!("Body content for post {i} with some extra text to make it realistic."))
+            .bind(format!(
+                "Body content for post {i} with some extra text to make it realistic."
+            ))
             .execute(&pool)
             .await
             .unwrap();
@@ -81,19 +83,13 @@ fn bench_execute_page(c: &mut Criterion) {
     let mut group = c.benchmark_group("execute_page");
 
     group.bench_function("simple_select_page0", |b| {
-        b.to_async(&rt).iter(|| async {
-            execute_page(&pool, "SELECT * FROM users", 0)
-                .await
-                .unwrap()
-        })
+        b.to_async(&rt)
+            .iter(|| async { execute_page(&pool, "SELECT * FROM users", 0).await.unwrap() })
     });
 
     group.bench_function("simple_select_page1", |b| {
-        b.to_async(&rt).iter(|| async {
-            execute_page(&pool, "SELECT * FROM users", 1)
-                .await
-                .unwrap()
-        })
+        b.to_async(&rt)
+            .iter(|| async { execute_page(&pool, "SELECT * FROM users", 1).await.unwrap() })
     });
 
     group.bench_function("filtered", |b| {
@@ -193,15 +189,9 @@ fn bench_suggest_distinct_values(c: &mut Criterion) {
 
     group.bench_function("empty_prefix", |b| {
         b.to_async(&rt).iter(|| async {
-            sbql_core::query::suggest_distinct_values(
-                &pool,
-                "SELECT * FROM users",
-                "city",
-                "",
-                20,
-            )
-            .await
-            .unwrap()
+            sbql_core::query::suggest_distinct_values(&pool, "SELECT * FROM users", "city", "", 20)
+                .await
+                .unwrap()
         })
     });
 

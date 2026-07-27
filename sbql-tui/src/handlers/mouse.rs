@@ -1,42 +1,34 @@
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
-use tokio::sync::mpsc;
 
-use crate::action::{self, Action};
+use crate::action::{
+    Action, ConnectionsAction, DiagramAction, NavAction, ResultsAction, TablesAction,
+};
 use crate::app::{AppState, FocusedPanel, NavMode};
-use sbql_core::CoreCommand;
 
-/// Mouse events are applied directly (not via Action) because they involve
-/// complex coordinate calculations that depend on mutable state.
-/// This keeps the mouse handler pragmatic while keyboard handlers use the Action pattern.
-pub fn handle(
-    state: &mut AppState,
-    mouse: MouseEvent,
-    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
-) {
-    let act = map_mouse(state, mouse);
-    action::apply(act, state, cmd_tx);
-}
-
-fn map_mouse(state: &AppState, mouse: MouseEvent) -> Action {
+/// Map a mouse event to an [`Action`], the same contract as [`super::handle_key`].
+///
+/// Hit-testing needs the rectangles from the last draw, so this reads geometry
+/// as well as state — but it stays a pure function of both.
+pub fn handle(state: &AppState, mouse: MouseEvent) -> Action {
     if state.diagram.is_some() {
         return match mouse.kind {
             MouseEventKind::ScrollDown => {
                 if mouse.modifiers.contains(KeyModifiers::SHIFT)
                     || mouse.modifiers.contains(KeyModifiers::ALT)
                 {
-                    Action::DiagramScroll { dx: 4, dy: 0 }
+                    Action::Diagram(DiagramAction::Scroll { dx: 4, dy: 0 })
                 } else {
-                    Action::DiagramScroll { dx: 0, dy: 2 }
+                    Action::Diagram(DiagramAction::Scroll { dx: 0, dy: 2 })
                 }
             }
             MouseEventKind::ScrollUp => {
                 if mouse.modifiers.contains(KeyModifiers::SHIFT)
                     || mouse.modifiers.contains(KeyModifiers::ALT)
                 {
-                    Action::DiagramScroll { dx: -4, dy: 0 }
+                    Action::Diagram(DiagramAction::Scroll { dx: -4, dy: 0 })
                 } else {
-                    Action::DiagramScroll { dx: 0, dy: -2 }
+                    Action::Diagram(DiagramAction::Scroll { dx: 0, dy: -2 })
                 }
             }
             _ => Action::Noop,
@@ -46,19 +38,19 @@ fn map_mouse(state: &AppState, mouse: MouseEvent) -> Action {
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => map_mouse_click(state, mouse.column, mouse.row),
         MouseEventKind::ScrollDown => match state.focused {
-            FocusedPanel::Results => Action::MoveRowDown,
+            FocusedPanel::Results => Action::Results(ResultsAction::RowDown),
             FocusedPanel::Connections => {
                 if !state.conn.connections.is_empty() {
-                    let next = (state.conn.selected + 1).min(state.conn.connections.len() - 1);
-                    Action::SelectConnection(next)
+                    let next = state.conn.selected() + 1;
+                    Action::Connections(ConnectionsAction::Select(next))
                 } else {
                     Action::Noop
                 }
             }
             FocusedPanel::Tables => {
                 if !state.tables.tables.is_empty() {
-                    let next = (state.tables.selected + 1).min(state.tables.tables.len() - 1);
-                    Action::SelectTable(next)
+                    let next = state.tables.selected() + 1;
+                    Action::Tables(TablesAction::Select(next))
                 } else {
                     Action::Noop
                 }
@@ -66,11 +58,13 @@ fn map_mouse(state: &AppState, mouse: MouseEvent) -> Action {
             _ => Action::Noop,
         },
         MouseEventKind::ScrollUp => match state.focused {
-            FocusedPanel::Results => Action::MoveRowUp,
-            FocusedPanel::Connections => {
-                Action::SelectConnection(state.conn.selected.saturating_sub(1))
-            }
-            FocusedPanel::Tables => Action::SelectTable(state.tables.selected.saturating_sub(1)),
+            FocusedPanel::Results => Action::Results(ResultsAction::RowUp),
+            FocusedPanel::Connections => Action::Connections(ConnectionsAction::Select(
+                state.conn.selected().saturating_sub(1),
+            )),
+            FocusedPanel::Tables => Action::Tables(TablesAction::Select(
+                state.tables.selected().saturating_sub(1),
+            )),
             _ => Action::Noop,
         },
         _ => Action::Noop,
@@ -81,45 +75,45 @@ fn map_mouse_click(state: &AppState, col: u16, row: u16) -> Action {
     if let Some(la) = state.layout.last_areas {
         if rect_contains(la.table_list, col, row) {
             let mut actions = vec![
-                Action::FocusPanel(FocusedPanel::Tables),
-                Action::SetNavMode(NavMode::Panel),
+                Action::Nav(NavAction::FocusPanel(FocusedPanel::Tables)),
+                Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
             ];
             if row > la.table_list.y {
+                // SelectTable clamps, so a click below the last row is safe.
                 let clicked = (row - la.table_list.y).saturating_sub(1) as usize;
-                let new_idx = clicked.min(state.tables.tables.len().saturating_sub(1));
-                actions.push(Action::SelectTable(new_idx));
+                actions.push(Action::Tables(TablesAction::Select(clicked)));
             }
             return Action::Batch(actions);
         }
         if rect_contains(la.conn_list, col, row) {
             let mut actions = vec![
-                Action::FocusPanel(FocusedPanel::Connections),
-                Action::SetNavMode(NavMode::Panel),
+                Action::Nav(NavAction::FocusPanel(FocusedPanel::Connections)),
+                Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
             ];
-            if row > la.conn_list.y && !state.conn.connections.is_empty() {
+            if row > la.conn_list.y {
+                // SelectConnection clamps, so a click below the last row is safe.
                 let clicked = (row - la.conn_list.y).saturating_sub(1) as usize;
-                let new_idx = clicked.min(state.conn.connections.len() - 1);
-                actions.push(Action::SelectConnection(new_idx));
+                actions.push(Action::Connections(ConnectionsAction::Select(clicked)));
             }
             return Action::Batch(actions);
         }
         if rect_contains(la.editor, col, row) {
             return Action::Batch(vec![
-                Action::FocusPanel(FocusedPanel::Editor),
-                Action::SetNavMode(NavMode::Panel),
+                Action::Nav(NavAction::FocusPanel(FocusedPanel::Editor)),
+                Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
             ]);
         }
         if rect_contains(la.results, col, row) {
             let mut actions = vec![
-                Action::FocusPanel(FocusedPanel::Results),
-                Action::SetNavMode(NavMode::Panel),
+                Action::Nav(NavAction::FocusPanel(FocusedPanel::Results)),
+                Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
             ];
             let header_offset = 2u16;
             if row >= la.results.y + header_offset {
                 let clicked_row_vis = (row - la.results.y - header_offset) as usize;
                 let new_row = state.results.scroll + clicked_row_vis;
                 if new_row < state.results.data.rows.len() {
-                    actions.push(Action::SetResultsRow(new_row));
+                    actions.push(Action::Results(ResultsAction::SetRow(new_row)));
                 }
             }
             if !state.layout.last_col_widths.is_empty() && col > la.results.x {
@@ -143,7 +137,9 @@ fn map_mouse_click(state: &AppState, col: u16, row: u16) -> Action {
                     clicked_col = ci + 1;
                 }
                 let max_col = state.results.data.columns.len().saturating_sub(1);
-                actions.push(Action::SetResultsCol(clicked_col.min(max_col)));
+                actions.push(Action::Results(ResultsAction::SetCol(
+                    clicked_col.min(max_col),
+                )));
             }
             return Action::Batch(actions);
         }
@@ -153,21 +149,21 @@ fn map_mouse_click(state: &AppState, col: u16, row: u16) -> Action {
         let conn_width = term_width / 4;
         if col < conn_width {
             return Action::Batch(vec![
-                Action::FocusPanel(FocusedPanel::Connections),
-                Action::SetNavMode(NavMode::Panel),
+                Action::Nav(NavAction::FocusPanel(FocusedPanel::Connections)),
+                Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
             ]);
         }
         let term_height = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(24);
         let editor_height = term_height * 35 / 100;
         if row < editor_height {
             return Action::Batch(vec![
-                Action::FocusPanel(FocusedPanel::Editor),
-                Action::SetNavMode(NavMode::Panel),
+                Action::Nav(NavAction::FocusPanel(FocusedPanel::Editor)),
+                Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
             ]);
         }
         return Action::Batch(vec![
-            Action::FocusPanel(FocusedPanel::Results),
-            Action::SetNavMode(NavMode::Panel),
+            Action::Nav(NavAction::FocusPanel(FocusedPanel::Results)),
+            Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
         ]);
     }
     Action::Noop

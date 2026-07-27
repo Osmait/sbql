@@ -2,16 +2,16 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use ratatui::layout::Rect;
-use ratatui::style::Style;
 use sbql_core::{
-    ConnectionConfig, CoreEvent, DbBackend, DiagramData, QueryResult, SortDirection, SslMode,
-    TableEntry,
+    ConnectionConfig, ConnectionDraft, CoreEvent, DbBackend, DiagramData, FieldSpec, QueryResult,
+    SortDirection, SslMode, TableEntry,
 };
 use tui_textarea::TextArea;
 use uuid::Uuid;
 
 use crate::completion::CompletionState;
 use crate::highlight::SqlHighlighter;
+use crate::list_cursor::ListCursor;
 
 // ---------------------------------------------------------------------------
 // Focus model
@@ -52,17 +52,12 @@ pub enum NavMode {
 #[derive(Debug)]
 pub struct ConnectionForm {
     pub visible: bool,
-    pub editing_id: Option<Uuid>, // None = new connection
-    pub field_index: usize,       // which field is active
-    pub backend: DbBackend,
-    pub name: String,
-    pub host: String,
-    pub port: String,
-    pub user: String,
-    pub database: String,
-    pub password: String,
-    pub ssl_mode: SslMode,
-    pub file_path: String,
+    /// The connection being typed. All field data, validation and the
+    /// backend's field list come from `sbql-core`, so the TUI and the macOS
+    /// app cannot drift apart on what a connection needs.
+    pub draft: ConnectionDraft,
+    /// Row 0 is the backend picker; rows 1.. map onto `spec().fields`.
+    pub field_index: usize,
     pub error: Option<String>,
 }
 
@@ -70,17 +65,8 @@ impl Default for ConnectionForm {
     fn default() -> Self {
         Self {
             visible: false,
-            editing_id: None,
+            draft: ConnectionDraft::new(DbBackend::Postgres),
             field_index: 0,
-            backend: DbBackend::Postgres,
-            name: String::new(),
-            host: String::new(),
-            port: String::new(),
-            user: String::new(),
-            database: String::new(),
-            password: String::new(),
-            ssl_mode: SslMode::Prefer,
-            file_path: String::new(),
             error: None,
         }
     }
@@ -90,9 +76,6 @@ impl ConnectionForm {
     pub fn open_new() -> Self {
         Self {
             visible: true,
-            port: "5432".into(),
-            host: "localhost".into(),
-            ssl_mode: SslMode::Prefer,
             ..Default::default()
         }
     }
@@ -100,179 +83,64 @@ impl ConnectionForm {
     pub fn open_edit(cfg: &ConnectionConfig) -> Self {
         Self {
             visible: true,
-            editing_id: Some(cfg.id),
-            backend: cfg.backend,
-            name: cfg.name.clone(),
-            host: cfg.host.clone(),
-            port: cfg.port.to_string(),
-            user: cfg.user.clone(),
-            database: cfg.database.clone(),
-            password: String::new(), // always re-enter
-            ssl_mode: cfg.ssl_mode.clone(),
-            file_path: cfg.file_path.clone().unwrap_or_default(),
+            draft: ConnectionDraft::from_config(cfg),
             field_index: 0,
             error: None,
         }
     }
 
-    /// Returns the label for each field index, depending on backend.
-    pub fn field_label(&self, idx: usize) -> &'static str {
-        match self.backend {
-            DbBackend::Postgres | DbBackend::Mysql => match idx {
-                0 => "Backend",
-                1 => "Name",
-                2 => "Host",
-                3 => "Port",
-                4 => "User",
-                5 => "Database",
-                6 => "Password",
-                7 => "SSL Mode",
-                _ => "",
-            },
-            DbBackend::Sqlite => match idx {
-                0 => "Backend",
-                1 => "Name",
-                2 => "File Path",
-                _ => "",
-            },
-            DbBackend::Redis => match idx {
-                0 => "Backend",
-                1 => "Name",
-                2 => "Host",
-                3 => "Port",
-                4 => "Password",
-                5 => "Database",
-                _ => "",
-            },
-            DbBackend::DynamoDb => match idx {
-                0 => "Backend",
-                1 => "Name",
-                2 => "Endpoint",
-                3 => "Port",
-                4 => "Region",
-                5 => "Access Key",
-                6 => "Secret Key",
-                _ => "",
-            },
-            DbBackend::MongoDb => match idx {
-                0 => "Backend",
-                1 => "Name",
-                2 => "Host",
-                3 => "Port",
-                4 => "Database",
-                5 => "User",
-                6 => "Password",
-                _ => "",
-            },
-            DbBackend::SqlServer => match idx {
-                0 => "Backend",
-                1 => "Name",
-                2 => "Host",
-                3 => "Port",
-                4 => "User",
-                5 => "Database",
-                6 => "Password",
-                _ => "",
-            },
-        }
-    }
-
-    /// Number of fields depends on the selected backend.
+    /// One row for the backend picker plus one per field the backend declares.
     pub fn field_count(&self) -> usize {
-        match self.backend {
-            DbBackend::Postgres | DbBackend::Mysql => 8, // backend, name, host, port, user, database, password, ssl_mode
-            DbBackend::Sqlite => 3,   // backend, name, file_path
-            DbBackend::Redis => 6,    // backend, name, host, port, password, database
-            DbBackend::DynamoDb => 7, // backend, name, endpoint, port, region, access_key, secret_key
-            DbBackend::MongoDb => 7,  // backend, name, host, port, database, user, password
-            DbBackend::SqlServer => 7, // backend, name, host, port, user, database, password
+        1 + self.draft.spec().fields.len()
+    }
+
+    /// Which connection field a row edits. `None` for the backend picker.
+    pub fn field_at(&self, idx: usize) -> Option<&'static FieldSpec> {
+        if idx == 0 {
+            return None;
+        }
+        self.draft.spec().fields.get(idx - 1)
+    }
+
+    pub fn field_label(&self, idx: usize) -> &'static str {
+        match self.field_at(idx) {
+            _ if idx == 0 => "Backend",
+            Some(spec) => spec.label,
+            None => "",
         }
     }
 
-    /// Toggle backend between Postgres, SQLite, and Redis, resetting field_index.
+    /// The active row's value, when it is one that is typed into.
+    pub fn active_value_mut(&mut self) -> Option<&mut String> {
+        let field = self.field_at(self.field_index)?.field;
+        self.draft.value_mut(field)
+    }
+
+    /// The row showing a given field, so a validation error can move the
+    /// cursor to the field it is complaining about.
+    pub fn row_of(&self, field: sbql_core::ConnectionField) -> Option<usize> {
+        self.draft
+            .spec()
+            .fields
+            .iter()
+            .position(|f| f.field == field)
+            .map(|i| i + 1)
+    }
+
     pub fn cycle_backend(&mut self) {
-        self.backend = match self.backend {
-            DbBackend::Postgres => DbBackend::Mysql,
-            DbBackend::Mysql => DbBackend::Sqlite,
-            DbBackend::Sqlite => DbBackend::Redis,
-            DbBackend::Redis => DbBackend::DynamoDb,
-            DbBackend::DynamoDb => DbBackend::MongoDb,
-            DbBackend::MongoDb => DbBackend::SqlServer,
-            DbBackend::SqlServer => DbBackend::Postgres,
-        };
+        self.draft.set_backend(self.draft.backend.next());
         self.field_index = 0;
     }
 
     /// Cycle through SSL mode options (for the SSL Mode field).
     pub fn cycle_ssl_mode(&mut self) {
-        self.ssl_mode = match self.ssl_mode {
+        self.draft.ssl_mode = match self.draft.ssl_mode {
             SslMode::Prefer => SslMode::Require,
             SslMode::Require => SslMode::VerifyFull,
             SslMode::VerifyFull => SslMode::VerifyCa,
             SslMode::VerifyCa => SslMode::Disable,
             SslMode::Disable => SslMode::Prefer,
         };
-    }
-
-    pub fn active_value_mut(&mut self) -> Option<&mut String> {
-        match self.backend {
-            DbBackend::Postgres | DbBackend::Mysql => match self.field_index {
-                0 => None, // Backend is cycled
-                1 => Some(&mut self.name),
-                2 => Some(&mut self.host),
-                3 => Some(&mut self.port),
-                4 => Some(&mut self.user),
-                5 => Some(&mut self.database),
-                6 => Some(&mut self.password),
-                7 => None, // SSL mode is cycled
-                _ => None,
-            },
-            DbBackend::Sqlite => match self.field_index {
-                0 => None, // Backend is cycled
-                1 => Some(&mut self.name),
-                2 => Some(&mut self.file_path),
-                _ => None,
-            },
-            DbBackend::Redis => match self.field_index {
-                0 => None, // Backend is cycled
-                1 => Some(&mut self.name),
-                2 => Some(&mut self.host),
-                3 => Some(&mut self.port),
-                4 => Some(&mut self.password),
-                5 => Some(&mut self.database),
-                _ => None,
-            },
-            DbBackend::DynamoDb => match self.field_index {
-                0 => None, // Backend is cycled
-                1 => Some(&mut self.name),
-                2 => Some(&mut self.host),
-                3 => Some(&mut self.port),
-                4 => Some(&mut self.database), // region
-                5 => Some(&mut self.user),     // access_key
-                6 => Some(&mut self.password),  // secret_key
-                _ => None,
-            },
-            DbBackend::MongoDb => match self.field_index {
-                0 => None, // Backend is cycled
-                1 => Some(&mut self.name),
-                2 => Some(&mut self.host),
-                3 => Some(&mut self.port),
-                4 => Some(&mut self.database),
-                5 => Some(&mut self.user),
-                6 => Some(&mut self.password),
-                _ => None,
-            },
-            DbBackend::SqlServer => match self.field_index {
-                0 => None, // Backend is cycled
-                1 => Some(&mut self.name),
-                2 => Some(&mut self.host),
-                3 => Some(&mut self.port),
-                4 => Some(&mut self.user),
-                5 => Some(&mut self.database),
-                6 => Some(&mut self.password),
-                _ => None,
-            },
-        }
     }
 }
 
@@ -335,7 +203,7 @@ pub struct FilterBar {
     pub visible: bool,
     pub textarea: TextArea<'static>,
     pub suggestions: Vec<String>,
-    pub selected_suggestion: usize,
+    pub suggestion_cursor: ListCursor,
     pub show_suggestions: bool,
     pub suggestion_token: u64,
     pub loading_suggestions: bool,
@@ -385,7 +253,6 @@ pub struct DiagramState {
     /// Glyph rendering mode for diagram connectors/boxes.
     pub glyph_mode: DiagramGlyphMode,
     /// Cached canvas lines from the last render.
-    pub cached_canvas: Option<Vec<ratatui::text::Line<'static>>>,
     /// When true, the cached canvas must be rebuilt.
     pub canvas_dirty: bool,
     /// Stored table positions (global table index → (x, y)) from the last layout.
@@ -415,7 +282,6 @@ impl DiagramState {
             scroll_y: 0,
             focus_mode: false,
             glyph_mode: DiagramGlyphMode::Ascii,
-            cached_canvas: None,
             canvas_dirty: true,
             table_positions: HashMap::new(),
             last_viewport_w: 0,
@@ -432,16 +298,28 @@ impl DiagramState {
 
 pub struct ConnectionState {
     pub connections: Vec<ConnectionConfig>,
-    pub selected: usize,
+    pub cursor: ListCursor,
     pub active_id: Option<Uuid>,
     pub active_backend: DbBackend,
     pub form: ConnectionForm,
     pub pending_delete: Option<(Uuid, String)>,
 }
 
+impl ConnectionState {
+    pub fn selected(&self) -> usize {
+        self.cursor.index()
+    }
+}
+
 pub struct TableBrowserState {
     pub tables: Vec<TableEntry>,
-    pub selected: usize,
+    pub cursor: ListCursor,
+}
+
+impl TableBrowserState {
+    pub fn selected(&self) -> usize {
+        self.cursor.index()
+    }
 }
 
 pub struct EditorState {
@@ -450,7 +328,9 @@ pub struct EditorState {
     // Syntax highlighting
     pub scroll_row: usize,
     pub scroll_col: usize,
-    pub highlight_cache: Option<Vec<Vec<(Style, String)>>>,
+    /// Bumped on every text change. The view keys its highlight cache on this
+    /// so the model never holds rendered output.
+    pub revision: u64,
     pub highlighter: SqlHighlighter,
     // Autocomplete
     pub completion: CompletionState,
@@ -462,12 +342,13 @@ impl EditorState {
         self.textarea.lines().join("\n")
     }
 
-    /// Invalidate the cached highlight spans (call on any text change).
-    pub fn invalidate_highlight(&mut self) {
-        self.highlight_cache = None;
+    /// Record that the text changed, so the view knows to re-highlight.
+    pub fn mark_text_changed(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
     }
 }
 
+#[derive(Default)]
 pub struct ResultsState {
     pub data: QueryResult,
     pub scroll: usize,
@@ -668,6 +549,28 @@ pub struct LayoutCache {
 // Main application state
 // ---------------------------------------------------------------------------
 
+/// Which part of the UI currently owns the keyboard.
+///
+/// Overlays are exclusive: opening one closes any other. The variants are
+/// listed in precedence order, which is the order [`AppState::mode`] resolves
+/// them — so the answer to "who gets this key" is declared here rather than
+/// implied by the order of a chain of `if`s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// Full-screen schema diagram. Takes every key.
+    Diagram,
+    /// Single-cell edit popup over the results grid.
+    CellEdit,
+    /// Filter bar under the results grid.
+    Filter,
+    /// Add/edit connection dialog.
+    ConnectionForm,
+    /// "Delete connection?" confirmation.
+    ConfirmDelete,
+    /// No overlay: keys go to the focused panel.
+    Browsing,
+}
+
 pub struct AppState {
     // ---- panels ----
     pub focused: FocusedPanel,
@@ -714,6 +617,56 @@ pub struct LastAreas {
 }
 
 impl AppState {
+    /// Which mode owns the keyboard right now.
+    ///
+    /// The single place overlay precedence is decided. Callers `match` on the
+    /// result, so adding an overlay forces every dispatch site to say what it
+    /// does with it, instead of silently falling through to the panel keys.
+    pub fn mode(&self) -> Mode {
+        if self.diagram.is_some() {
+            Mode::Diagram
+        } else if self.mutation.cell_edit.is_some() {
+            Mode::CellEdit
+        } else if self.filter.visible {
+            Mode::Filter
+        } else if self.conn.form.visible {
+            Mode::ConnectionForm
+        } else if self.conn.pending_delete.is_some() {
+            Mode::ConfirmDelete
+        } else {
+            Mode::Browsing
+        }
+    }
+
+    /// Close every overlay.
+    ///
+    /// Opening an overlay goes through here first, so two can never be open at
+    /// once and `mode()` never has to arbitrate between contradictory state.
+    pub fn close_overlays(&mut self) {
+        self.diagram = None;
+        self.diagram_requested = false;
+        self.mutation.cell_edit = None;
+        self.filter.visible = false;
+        self.filter.show_suggestions = false;
+        self.conn.form.visible = false;
+        self.conn.pending_delete = None;
+    }
+
+    /// Number of overlays currently open. Should only ever be 0 or 1.
+    #[cfg(test)]
+    pub fn open_overlay_count(&self) -> usize {
+        [
+            self.diagram.is_some(),
+            self.mutation.cell_edit.is_some(),
+            self.filter.visible,
+            self.conn.form.visible,
+            self.conn.pending_delete.is_some(),
+        ]
+        .iter()
+        .filter(|open| **open)
+        .count()
+    }
+
     pub fn new(connections: Vec<ConnectionConfig>) -> Self {
         let mut textarea = TextArea::default();
         textarea.set_placeholder_text("-- Write SQL here. Press Ctrl+S or F5 to run.");
@@ -723,7 +676,7 @@ impl AppState {
 
             conn: ConnectionState {
                 connections,
-                selected: 0,
+                cursor: ListCursor::new(),
                 active_id: None,
                 active_backend: DbBackend::Postgres,
                 form: ConnectionForm::default(),
@@ -731,14 +684,14 @@ impl AppState {
             },
             tables: TableBrowserState {
                 tables: Vec::new(),
-                selected: 0,
+                cursor: ListCursor::new(),
             },
             editor: EditorState {
                 textarea,
                 mode: EditorMode::Normal,
                 scroll_row: 0,
                 scroll_col: 0,
-                highlight_cache: None,
+                revision: 0,
                 highlighter: SqlHighlighter::new(),
                 completion: CompletionState::default(),
             },
@@ -799,9 +752,7 @@ impl AppState {
             CoreEvent::ConnectionList(conns) => {
                 self.results.is_loading = false;
                 self.conn.connections = conns;
-                if self.conn.selected >= self.conn.connections.len() {
-                    self.conn.selected = self.conn.connections.len().saturating_sub(1);
-                }
+                self.conn.cursor.clamp(self.conn.connections.len());
             }
             CoreEvent::Connected(id) => {
                 self.results.is_loading = false;
@@ -830,7 +781,7 @@ impl AppState {
             CoreEvent::TableList(tables) => {
                 self.results.is_loading = false;
                 self.tables.tables = tables;
-                self.tables.selected = 0;
+                self.tables.cursor.reset();
             }
             CoreEvent::QueryResult(mut result) => {
                 self.results.is_loading = false;
@@ -966,6 +917,7 @@ impl AppState {
                 self.cached_diagram = Some(data.clone());
                 if self.diagram_requested {
                     self.diagram_requested = false;
+                    self.close_overlays();
                     self.diagram = Some(DiagramState::new(data));
                 }
             }
@@ -982,10 +934,9 @@ impl AppState {
                         self.filter.suggestions = merged;
                     }
                     self.filter.show_suggestions = !self.filter.suggestions.is_empty();
-                    self.filter.selected_suggestion = self
-                        .filter
-                        .selected_suggestion
-                        .min(self.filter.suggestions.len().saturating_sub(1));
+                    self.filter
+                        .suggestion_cursor
+                        .clamp(self.filter.suggestions.len());
                     self.filter.loading_suggestions = false;
                 }
             }
@@ -1024,6 +975,7 @@ mod tests {
             rows: vec![vec!["1".into(), "2".into()], vec!["3".into(), "4".into()]],
             page: 0,
             has_next_page: false,
+            total_count: None,
         };
         state.results.viewport_height = 10;
         state.results.viewport_cols = 2;
@@ -1097,12 +1049,12 @@ mod tests {
             ConnectionConfig::new_postgres("a", "h", 5432, "u", "d"),
             ConnectionConfig::new_postgres("b", "h", 5432, "u", "d"),
         ]);
-        state.conn.selected = 1;
+        state.conn.cursor.select(1, state.conn.connections.len());
         // Now replace with just 1 connection
-        state.apply_core_event(CoreEvent::ConnectionList(vec![ConnectionConfig::new_postgres(
-            "a", "h", 5432, "u", "d",
-        )]));
-        assert_eq!(state.conn.selected, 0);
+        state.apply_core_event(CoreEvent::ConnectionList(vec![
+            ConnectionConfig::new_postgres("a", "h", 5432, "u", "d"),
+        ]));
+        assert_eq!(state.conn.selected(), 0);
     }
 
     #[test]
@@ -1138,7 +1090,7 @@ mod tests {
     #[test]
     fn core_event_table_list() {
         let mut state = AppState::new(vec![]);
-        state.tables.selected = 5;
+        state.tables.cursor.select(5, 6);
         let tables = vec![
             TableEntry {
                 schema: "public".into(),
@@ -1151,7 +1103,7 @@ mod tests {
         ];
         state.apply_core_event(CoreEvent::TableList(tables));
         assert_eq!(state.tables.tables.len(), 2);
-        assert_eq!(state.tables.selected, 0); // reset
+        assert_eq!(state.tables.selected(), 0); // reset
     }
 
     #[test]
@@ -1165,6 +1117,7 @@ mod tests {
             rows: vec![vec!["1".into()]],
             page: 0,
             has_next_page: false,
+            total_count: None,
         };
         state.apply_core_event(CoreEvent::QueryResult(result));
         assert_eq!(state.results.selected_row, 0);
@@ -1183,6 +1136,7 @@ mod tests {
             rows: vec![vec!["1".into()]],
             page: 2,
             has_next_page: false,
+            total_count: None,
         };
         state.apply_core_event(CoreEvent::QueryResult(result));
         assert_eq!(state.results.selected_row, 5);
@@ -1198,6 +1152,7 @@ mod tests {
             rows: vec![],
             page: 1,
             has_next_page: false,
+            total_count: None,
         };
         state.apply_core_event(CoreEvent::QueryResult(result));
         assert_eq!(
@@ -1383,10 +1338,35 @@ mod tests {
         assert_eq!(form.field_label(8), "");
     }
 
+    /// Labels follow the backend rather than the storage field, so switching
+    /// backend must relabel the rows without any per-backend code here.
+    #[test]
+    fn connection_form_labels_follow_the_selected_backend() {
+        let mut form = ConnectionForm::default();
+        form.draft.set_backend(DbBackend::DynamoDb);
+        assert_eq!(form.field_label(2), "Endpoint");
+        assert_eq!(form.field_label(4), "Region");
+
+        form.draft.set_backend(DbBackend::Sqlite);
+        assert_eq!(form.field_label(2), "File Path");
+        assert_eq!(form.field_count(), 3);
+    }
+
+    /// A validation error has to point at a row, so the cursor can land on the
+    /// field the user still needs to fill in.
+    #[test]
+    fn connection_form_maps_a_field_back_to_its_row() {
+        let form = ConnectionForm::default(); // Postgres
+        assert_eq!(form.row_of(sbql_core::ConnectionField::Name), Some(1));
+        assert_eq!(form.row_of(sbql_core::ConnectionField::Database), Some(5));
+        // Postgres has no file path, so there is no row to point at.
+        assert_eq!(form.row_of(sbql_core::ConnectionField::FilePath), None);
+    }
+
     #[test]
     fn connection_form_redis_field_labels() {
         let mut form = ConnectionForm::default();
-        form.backend = DbBackend::Redis;
+        form.draft.backend = DbBackend::Redis;
         assert_eq!(form.field_label(0), "Backend");
         assert_eq!(form.field_label(1), "Name");
         assert_eq!(form.field_label(2), "Host");
@@ -1399,64 +1379,72 @@ mod tests {
     #[test]
     fn connection_form_redis_field_count() {
         let mut form = ConnectionForm::default();
-        form.backend = DbBackend::Redis;
+        form.draft.backend = DbBackend::Redis;
         assert_eq!(form.field_count(), 6);
     }
 
     #[test]
-    fn connection_form_cycle_backend_includes_redis() {
+    fn connection_form_cycle_backend_visits_every_backend() {
         let mut form = ConnectionForm::default();
-        assert_eq!(form.backend, DbBackend::Postgres);
-        form.cycle_backend();
-        assert_eq!(form.backend, DbBackend::Sqlite);
-        form.cycle_backend();
-        assert_eq!(form.backend, DbBackend::Redis);
-        form.cycle_backend();
-        assert_eq!(form.backend, DbBackend::Postgres);
+        assert_eq!(form.draft.backend, DbBackend::Postgres);
+
+        let expected = [
+            DbBackend::Mysql,
+            DbBackend::Sqlite,
+            DbBackend::Redis,
+            DbBackend::DynamoDb,
+            DbBackend::MongoDb,
+            DbBackend::SqlServer,
+            DbBackend::Postgres,
+        ];
+        for backend in expected {
+            form.cycle_backend();
+            assert_eq!(form.draft.backend, backend);
+        }
     }
 
     #[test]
     fn connection_form_redis_active_value_mut() {
         let mut form = ConnectionForm::default();
-        form.backend = DbBackend::Redis;
+        form.draft.backend = DbBackend::Redis;
 
         form.field_index = 0;
         assert!(form.active_value_mut().is_none()); // Backend is cycled
 
         form.field_index = 1;
         *form.active_value_mut().unwrap() = "my-redis".into();
-        assert_eq!(form.name, "my-redis");
+        assert_eq!(form.draft.name, "my-redis");
 
         form.field_index = 2;
         *form.active_value_mut().unwrap() = "redis-host".into();
-        assert_eq!(form.host, "redis-host");
+        assert_eq!(form.draft.host, "redis-host");
 
         form.field_index = 3;
         *form.active_value_mut().unwrap() = "6379".into();
-        assert_eq!(form.port, "6379");
+        assert_eq!(form.draft.port, "6379");
 
         form.field_index = 4;
         *form.active_value_mut().unwrap() = "secret".into();
-        assert_eq!(form.password, "secret");
+        assert_eq!(form.draft.password, "secret");
 
         form.field_index = 5;
         *form.active_value_mut().unwrap() = "2".into();
-        assert_eq!(form.database, "2");
+        assert_eq!(form.draft.database, "2");
     }
 
     #[test]
     fn connection_form_cycle_ssl() {
         let mut form = ConnectionForm::default();
         form.cycle_ssl_mode();
-        assert_eq!(form.ssl_mode, SslMode::Require);
+        assert_eq!(form.draft.ssl_mode, SslMode::Require);
         form.cycle_ssl_mode();
-        assert_eq!(form.ssl_mode, SslMode::VerifyFull);
+        assert_eq!(form.draft.ssl_mode, SslMode::VerifyFull);
         form.cycle_ssl_mode();
-        assert_eq!(form.ssl_mode, SslMode::VerifyCa);
+        assert_eq!(form.draft.ssl_mode, SslMode::VerifyCa);
         form.cycle_ssl_mode();
-        assert_eq!(form.ssl_mode, SslMode::Disable);
+        assert_eq!(form.draft.ssl_mode, SslMode::Disable);
         form.cycle_ssl_mode();
-        assert_eq!(form.ssl_mode, SslMode::Prefer);
+        assert_eq!(form.draft.ssl_mode, SslMode::Prefer);
     }
 
     #[test]
@@ -1467,7 +1455,7 @@ mod tests {
 
         form.field_index = 1;
         *form.active_value_mut().unwrap() = "test".into();
-        assert_eq!(form.name, "test");
+        assert_eq!(form.draft.name, "test");
 
         form.field_index = 7;
         assert!(form.active_value_mut().is_none()); // SSL mode is cycled
@@ -1477,8 +1465,8 @@ mod tests {
     fn connection_form_open_new() {
         let form = ConnectionForm::open_new();
         assert!(form.visible);
-        assert_eq!(form.port, "5432");
-        assert_eq!(form.host, "localhost");
+        assert_eq!(form.draft.port, "5432");
+        assert_eq!(form.draft.host, "localhost");
     }
 
     #[test]
@@ -1486,10 +1474,10 @@ mod tests {
         let cfg = ConnectionConfig::new_postgres("myconn", "myhost", 3333, "myuser", "mydb");
         let form = ConnectionForm::open_edit(&cfg);
         assert!(form.visible);
-        assert_eq!(form.name, "myconn");
-        assert_eq!(form.host, "myhost");
-        assert_eq!(form.port, "3333");
-        assert!(form.editing_id.is_some());
+        assert_eq!(form.draft.name, "myconn");
+        assert_eq!(form.draft.host, "myhost");
+        assert_eq!(form.draft.port, "3333");
+        assert!(form.draft.id.is_some());
     }
 
     // -----------------------------------------------------------------------

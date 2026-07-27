@@ -18,6 +18,10 @@ use ratatui::{
 };
 use sbql_core::TableSchema;
 
+mod canvas;
+
+use canvas::*;
+
 use crate::app::{DiagramGlyphMode, DiagramState};
 use crate::ui::theme;
 
@@ -27,52 +31,6 @@ use crate::ui::theme;
 
 /// Fixed width of each table box (inner content width = BOX_WIDTH - 2 borders).
 const BOX_WIDTH: u16 = 36;
-
-#[derive(Clone, Copy)]
-struct GlyphSet {
-    h: char,
-    v: char,
-    tl: char,
-    tr: char,
-    bl: char,
-    br: char,
-    cross: char,
-    ltee: char,
-    rtee: char,
-    arrow_right: char,
-    arrow_left: char,
-}
-
-fn glyphs_for(mode: DiagramGlyphMode) -> GlyphSet {
-    match mode {
-        DiagramGlyphMode::Ascii => GlyphSet {
-            h: '-',
-            v: '|',
-            tl: '+',
-            tr: '+',
-            bl: '+',
-            br: '+',
-            cross: '+',
-            ltee: '+',
-            rtee: '+',
-            arrow_right: '>',
-            arrow_left: '<',
-        },
-        DiagramGlyphMode::Unicode => GlyphSet {
-            h: '─',
-            v: '│',
-            tl: '┌',
-            tr: '┐',
-            bl: '└',
-            br: '┘',
-            cross: '┼',
-            ltee: '├',
-            rtee: '┤',
-            arrow_right: '▶',
-            arrow_left: '◀',
-        },
-    }
-}
 
 /// Map a SQL data type string to a theme colour.
 fn data_type_color(data_type: &str) -> ratatui::style::Color {
@@ -120,17 +78,55 @@ fn data_type_color(data_type: &str) -> ratatui::style::Color {
 // Public draw entry point
 // ---------------------------------------------------------------------------
 
-pub fn draw(frame: &mut Frame, state: &mut DiagramState) {
-    let full = frame.area();
-
-    // Split into left sidebar + right canvas
-    let split = Layout::default()
+/// Where the diagram's two panes sit for a given screen.
+fn panes(full: Rect) -> std::rc::Rc<[Rect]> {
+    Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(22), Constraint::Percentage(78)])
-        .split(full);
+        .split(full)
+}
+
+/// Rebuild the canvas if stale, record the viewport, and pull scroll back into
+/// range.
+///
+/// Everything that *changes* the diagram lives here. Rendering used to do this
+/// mid-draw, which meant the scroll offset was only correct once a frame had
+/// been painted — so anything reading it before then saw a stale value.
+pub fn measure(state: &mut DiagramState, cache: &mut crate::ui::cache::RenderCache, full: Rect) {
+    let area = panes(full)[1];
+    let inner_h = area.height.saturating_sub(2) as usize;
+    let inner_w = area.width.saturating_sub(2) as usize;
+
+    state.last_viewport_w = inner_w as u16;
+    state.last_viewport_h = inner_h as u16;
+
+    if state.canvas_dirty || cache.diagram_canvas().is_none() {
+        let build = build_canvas_lines(state, area.width);
+        cache.set_diagram_canvas(build.lines);
+        state.table_positions = build.table_positions;
+        state.canvas_dirty = false;
+    }
+
+    let (canvas_height, canvas_width) = match cache.diagram_canvas() {
+        Some(lines) => (lines.len(), lines.iter().map(line_width).max().unwrap_or(0)),
+        None => (0, 0),
+    };
+
+    state.scroll_y = state
+        .scroll_y
+        .min(canvas_height.saturating_sub(inner_h) as u16);
+    state.scroll_x = state
+        .scroll_x
+        .min(canvas_width.saturating_sub(inner_w) as u16);
+}
+
+/// Render the diagram. Reads state only — call [`measure`] first.
+pub fn draw(frame: &mut Frame, state: &DiagramState, cache: &crate::ui::cache::RenderCache) {
+    let full = frame.area();
+    let split = panes(full);
 
     draw_sidebar(frame, state, split[0]);
-    draw_canvas(frame, state, split[1]);
+    draw_canvas(frame, state, cache, split[1]);
     draw_help_bar(frame, full, state.focus_mode);
 }
 
@@ -270,7 +266,12 @@ fn draw_sidebar(frame: &mut Frame, state: &DiagramState, area: Rect) {
 // Right canvas: ASCII table boxes
 // ---------------------------------------------------------------------------
 
-fn draw_canvas(frame: &mut Frame, state: &mut DiagramState, area: Rect) {
+fn draw_canvas(
+    frame: &mut Frame,
+    state: &DiagramState,
+    cache: &crate::ui::cache::RenderCache,
+    area: Rect,
+) {
     let data = &state.data;
     let visible_indices = visible_table_indices(state);
     let visible_keys: std::collections::HashSet<String> = visible_indices
@@ -280,28 +281,10 @@ fn draw_canvas(frame: &mut Frame, state: &mut DiagramState, area: Rect) {
         .collect();
     let visible_fk_count = visible_foreign_keys(state, &visible_keys).len();
 
-    // Store viewport dimensions for navigation centering
     let inner_h = area.height.saturating_sub(2) as usize;
     let inner_w = area.width.saturating_sub(2) as usize;
-    state.last_viewport_w = inner_w as u16;
-    state.last_viewport_h = inner_h as u16;
-
-    // Rebuild canvas only when dirty or not yet cached
-    if state.canvas_dirty || state.cached_canvas.is_none() {
-        let build = build_canvas_lines(state, area.width);
-        state.cached_canvas = Some(build.lines);
-        state.table_positions = build.table_positions;
-        state.canvas_dirty = false;
-    }
-    let lines = state.cached_canvas.clone().unwrap_or_default();
-
+    let lines = cache.diagram_canvas().unwrap_or_default().to_vec();
     let canvas_height = lines.len();
-    let canvas_width = lines.iter().map(line_width).max().unwrap_or(0);
-
-    let max_scroll_y = canvas_height.saturating_sub(inner_h) as u16;
-    let max_scroll_x = canvas_width.saturating_sub(inner_w) as u16;
-    state.scroll_y = state.scroll_y.min(max_scroll_y);
-    state.scroll_x = state.scroll_x.min(max_scroll_x);
 
     // Position indicator
     let pct = if canvas_height > 0 {
@@ -842,35 +825,6 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> CanvasBuild {
 // Helpers for building table box text
 // ---------------------------------------------------------------------------
 
-/// A styled line is a list of Spans (to carry color information).
-#[derive(Clone)]
-struct StyledLine {
-    spans: Vec<Span<'static>>,
-}
-
-#[derive(Clone)]
-struct CanvasCell {
-    ch: char,
-    style: Style,
-}
-
-impl Default for CanvasCell {
-    fn default() -> Self {
-        Self {
-            ch: ' ',
-            style: Style::default().fg(theme::OVERLAY0),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct CanvasRect {
-    x: usize,
-    y: usize,
-    w: usize,
-    h: usize,
-}
-
 #[derive(Clone)]
 struct PreparedEdge {
     from_idx: usize,
@@ -1052,36 +1006,6 @@ fn build_top_border(
     }
 }
 
-fn truncate_str(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        s
-    } else {
-        &s[..max]
-    }
-}
-
-fn write_box(canvas: &mut [Vec<CanvasCell>], x: usize, y: usize, box_lines: &[StyledLine]) {
-    for (dy, line) in box_lines.iter().enumerate() {
-        let row = y + dy;
-        if row >= canvas.len() {
-            break;
-        }
-        let mut cx = x;
-        for span in &line.spans {
-            for ch in span.content.chars() {
-                if cx >= canvas[row].len() {
-                    break;
-                }
-                canvas[row][cx] = CanvasCell {
-                    ch,
-                    style: span.style,
-                };
-                cx += 1;
-            }
-        }
-    }
-}
-
 fn endpoint_y(table: &TableSchema, rect: CanvasRect, col_name: &str) -> usize {
     let col_idx = table
         .columns
@@ -1093,166 +1017,6 @@ fn endpoint_y(table: &TableSchema, rect: CanvasRect, col_name: &str) -> usize {
         None => rect.y + (rect.h / 2),
     }
 }
-
-/// Find a free vertical lane that doesn't overlap with any table box rect.
-/// Shifts `lane_x` to the right in increments of 2 until a free spot is found,
-/// up to 20 attempts.
-fn find_free_lane(
-    lane_x: usize,
-    rects: &[CanvasRect],
-    y_min: usize,
-    y_max: usize,
-    max_x: usize,
-) -> usize {
-    let mut x = lane_x;
-    for _ in 0..20 {
-        let overlaps = rects
-            .iter()
-            .any(|r| x >= r.x && x < r.x + r.w && y_max >= r.y && y_min < r.y + r.h);
-        if !overlaps {
-            return x;
-        }
-        x = (x + 2).min(max_x);
-    }
-    x
-}
-
-fn draw_arrow(
-    canvas: &mut [Vec<CanvasCell>],
-    x: usize,
-    y: usize,
-    left_to_right: bool,
-    style: Style,
-    glyphs: GlyphSet,
-) {
-    if canvas.is_empty() || y >= canvas.len() || x >= canvas[y].len() {
-        return;
-    }
-    let arrow = if left_to_right {
-        glyphs.arrow_right
-    } else {
-        glyphs.arrow_left
-    };
-    place_line_char(&mut canvas[y][x], arrow, style, glyphs);
-}
-
-fn draw_hline(
-    canvas: &mut [Vec<CanvasCell>],
-    x1: usize,
-    x2: usize,
-    y: usize,
-    style: Style,
-    glyphs: GlyphSet,
-) {
-    if y >= canvas.len() {
-        return;
-    }
-    let (start, end) = if x1 <= x2 { (x1, x2) } else { (x2, x1) };
-    let upper = end.min(canvas[y].len().saturating_sub(1));
-    if start <= upper {
-        for cell in &mut canvas[y][start..=upper] {
-            place_line_char(cell, glyphs.h, style, glyphs);
-        }
-    }
-}
-
-fn draw_vline(
-    canvas: &mut [Vec<CanvasCell>],
-    x: usize,
-    y1: usize,
-    y2: usize,
-    style: Style,
-    glyphs: GlyphSet,
-) {
-    if canvas.is_empty() || x >= canvas[0].len() {
-        return;
-    }
-    let (start, end) = if y1 <= y2 { (y1, y2) } else { (y2, y1) };
-    for y in start..=end {
-        if y >= canvas.len() {
-            break;
-        }
-        place_line_char(&mut canvas[y][x], glyphs.v, style, glyphs);
-    }
-}
-
-fn place_line_char(cell: &mut CanvasCell, ch: char, style: Style, glyphs: GlyphSet) {
-    let merged = match (cell.ch, ch) {
-        (' ', c) => c,
-        (a, b) if a == glyphs.h && b == glyphs.h => glyphs.h,
-        (a, b) if a == glyphs.v && b == glyphs.v => glyphs.v,
-        (a, b) if (a == glyphs.h && b == glyphs.v) || (a == glyphs.v && b == glyphs.h) => {
-            glyphs.cross
-        }
-        (_, c) if c == glyphs.h && is_vertical(cell.ch) => glyphs.cross,
-        (_, c) if c == glyphs.v && is_horizontal(cell.ch) => glyphs.cross,
-        (_, c) => c,
-    };
-    cell.ch = merged;
-    cell.style = style;
-}
-
-fn is_horizontal(ch: char) -> bool {
-    matches!(
-        ch,
-        '-' | '+' | '─' | '┬' | '┴' | '├' | '┤' | '┼' | '┌' | '┐' | '└' | '┘'
-    )
-}
-
-fn is_vertical(ch: char) -> bool {
-    matches!(
-        ch,
-        '|' | '+' | '│' | '┬' | '┴' | '├' | '┤' | '┼' | '┌' | '┐' | '└' | '┘'
-    )
-}
-
-fn canvas_to_lines(canvas: Vec<Vec<CanvasCell>>) -> Vec<Line<'static>> {
-    canvas
-        .into_iter()
-        .map(|row| {
-            let spans: Vec<Span<'static>> = row
-                .into_iter()
-                .map(|cell| Span::styled(cell.ch.to_string(), cell.style))
-                .collect();
-            Line::from(spans)
-        })
-        .collect()
-}
-
-fn crop_line(line: Line<'static>, x_offset: usize, width: usize) -> Line<'static> {
-    if width == 0 {
-        return Line::from(Vec::<Span<'static>>::new());
-    }
-
-    let mut chars: Vec<Span<'static>> = Vec::new();
-    for sp in line.spans {
-        for ch in sp.content.chars() {
-            chars.push(Span::styled(ch.to_string(), sp.style));
-        }
-    }
-
-    if x_offset >= chars.len() {
-        return Line::from(" ".repeat(width));
-    }
-
-    let slice: Vec<Span<'static>> = chars.into_iter().skip(x_offset).take(width).collect();
-
-    if slice.len() < width {
-        let mut padded = slice;
-        padded.push(Span::raw(" ".repeat(width - padded.len())));
-        Line::from(padded)
-    } else {
-        Line::from(slice)
-    }
-}
-
-fn line_width(line: &Line<'_>) -> usize {
-    line.spans.iter().map(|sp| sp.content.chars().count()).sum()
-}
-
-// ---------------------------------------------------------------------------
-// Help bar overlay at the bottom of the screen
-// ---------------------------------------------------------------------------
 
 fn draw_help_bar(frame: &mut Frame, full_area: Rect, focus_mode: bool) {
     if full_area.height < 2 {
@@ -1294,6 +1058,53 @@ mod tests {
     use super::*;
     use ratatui::{backend::TestBackend, Terminal};
     use sbql_core::{ColumnInfo, DiagramData, ForeignKey, TableSchema};
+
+    /// Scroll clamping is a state change, so it belongs to `measure`. It used
+    /// to happen mid-draw, which left the offset stale for anything that read
+    /// it before the next frame was painted.
+    #[test]
+    fn measure_clamps_scroll_without_rendering() {
+        let data = DiagramData {
+            tables: vec![TableSchema {
+                schema: "public".into(),
+                name: "solo".into(),
+                columns: vec![ColumnInfo {
+                    name: "id".into(),
+                    data_type: "integer".into(),
+                    is_pk: true,
+                    is_nullable: false,
+                }],
+            }],
+            foreign_keys: vec![],
+        };
+        let mut state = DiagramState::new(data);
+        state.scroll_x = 9_000;
+        state.scroll_y = 9_000;
+
+        let full = Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 40,
+        };
+        let mut cache = crate::ui::cache::RenderCache::new();
+        measure(&mut state, &mut cache, full);
+
+        assert!(
+            state.scroll_y < 9_000,
+            "vertical scroll should be pulled back"
+        );
+        assert!(
+            state.scroll_x < 9_000,
+            "horizontal scroll should be pulled back"
+        );
+        assert!(cache.diagram_canvas().is_some(), "canvas built by measure");
+        assert!(!state.canvas_dirty);
+        assert_eq!(
+            state.last_viewport_h, 38,
+            "viewport recorded without a frame"
+        );
+    }
 
     #[test]
     fn test_diagram_rendering() {
@@ -1354,7 +1165,14 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         // Draw the UI
-        terminal.draw(|f| draw(f, &mut state)).unwrap();
+        let mut cache = crate::ui::cache::RenderCache::new();
+        terminal
+            .draw(|f| {
+                // measure settles the canvas cache; draw is a pure read.
+                measure(&mut state, &mut cache, f.area());
+                draw(f, &state, &cache);
+            })
+            .unwrap();
 
         let buffer = terminal.backend().buffer();
         let mut content = String::new();
@@ -1553,7 +1371,14 @@ mod tests {
         let mut state = DiagramState::new(data);
         let backend = TestBackend::new(100, 30);
         let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut state)).unwrap();
+        let mut cache = crate::ui::cache::RenderCache::new();
+        terminal
+            .draw(|f| {
+                // measure settles the canvas cache; draw is a pure read.
+                measure(&mut state, &mut cache, f.area());
+                draw(f, &state, &cache);
+            })
+            .unwrap();
 
         let buffer = terminal.backend().buffer();
         let mut content = String::new();

@@ -7,9 +7,29 @@ pub(crate) async fn save(
     config: ConnectionConfig,
     password: Option<String>,
 ) -> Vec<CoreEvent> {
+    // Last gate before anything is persisted. Clients validate as the user
+    // types, but they are not trusted to — a client that forgets (as the macOS
+    // app did) would otherwise write a connection that can never open.
+    if let Err(e) = config.validate() {
+        return vec![CoreEvent::Error(e.to_string())];
+    }
+
+    // A keyring that refuses the write is not fatal — the connection is still
+    // saved and the password is cached for this session — but the user has to
+    // hear about it, otherwise the password is quietly gone on the next launch.
+    let mut warning = None;
     if let Some(ref pw) = password {
         if let Err(e) = config.save_password(pw) {
             tracing::warn!("Keyring save failed (will use in-memory cache): {e}");
+            // The status bar is one line, so lead with what went wrong and keep
+            // the cause short — `e` already carries a fix-it hint.
+            let detail = match &e {
+                SbqlError::Keyring(msg) => msg.as_str(),
+                _ => "the credential store rejected it",
+            };
+            warning = Some(format!(
+                "Connection saved, password NOT stored (session only): {detail}"
+            ));
         }
         core.password_cache.insert(config.id, pw.clone());
     } else {
@@ -29,7 +49,14 @@ pub(crate) async fn save(
     if let Err(e) = save_connections(&core.connections) {
         return vec![CoreEvent::Error(e.to_string())];
     }
-    vec![CoreEvent::ConnectionList(core.connections.clone())]
+
+    // The list stays first so existing consumers keep seeing it at index 0; the
+    // warning is applied afterwards and is what the user ends up reading.
+    let mut events = vec![CoreEvent::ConnectionList(core.connections.clone())];
+    if let Some(msg) = warning {
+        events.push(CoreEvent::Error(msg));
+    }
+    events
 }
 
 pub(crate) async fn delete(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
@@ -57,11 +84,21 @@ pub(crate) async fn connect(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
             .inspect(|pw| {
                 core.password_cache.insert(id, pw.clone());
             })
-            .map_err(|_| {
-                SbqlError::Keyring(format!(
-                    "No password found for '{}'. Try re-entering it (e to edit).",
-                    cfg.name
-                ))
+            // A missing entry is the user's to fix; anything else means the
+            // credential store itself is unusable, and re-typing the password
+            // would not help — so that cause has to survive.
+            .map_err(|e| match e {
+                SbqlError::PasswordNotFound(name) if crate::keyring_enabled() => {
+                    SbqlError::Keyring(format!(
+                        "No password found for '{name}'. Try re-entering it (e to edit)."
+                    ))
+                }
+                // Keyring off by choice: nothing was ever stored, so say that
+                // rather than implying something is broken.
+                SbqlError::PasswordNotFound(name) => SbqlError::Keyring(format!(
+                    "Keyring disabled — enter the password for '{name}' with 'e' (session only)."
+                )),
+                other => other,
             })
     };
 
@@ -96,10 +133,29 @@ pub(crate) async fn disconnect(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ConnectionConfig, Core, CoreCommand, CoreEvent};
+    use crate::{config::CONFIG_DIR_ENV, ConnectionConfig, Core, CoreCommand, CoreEvent};
+    use std::sync::OnceLock;
+
+    /// Keep the test suite away from the developer's machine.
+    ///
+    /// Two separate hazards. Connections are persisted, so without an override
+    /// these tests overwrite the real `~/.config/sbql/connections.toml`. And
+    /// passwords go to the OS credential store, so on a desktop with a locked
+    /// keyring every run pops up an unlock prompt — and leaves test credentials
+    /// behind. Tests that care about the store opt back in explicitly.
+    ///
+    /// The temp dir is created once per test process and leaked, so it outlives
+    /// every test that reads it back.
+    fn isolate_from_the_machine() {
+        static SCRATCH: OnceLock<tempfile::TempDir> = OnceLock::new();
+        let dir = SCRATCH.get_or_init(|| tempfile::tempdir().expect("create temp config dir"));
+        std::env::set_var(CONFIG_DIR_ENV, dir.path());
+        std::env::set_var(crate::NO_KEYRING_ENV, "1");
+    }
 
     #[tokio::test]
     async fn test_save_inserts_config_and_emits_list() {
+        isolate_from_the_machine();
         let mut core = Core::default();
         core.connections.clear();
         let config = ConnectionConfig::new_sqlite("test_save", ":memory:");
@@ -127,6 +183,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_save_with_password_caches() {
+        isolate_from_the_machine();
         let mut core = Core::default();
         core.connections.clear();
         let config = ConnectionConfig::new_sqlite("test_pw", ":memory:");
@@ -142,8 +199,108 @@ mod tests {
         assert_eq!(core.password_cache.get(&id), Some(&"secret".to_string()));
     }
 
+    /// A client that skips its own validation must not be able to persist a
+    /// connection that could never open. The macOS app only checked that the
+    /// name was non-empty, so this is the gate that covers it.
+    #[tokio::test]
+    async fn test_save_rejects_a_config_that_would_never_connect() {
+        isolate_from_the_machine();
+        let mut core = Core::default();
+        core.connections.clear();
+
+        // Exactly what the macOS form allowed through: named, but no host.
+        let mut config = ConnectionConfig::new_postgres("no-host", "", 5432, "u", "db");
+        config.host = String::new();
+
+        let events = core
+            .handle(CoreCommand::SaveConnection {
+                config,
+                password: Some("pw".into()),
+            })
+            .await;
+
+        match &events[0] {
+            CoreEvent::Error(msg) => assert!(msg.contains("Host is required"), "{msg}"),
+            other => panic!("expected a validation error, got {other:?}"),
+        }
+        assert!(
+            core.connections.is_empty(),
+            "an invalid connection must not be stored"
+        );
+    }
+
+    /// Saving must survive an unusable credential store — common on Linux boxes
+    /// with no Secret Service running. The connection is kept, the password
+    /// stays usable for the session, and the user is told it was not persisted.
+    ///
+    /// The store is faulted rather than really broken, so this never touches
+    /// the developer's keyring.
+    #[tokio::test]
+    async fn test_save_reports_unstorable_password_without_losing_connection() {
+        isolate_from_the_machine();
+        let _faulty_store = crate::config::store_fault::ForcedFailure::new();
+
+        let mut core = Core::default();
+        core.connections.clear();
+        // Postgres (unlike SQLite) actually reaches for the keyring.
+        let config = ConnectionConfig::new_postgres("test_no_store", "localhost", 5432, "u", "db");
+        let id = config.id;
+
+        let events = core
+            .handle(CoreCommand::SaveConnection {
+                config,
+                password: Some("secret".into()),
+            })
+            .await;
+
+        assert!(matches!(&events[0], CoreEvent::ConnectionList(list) if list
+            .iter()
+            .any(|c| c.id == id)));
+        assert_eq!(core.password_cache.get(&id), Some(&"secret".to_string()));
+
+        let warning = events
+            .iter()
+            .find_map(|e| match e {
+                CoreEvent::Error(msg) => Some(msg.clone()),
+                _ => None,
+            })
+            .expect("expected a warning when the keyring is unusable");
+        assert!(warning.contains("password NOT stored"), "{warning}");
+        // It has to fit a single-line status bar.
+        assert!(
+            warning.len() < 160,
+            "warning too long ({}): {warning}",
+            warning.len()
+        );
+    }
+
+    /// With the keyring switched off, the same save is silent: nothing was
+    /// meant to be stored, so nothing is reported as wrong.
+    #[tokio::test]
+    async fn test_save_with_the_keyring_disabled_warns_about_nothing() {
+        isolate_from_the_machine();
+        let mut core = Core::default();
+        core.connections.clear();
+        let config = ConnectionConfig::new_postgres("no_keyring", "localhost", 5432, "u", "db");
+        let id = config.id;
+
+        let events = core
+            .handle(CoreCommand::SaveConnection {
+                config,
+                password: Some("secret".into()),
+            })
+            .await;
+
+        assert!(
+            !events.iter().any(|e| matches!(e, CoreEvent::Error(_))),
+            "opting out of the keyring is not an error: {events:?}"
+        );
+        assert_eq!(core.password_cache.get(&id), Some(&"secret".to_string()));
+    }
+
     #[tokio::test]
     async fn test_delete_removes_connection() {
+        isolate_from_the_machine();
         let mut core = Core::default();
         core.connections.clear();
         let config = ConnectionConfig::new_sqlite("to_delete", ":memory:");

@@ -72,7 +72,6 @@ fn escape_value(s: &str) -> String {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Row parsing helpers
 // ---------------------------------------------------------------------------
@@ -171,7 +170,11 @@ fn build_values_clause(batch: &[Vec<String>]) -> String {
     batch
         .iter()
         .map(|row| {
-            let vals = row.iter().map(|v| escape_value(v)).collect::<Vec<_>>().join(", ");
+            let vals = row
+                .iter()
+                .map(|v| escape_value(v))
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("({})", vals)
         })
         .collect::<Vec<_>>()
@@ -185,7 +188,11 @@ async fn flush_batch_pg(
     columns: &[String],
     batch: &[Vec<String>],
 ) -> Result<u64> {
-    let col_list = columns.iter().map(|c| quote_ident(c)).collect::<Vec<_>>().join(", ");
+    let col_list = columns
+        .iter()
+        .map(|c| quote_ident(c))
+        .collect::<Vec<_>>()
+        .join(", ");
     let table_ref = format!("{}.{}", quote_ident(schema), quote_ident(table));
     let sql = format!(
         "INSERT INTO {} ({}) VALUES {}",
@@ -206,7 +213,11 @@ async fn flush_batch_sqlite(
     columns: &[String],
     batch: &[Vec<String>],
 ) -> Result<u64> {
-    let col_list = columns.iter().map(|c| quote_ident(c)).collect::<Vec<_>>().join(", ");
+    let col_list = columns
+        .iter()
+        .map(|c| quote_ident(c))
+        .collect::<Vec<_>>()
+        .join(", ");
     let sql = format!(
         "INSERT INTO {} ({}) VALUES {}",
         quote_ident(table),
@@ -227,7 +238,11 @@ async fn flush_batch_mysql(
     columns: &[String],
     batch: &[Vec<String>],
 ) -> Result<u64> {
-    let col_list = columns.iter().map(|c| quote_ident_mysql(c)).collect::<Vec<_>>().join(", ");
+    let col_list = columns
+        .iter()
+        .map(|c| quote_ident_mysql(c))
+        .collect::<Vec<_>>()
+        .join(", ");
     let table_ref = format!("{}.{}", quote_ident_mysql(schema), quote_ident_mysql(table));
     let sql = format!(
         "INSERT INTO {} ({}) VALUES {}",
@@ -256,12 +271,7 @@ async fn import_csv_sqlite(pool: &SqlitePool, path: &str, table: &str) -> Result
     import_rows_sqlite(pool, table, &headers, rows).await
 }
 
-async fn import_csv_mysql(
-    pool: &MySqlPool,
-    path: &str,
-    schema: &str,
-    table: &str,
-) -> Result<u64> {
+async fn import_csv_mysql(pool: &MySqlPool, path: &str, schema: &str, table: &str) -> Result<u64> {
     let (headers, rows) = read_csv(path)?;
     import_rows_mysql(pool, schema, table, &headers, rows).await
 }
@@ -286,12 +296,7 @@ async fn import_json_sqlite(pool: &SqlitePool, path: &str, table: &str) -> Resul
     import_rows_sqlite(pool, table, &columns, rows).await
 }
 
-async fn import_json_mysql(
-    pool: &MySqlPool,
-    path: &str,
-    schema: &str,
-    table: &str,
-) -> Result<u64> {
+async fn import_json_mysql(pool: &MySqlPool, path: &str, schema: &str, table: &str) -> Result<u64> {
     let (columns, rows) = read_json(path)?;
     if columns.is_empty() {
         return Ok(0);
@@ -377,10 +382,7 @@ mod tests {
 
     #[test]
     fn test_build_values_clause() {
-        let batch = vec![
-            vec!["a".into(), "b".into()],
-            vec!["c".into(), "".into()],
-        ];
+        let batch = vec![vec!["a".into(), "b".into()], vec!["c".into(), "".into()]];
         let clause = build_values_clause(&batch);
         assert_eq!(clause, "('a', 'b'), ('c', NULL)");
     }

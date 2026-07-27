@@ -39,7 +39,10 @@ pub fn apply_order(
     direction: SortDirection,
     backend: DbBackend,
 ) -> Result<String> {
-    if backend == DbBackend::Redis || backend == DbBackend::DynamoDb || backend == DbBackend::MongoDb {
+    if backend == DbBackend::Redis
+        || backend == DbBackend::DynamoDb
+        || backend == DbBackend::MongoDb
+    {
         return Err(SbqlError::SqlParse(
             "ORDER BY not supported for this backend".into(),
         ));
@@ -163,24 +166,20 @@ pub fn format_sql(sql: &str) -> String {
     let trimmed = sql.trim_end_matches(';').trim();
     let dialect = PostgreSqlDialect {};
     match Parser::parse_sql(&dialect, trimmed) {
-        Ok(stmts) if !stmts.is_empty() => {
-            stmts
-                .iter()
-                .map(|s| format!("{s}"))
-                .collect::<Vec<_>>()
-                .join(";\n")
-        }
+        Ok(stmts) if !stmts.is_empty() => stmts
+            .iter()
+            .map(|s| format!("{s}"))
+            .collect::<Vec<_>>()
+            .join(";\n"),
         _ => {
             // Try generic dialect as fallback
             let dialect = sqlparser::dialect::GenericDialect {};
             match Parser::parse_sql(&dialect, trimmed) {
-                Ok(stmts) if !stmts.is_empty() => {
-                    stmts
-                        .iter()
-                        .map(|s| format!("{s}"))
-                        .collect::<Vec<_>>()
-                        .join(";\n")
-                }
+                Ok(stmts) if !stmts.is_empty() => stmts
+                    .iter()
+                    .map(|s| format!("{s}"))
+                    .collect::<Vec<_>>()
+                    .join(";\n"),
                 _ => sql.to_owned(),
             }
         }
@@ -192,10 +191,22 @@ pub fn format_sql(sql: &str) -> String {
 /// For SQLite: `SELECT * FROM "table"` (no schema prefix)
 pub fn table_select_sql(schema: &str, table: &str, backend: DbBackend) -> String {
     match backend {
-        DbBackend::Postgres => format!("SELECT * FROM {}.{}", quote_ident(schema), quote_ident(table)),
+        DbBackend::Postgres => format!(
+            "SELECT * FROM {}.{}",
+            quote_ident(schema),
+            quote_ident(table)
+        ),
         DbBackend::Sqlite => format!("SELECT * FROM {}", quote_ident(table)),
-        DbBackend::Mysql => format!("SELECT * FROM {}.{}", quote_ident_mysql(schema), quote_ident_mysql(table)),
-        DbBackend::SqlServer => format!("SELECT * FROM {}.{}", quote_ident_sqlserver(schema), quote_ident_sqlserver(table)),
+        DbBackend::Mysql => format!(
+            "SELECT * FROM {}.{}",
+            quote_ident_mysql(schema),
+            quote_ident_mysql(table)
+        ),
+        DbBackend::SqlServer => format!(
+            "SELECT * FROM {}.{}",
+            quote_ident_sqlserver(schema),
+            quote_ident_sqlserver(table)
+        ),
         DbBackend::Redis | DbBackend::DynamoDb | DbBackend::MongoDb => String::new(),
     }
 }
@@ -448,8 +459,7 @@ mod tests {
     #[test]
     fn test_apply_order_mysql() {
         let sql = "SELECT * FROM users";
-        let result =
-            apply_order(sql, "name", SortDirection::Ascending, DbBackend::Mysql).unwrap();
+        let result = apply_order(sql, "name", SortDirection::Ascending, DbBackend::Mysql).unwrap();
         let upper = result.to_uppercase();
         assert!(upper.contains("ORDER BY"), "missing ORDER BY: {result}");
         assert!(upper.contains("NAME"), "missing column: {result}");
@@ -471,9 +481,15 @@ mod tests {
         assert!(upper.contains("WHERE"), "missing WHERE: {result}");
         assert!(upper.contains("LIKE"), "missing LIKE: {result}");
         // MySQL uses LIKE (case-insensitive by default), not ILIKE
-        assert!(!upper.contains("ILIKE"), "should not use ILIKE for MySQL: {result}");
+        assert!(
+            !upper.contains("ILIKE"),
+            "should not use ILIKE for MySQL: {result}"
+        );
         // MySQL should NOT have COLLATE NOCASE (that's SQLite)
-        assert!(!upper.contains("COLLATE NOCASE"), "should not use COLLATE NOCASE for MySQL: {result}");
+        assert!(
+            !upper.contains("COLLATE NOCASE"),
+            "should not use COLLATE NOCASE for MySQL: {result}"
+        );
         assert!(upper.contains("%ACTIVE%"), "missing value: {result}");
     }
 

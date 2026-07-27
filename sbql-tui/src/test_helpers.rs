@@ -50,6 +50,7 @@ pub fn make_state_with_results() -> AppState {
         ],
         page: 0,
         has_next_page: false,
+        total_count: None,
     };
     state.results.viewport_height = 20;
     state.results.viewport_cols = 3;

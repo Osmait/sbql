@@ -54,9 +54,18 @@ async fn test_import_csv() {
             .unwrap();
 
     assert_eq!(rows.len(), 5);
-    assert_eq!(rows[0], ("Alice".into(), "30".into(), "alice@example.com".into()));
-    assert_eq!(rows[1], ("Bob".into(), "25".into(), "bob@example.com".into()));
-    assert_eq!(rows[4], ("Eve".into(), "28".into(), "eve@example.com".into()));
+    assert_eq!(
+        rows[0],
+        ("Alice".into(), "30".into(), "alice@example.com".into())
+    );
+    assert_eq!(
+        rows[1],
+        ("Bob".into(), "25".into(), "bob@example.com".into())
+    );
+    assert_eq!(
+        rows[4],
+        ("Eve".into(), "28".into(), "eve@example.com".into())
+    );
 }
 
 #[tokio::test]
@@ -96,7 +105,8 @@ async fn test_import_csv_special_chars() {
     // Single quote in value (SQL injection-like)
     writeln!(file, r#"O'Brien,40,obrien@example.com"#).unwrap();
     // Double quotes inside a quoted field: CSV escapes " as ""
-    file.write_all(b"\"\"\"Nickname\"\" Bob\",25,bob@example.com\n").unwrap();
+    file.write_all(b"\"\"\"Nickname\"\" Bob\",25,bob@example.com\n")
+        .unwrap();
     // Newline inside a quoted field
     write!(file, "\"Line1\nLine2\",50,multi@example.com\n").unwrap();
     file.flush().unwrap();

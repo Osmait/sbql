@@ -4,7 +4,7 @@
 
 It gives you two ways to work with the same engine:
 
-- a keyboard-first terminal UI for fast daily querying
+- a keyboard-first terminal UI for fast daily querying, on Linux and macOS
 - a native macOS app for a more visual workflow
 
 Today the project supports PostgreSQL, SQLite, and Redis in the core and TUI, with PostgreSQL and SQLite exposed in the macOS app.
@@ -86,9 +86,10 @@ Most database tools force a trade-off:
 
 | Target | Status |
 |---|---|
-| Rust workspace / TUI | Built and tested in CI on Ubuntu |
+| TUI on Linux | Supported. Built and tested in CI on Ubuntu; passwords go to the Secret Service |
+| TUI on macOS | Supported. Passwords go to the login Keychain |
 | macOS app | Native SwiftUI app with XCFramework bridge |
-| Windows | Not documented yet |
+| Windows | Not supported. The core builds, but no credential store backend is enabled |
 | Linux GUI app | Not available |
 
 ## Architecture
@@ -135,6 +136,18 @@ For a deeper architecture walkthrough, see `CONTRIBUTING.md`.
 - Docker if you want to run integration tests or container-backed benchmarks
 - Xcode 15+ if you want to build the macOS app
 
+On Linux you also need the D-Bus development headers, which `keyring` links
+against to reach the Secret Service:
+
+```bash
+sudo apt install libdbus-1-dev pkg-config     # Debian / Ubuntu
+sudo dnf install dbus-devel pkgconf-pkg-config # Fedora / RHEL
+sudo pacman -S dbus pkgconf                    # Arch
+```
+
+If you would rather not install them, build with `--features sbql-core/vendored-dbus`
+to compile libdbus from source instead (needs a C compiler).
+
 ### Build the TUI
 
 ```bash
@@ -145,6 +158,95 @@ Or install it locally:
 
 ```bash
 make install-local
+```
+
+### Linux credential storage
+
+`sbql` never writes passwords to disk. On Linux it stores them in the
+**Secret Service**, the standard D-Bus keyring API, so you need a provider
+running in your session. Any of these works:
+
+- `gnome-keyring-daemon` (GNOME and most desktop environments)
+- `kwalletd6` with `ksecretd` (KDE)
+- KeePassXC, with "Secret Service Integration" enabled in its settings
+
+Most full desktop environments start one for you. On a minimal setup — a tiling
+window manager, a container, or SSH — you may have to start one yourself:
+
+```bash
+# Check whether a provider is reachable
+busctl --user list | grep org.freedesktop.secrets
+
+# Start gnome-keyring AND unlock the login keyring in one process.
+# On first run this creates the keyring with the password you supply.
+pkill -f gnome-keyring-daemon
+echo -n "YOUR_PASSWORD" | gnome-keyring-daemon --unlock --components=secrets --daemonize
+```
+
+Starting the daemon is not enough on its own — the login keyring also has to be
+**unlocked**, and it must be the *same process* that does both. Running
+`--start` first and `--unlock` afterwards spawns a second daemon that unlocks
+the keyring but cannot claim the `org.freedesktop.secrets` bus name, so requests
+still reach the locked one. The symptom is a collection that the alias points to
+but that does not exist:
+
+```bash
+# 'default' resolves to the login collection...
+busctl --user call org.freedesktop.secrets /org/freedesktop/secrets \
+  org.freedesktop.Secret.Service ReadAlias s default
+
+# ...but asking about it fails with "Object does not exist" when it is locked
+busctl --user get-property org.freedesktop.secrets \
+  /org/freedesktop/secrets/collection/login org.freedesktop.Secret.Collection Locked
+```
+
+When it is working, that last command prints `b false`. To get this automatically
+on every login, enable the PAM module (`pam_gnome_keyring`) instead of starting
+the daemon by hand.
+
+Without a provider, `sbql` still runs and connects: passwords you type are kept
+in memory for that session. They just will not be there the next time you start
+it, and you will see an error explaining that no credential store was found.
+
+### Running without a keyring
+
+The credential store is optional. Nothing in `sbql` requires it — turning it off
+just means passwords are kept in memory for the session and never written
+anywhere.
+
+Per run:
+
+```bash
+sbql --no-keyring          # or: SBQL_NO_KEYRING=1 sbql
+```
+
+Or drop it at build time, which also removes the libdbus dependency on Linux:
+
+```bash
+cargo build --release -p sbql-tui --no-default-features
+```
+
+In both cases sbql stops reporting the missing store as a problem. You type a
+password once per session (`e` to edit a connection) and it works until you quit.
+
+**SQLite needs none of this.** SQLite connections have no password, so they never
+touch the keyring — which makes them the quickest way to try the app or to check
+that a build works on a new machine:
+
+```bash
+cargo test -p sbql-core --test sqlite_workflow
+```
+
+That test seeds a temporary database and drives the whole stack — load config,
+connect, list tables, run a query, build the schema diagram — with no Docker and
+no credential store involved.
+
+Connections themselves (host, port, user, database — never passwords) live in
+`~/.config/sbql/connections.toml`. Set `SBQL_CONFIG_DIR` to put that file
+somewhere else, which is also how you keep separate profiles:
+
+```bash
+SBQL_CONFIG_DIR=~/work/sbql sbql
 ```
 
 ### Build the macOS app

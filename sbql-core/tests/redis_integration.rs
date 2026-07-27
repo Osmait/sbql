@@ -176,7 +176,11 @@ async fn test_redis_mset_mget() {
     let result = execute_page(&pool, "MGET k1 k2 k3", 0).await.unwrap();
     assert_eq!(result.rows.len(), 3);
 
-    let values: Vec<&str> = result.rows.iter().map(|r| r.last().unwrap().as_str()).collect();
+    let values: Vec<&str> = result
+        .rows
+        .iter()
+        .map(|r| r.last().unwrap().as_str())
+        .collect();
     assert!(values.contains(&"v1"), "Missing v1: {values:?}");
     assert!(values.contains(&"v2"), "Missing v2: {values:?}");
     assert!(values.contains(&"v3"), "Missing v3: {values:?}");
@@ -269,6 +273,10 @@ async fn test_redis_sorted_set() {
 
     assert_eq!(result.rows.len(), 3);
     // Sorted by score ascending: alice(100), charlie(150), bob(200)
-    let values: Vec<&str> = result.rows.iter().map(|r| r.last().unwrap().as_str()).collect();
+    let values: Vec<&str> = result
+        .rows
+        .iter()
+        .map(|r| r.last().unwrap().as_str())
+        .collect();
     assert_eq!(values, vec!["alice", "charlie", "bob"]);
 }

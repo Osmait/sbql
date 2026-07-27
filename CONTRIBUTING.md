@@ -24,7 +24,7 @@ Thank you for your interest in contributing to sbql! This guide will help you un
 
 ## Project Overview
 
-sbql is a multi-platform SQL workspace that provides both a terminal UI (TUI) and a native macOS app for managing database connections, running queries, and visualizing schemas. It supports PostgreSQL, SQLite, and Redis.
+sbql is a multi-platform SQL workspace that provides both a terminal UI (TUI, on Linux and macOS) and a native macOS app for managing database connections, running queries, and visualizing schemas. It supports PostgreSQL, SQLite, and Redis.
 
 ---
 
@@ -297,7 +297,18 @@ graph TB
 Key design decisions:
 - **`DbPool` enum**: Wraps PostgreSQL, SQLite, and Redis pools behind a unified interface
 - **SQL AST manipulation**: Uses `sqlparser-rs` to inject ORDER BY and WHERE clauses without string concatenation
-- **Credential security**: Passwords stored in the OS keyring (macOS Keychain, Linux Secret Service)
+- **Config location**: `~/.config/sbql/connections.toml` by default, overridable with
+  `SBQL_CONFIG_DIR`. Any test that persists connections must point that variable at a
+  temp directory, otherwise it overwrites the developer's real connection list
+- **Credential security**: Passwords stored in the OS keyring, behind the default-on
+  `keyring` cargo feature. The backend is picked per target in `sbql-core/Cargo.toml`
+  (macOS Keychain, Linux/BSD Secret Service); a target with no backend feature
+  silently falls back to `keyring`'s in-memory mock store, so any new platform must
+  add its own entry there. All store access goes through the private `config::store`
+  module — keep `keyring` types out of the rest of the crate so the feature can stay
+  compilable in both configurations. Building `--no-default-features` drops the
+  dependency (and libdbus) entirely; `SBQL_NO_KEYRING=1` / `sbql --no-keyring` does
+  the same at runtime
 - **Pagination**: Server-side with configurable page size
 
 ---
@@ -391,6 +402,10 @@ sbql/
 ### Prerequisites
 
 - [Rust toolchain](https://rustup.rs/) (edition 2021, stable)
+- On Linux: D-Bus development headers, which `keyring` links against to reach
+  the Secret Service (`libdbus-1-dev` on Debian/Ubuntu, `dbus-devel` on Fedora,
+  `dbus` on Arch), plus `pkg-config`. Alternatively build with
+  `--features sbql-core/vendored-dbus` to compile libdbus from source.
 - For macOS app: Xcode 15+ with Swift 6
 - For integration tests: Docker (for PostgreSQL and Redis containers)
 
@@ -411,6 +426,9 @@ make install-local
 ```
 
 ### Building the macOS App
+
+These targets require macOS and Xcode; on other systems they stop with a message
+instead of running `xcodebuild`.
 
 ```bash
 # Build the XCFramework (Rust → Swift bridge)

@@ -392,23 +392,72 @@ async fn load_diagram_pg(pool: &PgPool) -> Result<DiagramData> {
 /// or `numeric(10,2)` are accepted.
 fn is_safe_pg_type(t: &str) -> bool {
     const SAFE: &[&str] = &[
-        "text", "varchar", "character varying", "char", "character",
-        "integer", "int", "int2", "int4", "int8", "smallint", "bigint",
-        "real", "float4", "float8", "double precision", "numeric", "decimal",
-        "boolean", "bool", "uuid", "json", "jsonb",
-        "timestamp", "timestamp with time zone", "timestamp without time zone",
-        "timestamptz", "date", "time", "time with time zone", "timetz",
-        "bytea", "inet", "cidr", "macaddr", "macaddr8",
-        "money", "oid", "interval", "bit", "bit varying", "varbit",
-        "point", "line", "lseg", "box", "path", "polygon", "circle",
-        "tsquery", "tsvector", "xml",
-        "smallserial", "serial", "bigserial",
-        "name", "regclass", "regtype",
+        "text",
+        "varchar",
+        "character varying",
+        "char",
+        "character",
+        "integer",
+        "int",
+        "int2",
+        "int4",
+        "int8",
+        "smallint",
+        "bigint",
+        "real",
+        "float4",
+        "float8",
+        "double precision",
+        "numeric",
+        "decimal",
+        "boolean",
+        "bool",
+        "uuid",
+        "json",
+        "jsonb",
+        "timestamp",
+        "timestamp with time zone",
+        "timestamp without time zone",
+        "timestamptz",
+        "date",
+        "time",
+        "time with time zone",
+        "timetz",
+        "bytea",
+        "inet",
+        "cidr",
+        "macaddr",
+        "macaddr8",
+        "money",
+        "oid",
+        "interval",
+        "bit",
+        "bit varying",
+        "varbit",
+        "point",
+        "line",
+        "lseg",
+        "box",
+        "path",
+        "polygon",
+        "circle",
+        "tsquery",
+        "tsvector",
+        "xml",
+        "smallserial",
+        "serial",
+        "bigserial",
+        "name",
+        "regclass",
+        "regtype",
     ];
     let lower = t.to_lowercase();
     SAFE.iter().any(|prefix| {
         if let Some(rest) = lower.strip_prefix(prefix) {
-            rest.is_empty() || rest.starts_with('(') || rest.starts_with('[') || rest.starts_with(' ')
+            rest.is_empty()
+                || rest.starts_with('(')
+                || rest.starts_with('[')
+                || rest.starts_with(' ')
         } else {
             false
         }
@@ -426,11 +475,17 @@ async fn execute_cell_update_pg(
 ) -> Result<()> {
     let target_type = resolve_column_type(pool, schema, table, target_col).await?;
     if !is_safe_pg_type(&target_type) {
-        return Err(SbqlError::Schema(format!("Unsafe column type: {target_type}")));
+        return Err(SbqlError::Schema(format!(
+            "Unsafe column type: {target_type}"
+        )));
     }
     let sql = format!(
         "UPDATE {}.{} SET {} = $1::{} WHERE {}::text = $2",
-        quote_ident(schema), quote_ident(table), quote_ident(target_col), target_type, quote_ident(pk_col)
+        quote_ident(schema),
+        quote_ident(table),
+        quote_ident(target_col),
+        target_type,
+        quote_ident(pk_col)
     );
     sqlx::query(&sql)
         .bind(new_val)
@@ -449,7 +504,9 @@ async fn execute_row_delete_pg(
 ) -> Result<()> {
     let sql = format!(
         "DELETE FROM {}.{} WHERE {}::text = $1",
-        quote_ident(schema), quote_ident(table), quote_ident(pk_col)
+        quote_ident(schema),
+        quote_ident(table),
+        quote_ident(pk_col)
     );
     sqlx::query(&sql).bind(pk_val).execute(pool).await?;
     Ok(())
@@ -619,7 +676,9 @@ async fn execute_cell_update_sqlite(
 ) -> Result<()> {
     let sql = format!(
         "UPDATE {} SET {} = $1 WHERE {} = $2",
-        quote_ident(table), quote_ident(target_col), quote_ident(pk_col)
+        quote_ident(table),
+        quote_ident(target_col),
+        quote_ident(pk_col)
     );
     sqlx::query(&sql)
         .bind(new_val)
@@ -637,7 +696,8 @@ async fn execute_row_delete_sqlite(
 ) -> Result<()> {
     let sql = format!(
         "DELETE FROM {} WHERE {} = $1",
-        quote_ident(table), quote_ident(pk_col)
+        quote_ident(table),
+        quote_ident(pk_col)
     );
     sqlx::query(&sql).bind(pk_val).execute(pool).await?;
     Ok(())
@@ -665,9 +725,7 @@ async fn list_tables_mysql(pool: &MySqlPool) -> Result<Vec<TableEntry>> {
     Ok(rows
         .into_iter()
         .map(|r| TableEntry {
-            schema: r
-                .try_get::<String, _>("table_schema")
-                .unwrap_or_default(),
+            schema: r.try_get::<String, _>("table_schema").unwrap_or_default(),
             name: r.try_get::<String, _>("table_name").unwrap_or_default(),
         })
         .collect())
@@ -810,9 +868,8 @@ async fn execute_cell_update_mysql(
     let q_table = quote_ident_mysql(table);
     let q_target = quote_ident_mysql(target_col);
     let q_pk = quote_ident_mysql(pk_col);
-    let sql = format!(
-        "UPDATE {q_schema}.{q_table} SET {q_target} = ? WHERE CAST({q_pk} AS CHAR) = ?"
-    );
+    let sql =
+        format!("UPDATE {q_schema}.{q_table} SET {q_target} = ? WHERE CAST({q_pk} AS CHAR) = ?");
     sqlx::query(&sql)
         .bind(new_val)
         .bind(pk_val)
@@ -831,9 +888,7 @@ async fn execute_row_delete_mysql(
     let q_schema = quote_ident_mysql(schema);
     let q_table = quote_ident_mysql(table);
     let q_pk = quote_ident_mysql(pk_col);
-    let sql = format!(
-        "DELETE FROM {q_schema}.{q_table} WHERE CAST({q_pk} AS CHAR) = ?"
-    );
+    let sql = format!("DELETE FROM {q_schema}.{q_table} WHERE CAST({q_pk} AS CHAR) = ?");
     sqlx::query(&sql).bind(pk_val).execute(pool).await?;
     Ok(())
 }
@@ -977,8 +1032,11 @@ async fn load_diagram_sqlserver(
             .unwrap_or_default()
             .to_string();
         let is_pk: bool = row.try_get::<i32, _>("is_pk").ok().flatten().unwrap_or(0) == 1;
-        let is_nullable: bool =
-            row.try_get::<bool, _>("is_nullable").ok().flatten().unwrap_or(true);
+        let is_nullable: bool = row
+            .try_get::<bool, _>("is_nullable")
+            .ok()
+            .flatten()
+            .unwrap_or(true);
         let col = ColumnInfo {
             name: row
                 .try_get::<&str, _>("column_name")
@@ -1121,9 +1179,7 @@ async fn execute_row_delete_sqlserver(
     let q_schema = quote_ident_sqlserver(schema);
     let q_table = quote_ident_sqlserver(table);
     let q_pk = quote_ident_sqlserver(pk_col);
-    let sql = format!(
-        "DELETE FROM {q_schema}.{q_table} WHERE CAST({q_pk} AS NVARCHAR(MAX)) = @P1"
-    );
+    let sql = format!("DELETE FROM {q_schema}.{q_table} WHERE CAST({q_pk} AS NVARCHAR(MAX)) = @P1");
     let mut conn = pool
         .get()
         .await
@@ -1138,9 +1194,7 @@ async fn execute_row_delete_sqlserver(
 // DynamoDB implementations
 // ---------------------------------------------------------------------------
 
-async fn list_tables_dynamodb(
-    client: &aws_sdk_dynamodb::Client,
-) -> Result<Vec<TableEntry>> {
+async fn list_tables_dynamodb(client: &aws_sdk_dynamodb::Client) -> Result<Vec<TableEntry>> {
     let resp = client
         .list_tables()
         .send()
