@@ -53,7 +53,10 @@ pub enum Action {
     Noop,
 
     /// Hand work to the core. The only way this layer performs I/O.
-    SendCommand(CoreCommand),
+    ///
+    /// Boxed because `CoreCommand` is an order of magnitude larger than any
+    /// other variant, and would otherwise set the size of every `Action`.
+    SendCommand(Box<CoreCommand>),
     /// Apply several actions in order.
     Batch(Vec<Action>),
 }
@@ -175,6 +178,13 @@ pub enum DiagramAction {
     SearchConfirm,
 }
 
+impl Action {
+    /// Wrap a core command for dispatch.
+    pub fn send(cmd: CoreCommand) -> Self {
+        Action::SendCommand(Box::new(cmd))
+    }
+}
+
 /// Apply an action to state and send any commands.
 /// Apply an action to state and send any commands.
 ///
@@ -210,6 +220,7 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
 
         // -- Side effects --
         Action::SendCommand(cmd) => {
+            let cmd = *cmd;
             let _ = cmd_tx.send(cmd);
         }
 
@@ -1267,11 +1278,7 @@ mod tests {
     fn send_command() {
         let mut state = AppState::new(vec![]);
         let (tx, mut rx) = cmd_channel();
-        apply(
-            Action::SendCommand(CoreCommand::ListTables),
-            &mut state,
-            &tx,
-        );
+        apply(Action::send(CoreCommand::ListTables), &mut state, &tx);
         let cmd = rx.try_recv().unwrap();
         assert!(matches!(cmd, CoreCommand::ListTables));
     }

@@ -97,7 +97,7 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
             ];
             if state.results.data.has_next_page {
                 let next = state.results.current_page + 1;
-                actions.push(Action::SendCommand(sbql_core::CoreCommand::FetchPage {
+                actions.push(Action::send(sbql_core::CoreCommand::FetchPage {
                     page: next,
                 }));
             }
@@ -110,7 +110,7 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
             ];
             if state.results.current_page > 0 {
                 let prev = state.results.current_page - 1;
-                actions.push(Action::SendCommand(sbql_core::CoreCommand::FetchPage {
+                actions.push(Action::send(sbql_core::CoreCommand::FetchPage {
                     page: prev,
                 }));
             }
