@@ -13,8 +13,11 @@ authors = ["sbql contributors"]
 license = "MIT"
 
 [workspace.dependencies]
-# Local workspace crate
-sbql-core = { path = "sbql-core", version = "0.1.2" }
+# Local workspace crate.
+# `default-features = false` has to live here: Cargo ignores a member's
+# `default-features = false` when the dependency is inherited from the
+# workspace, so members opt back in via their own `keyring` feature.
+sbql-core = { path = "sbql-core", version = "0.1.2", default-features = false }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -35,7 +38,10 @@ serde_json = "1"
 toml = "0.8"
 
 # Credential storage
-keyring = { version = "3", features = ["apple-native"] }
+# Platform backends are selected per-target in sbql-core/Cargo.toml, because
+# enabling a backend feature for the wrong OS silently falls back to keyring's
+# in-memory mock store (passwords would not survive a restart).
+keyring = "3"
 
 # Identifiers
 uuid = { version = "1", features = ["v4", "serde"] }

@@ -1,3 +1,22 @@
+UNAME_S := $(shell uname -s)
+
+# Opening a file in the desktop browser: `open` on macOS, `xdg-open` elsewhere.
+ifeq ($(UNAME_S),Darwin)
+OPEN := open
+else
+OPEN := xdg-open
+endif
+
+# The macOS app needs Xcode, so those targets bail out early on other systems
+# instead of failing halfway through with a confusing xcodebuild error.
+define require-macos
+	@[ "$(UNAME_S)" = "Darwin" ] || { \
+		echo "'$@' builds the SwiftUI app and only runs on macOS (found: $(UNAME_S))."; \
+		echo "On Linux use 'make install-local' for the TUI."; \
+		exit 1; \
+	}
+endef
+
 .PHONY: help release-plz-install version-auto version-auto-dry release-dry-run release install-local reinstall-local uninstall-local build-release xcframework install-macos uninstall-macos bench bench-pg bench-redis bench-all bench-report profile-memory flamegraph flamegraph-install
 
 help:
@@ -56,9 +75,11 @@ uninstall-local:
 	cargo uninstall sbql || true
 
 xcframework:
+	$(require-macos)
 	./scripts/build-xcframework.sh
 
 install-macos: xcframework
+	$(require-macos)
 	@echo "==> Building macOS app (Release)..."
 	xcodebuild -project sbql-macos/sbql-macos.xcodeproj \
 		-scheme sbql-macos \
@@ -71,6 +92,7 @@ install-macos: xcframework
 	@echo "==> Done! sbql-macos.app installed to /Applications/"
 
 uninstall-macos:
+	$(require-macos)
 	rm -rf /Applications/sbql-macos.app
 	@echo "==> sbql-macos.app removed from /Applications/"
 
@@ -92,7 +114,7 @@ bench-all:
 
 bench-report:
 	@if [ -f target/criterion/report/index.html ]; then \
-		open target/criterion/report/index.html; \
+		$(OPEN) target/criterion/report/index.html; \
 	else \
 		echo "No report found. Run 'make bench' first."; \
 		exit 1; \

@@ -14,7 +14,7 @@ sqlparser.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
-keyring.workspace = true
+keyring = { workspace = true, optional = true }
 uuid.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
@@ -35,8 +35,37 @@ russh.workspace = true
 russh-keys.workspace = true
 async-trait.workspace = true
 
+# --- Platform credential stores ---------------------------------------------
+# `keyring` picks its backend from the enabled features. If none matches the
+# target OS it silently uses an in-process mock store, so each supported OS
+# needs its own feature here.
+
+# macOS: native Keychain via security-framework.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { workspace = true, optional = true, features = ["apple-native"] }
+
+# Linux / BSD: Secret Service over D-Bus (gnome-keyring, KWallet, KeePassXC...).
+# `sync-secret-service` is the blocking client, which is what we need since the
+# keyring calls happen inside a Tokio runtime and the async backend deadlocks
+# there. `crypto-rust` keeps the session encryption pure Rust (no OpenSSL).
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))'.dependencies]
+keyring = { workspace = true, optional = true, features = [
+    "sync-secret-service",
+    "crypto-rust",
+] }
+
 [features]
+default = ["keyring"]
+
+# Persist passwords in the OS credential store. Turning this off drops the
+# dependency entirely — no libdbus needed on Linux — and passwords then live
+# only in memory for the duration of a session.
+keyring = ["dep:keyring"]
+
 dhat-heap = ["dep:dhat"]
+# Build libdbus from source instead of linking the system one. Useful for
+# self-contained Linux builds where libdbus-1-dev is not installed.
+vendored-dbus = ["keyring/vendored"]
 
 [dependencies.dhat]
 workspace = true

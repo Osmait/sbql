@@ -20,6 +20,7 @@ use tokio::sync::mpsc;
 mod action;
 mod app;
 mod completion;
+mod list_cursor;
 mod events;
 mod handlers;
 mod highlight;
@@ -31,6 +32,26 @@ mod worker;
 use app::AppState;
 use events::{spawn_event_reader, AppEvent};
 use worker::spawn_worker;
+
+const USAGE: &str = "\
+sbql — terminal SQL workspace
+
+USAGE:
+    sbql [OPTIONS] [CONNECTION]
+
+ARGS:
+    <CONNECTION>    Name of a saved connection to open on startup
+
+OPTIONS:
+        --no-keyring    Do not touch the OS credential store. Passwords are kept
+                        in memory for this session only and never written to disk.
+                        Useful when no Secret Service / Keychain is available.
+    -h, --help          Print this help
+    -V, --version       Print version
+
+ENVIRONMENT:
+    SBQL_CONFIG_DIR     Directory holding connections.toml (default ~/.config/sbql)
+    SBQL_NO_KEYRING     Set to 1 for the same effect as --no-keyring";
 
 /// Path to `~/.config/sbql/last-connection` (stores the UUID of the last active connection).
 fn last_connection_path() -> Option<PathBuf> {
@@ -62,9 +83,34 @@ fn clear_last_connection_id() {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // ---------------------------------------------------------------------------
-    // CLI: optional connection name  —  sbql [connection-name]
+    // CLI: sbql [--no-keyring] [connection-name]
     // ---------------------------------------------------------------------------
-    let auto_connect_name: Option<String> = std::env::args().nth(1).map(|s| s.trim().to_owned());
+    let mut auto_connect_name: Option<String> = None;
+    for arg in std::env::args().skip(1) {
+        match arg.trim() {
+            "--no-keyring" => {
+                // Read back by sbql-core on every credential operation.
+                std::env::set_var(sbql_core::NO_KEYRING_ENV, "1");
+            }
+            "-h" | "--help" => {
+                println!("{USAGE}");
+                return Ok(());
+            }
+            "-V" | "--version" => {
+                println!("sbql {}", env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
+            other if other.starts_with('-') => {
+                eprintln!("sbql: unknown option '{other}'\n\n{USAGE}");
+                std::process::exit(2);
+            }
+            name if auto_connect_name.is_none() => auto_connect_name = Some(name.to_owned()),
+            extra => {
+                eprintln!("sbql: unexpected argument '{extra}'\n\n{USAGE}");
+                std::process::exit(2);
+            }
+        }
+    }
 
     // Validate the name before entering raw mode so errors print cleanly.
     if let Some(ref name) = auto_connect_name {

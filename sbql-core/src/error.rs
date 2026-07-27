@@ -11,6 +11,12 @@ pub enum SbqlError {
     #[error("Keyring error: {0}")]
     Keyring(String),
 
+    /// The credential store is reachable but holds no password for this
+    /// connection — unlike [`SbqlError::Keyring`], the user can fix this by
+    /// re-entering the password.
+    #[error("No saved password for '{0}'")]
+    PasswordNotFound(String),
+
     #[error("SQL parse error: {0}")]
     SqlParse(String),
 

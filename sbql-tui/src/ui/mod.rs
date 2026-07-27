@@ -162,6 +162,7 @@ mod tests {
             ],
             page: 0,
             has_next_page: false,
+            total_count: None,
         };
         state.apply_core_event(CoreEvent::QueryResult(result));
 

@@ -12,8 +12,17 @@ publish = false
 name = "sbql"
 path = "src/main.rs"
 
+[features]
+default = ["keyring"]
+
+# Persist passwords in the OS credential store. Build with
+# `--no-default-features` for a keyring-free binary: passwords are then kept in
+# memory for the session only, and on Linux the libdbus build dependency goes
+# away entirely.
+keyring = ["sbql-core/keyring"]
+
 [dependencies]
-sbql-core.workspace = true
+sbql-core = { workspace = true, default-features = false }
 tokio.workspace = true
 uuid.workspace = true
 anyhow.workspace = true

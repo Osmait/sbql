@@ -20,6 +20,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Linux build dependencies
+        # keyring links the Secret Service client against libdbus on Linux.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
