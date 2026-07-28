@@ -15,8 +15,23 @@ name = "sbql_ffi"
 name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 
+[features]
+default = ["keyring"]
+
+# Same shape as sbql-tui. The workspace pins `sbql-core` with
+# `default-features = false` — Cargo ignores a member's own
+# `default-features = false` on an inherited dependency — so the credential
+# store is opted back into here rather than inherited.
+keyring = ["sbql-core/keyring"]
+
 [dependencies]
-sbql-core = { path = "../sbql-core" }
+# Inherited from the workspace rather than a bare `path`, because a bare path
+# carries no version requirement and `cargo package` refuses to verify the
+# manifest without one ("all dependencies must have a version requirement
+# specified when packaging"). That failure aborted every `release-plz
+# release-pr` run. sbql-tui was fixed this way in March; sbql-ffi arrived
+# afterwards and reintroduced the bare path.
+sbql-core = { workspace = true, default-features = false }
 uniffi = { version = "0.29", features = ["tokio", "cli"] }
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
