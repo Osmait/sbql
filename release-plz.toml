@@ -10,3 +10,17 @@ release_always = false
 
 # Keep default branch naming explicit for auto-merge workflow lookup.
 pr_branch_prefix = "release-plz-"
+
+# The FFI shim is an internal build artifact for the macOS app: `publish =
+# false`, no tag has ever been cut for it, and nothing consumes it as a
+# versioned crate.
+#
+# Leaving it release-managed is actively harmful. With no tag to anchor on,
+# release-plz treats it as never released and walks back up to
+# `max_analyze_commits` (1000) commits looking for a baseline — straight
+# through two commits from 2026-03-07 whose `Cargo.toml` lists `sbql-ffi` as a
+# workspace member before the directory existed. `cargo package` cannot load
+# the workspace there, and the whole run dies with "cannot compare packages".
+[[package]]
+name = "sbql-ffi"
+release = false
