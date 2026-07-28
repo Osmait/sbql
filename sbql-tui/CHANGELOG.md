@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/Osmait/sbql/compare/sbql-tui-v0.1.0...sbql-tui-v0.2.0) - 2026-07-28
+
+### Added
+
+- Ctrl+E opens the full text of a status-bar message, with its cause and a
+  next step chosen from the error kind. The bar is one row and cannot wrap, so
+  long database errors used to be cut off unreadably
+  ([#8](https://github.com/Osmait/sbql/pull/8))
+
+### Fixed
+
+- **Losing the terminal input stream no longer leaves an unquittable window.**
+  In raw mode Ctrl+C is a keypress, not a signal, so the only way out was to
+  kill the process from another terminal
+  ([#8](https://github.com/Osmait/sbql/pull/8))
+- A failed or half-finished terminal takeover is now rolled back, instead of
+  leaving the shell in raw mode with no echo
+  ([#8](https://github.com/Osmait/sbql/pull/8))
+- `status_msg` and `error_msg` merged into one notice, so a stale error can no
+  longer hide the message that came after it
+  ([#8](https://github.com/Osmait/sbql/pull/8))
+- The log moved off the shared, predictable `/tmp/sbql.log` to a per-user state
+  directory (or `$SBQL_LOG`), and a logging failure no longer prevents startup
+  ([#8](https://github.com/Osmait/sbql/pull/8))
+- `RUST_LOG` is honoured; fixed `sbql_*=info` directives used to override it
+  ([#8](https://github.com/Osmait/sbql/pull/8))
+
 ## [0.1.2](https://github.com/Osmait/sbql/compare/sbql-tui-v0.1.0...sbql-tui-v0.1.2) - 2026-03-07
 
 ### Added
