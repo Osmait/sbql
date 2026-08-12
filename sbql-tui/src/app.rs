@@ -158,8 +158,8 @@ pub struct CellEditState {
     /// Table info needed to generate the UPDATE statement.
     pub schema: String,
     pub table: String,
-    pub pk_col: String,
-    pub pk_val: String,
+    /// Every `(column, value)` component of the row's primary key.
+    pub pk: Vec<(String, String)>,
     pub textarea: TextArea<'static>,
 }
 
@@ -172,8 +172,7 @@ impl CellEditState {
         original: String,
         schema: String,
         table: String,
-        pk_col: String,
-        pk_val: String,
+        pk: Vec<(String, String)>,
     ) -> Self {
         let mut ta = TextArea::default();
         ta.insert_str(&original);
@@ -184,8 +183,7 @@ impl CellEditState {
             original,
             schema,
             table,
-            pk_col,
-            pk_val,
+            pk,
             textarea: ta,
         }
     }
@@ -222,18 +220,19 @@ pub struct PendingEdit {
     pub new_val: String,
     pub schema: String,
     pub table: String,
-    pub pk_col: String,
-    pub pk_val: String,
+    /// Every `(column, value)` component of the row's primary key. A composite
+    /// key reduced to its first column made the UPDATE hit every row sharing
+    /// that component.
+    pub pk: Vec<(String, String)>,
     pub col_name: String,
 }
 
-/// A row marked for deletion, with its PK already resolved.
+/// A row marked for deletion, with its full PK already resolved.
 #[derive(Debug, Clone)]
 pub struct PendingDelete {
     pub schema: String,
     pub table: String,
-    pub pk_col: String,
-    pub pk_val: String,
+    pub pk: Vec<(String, String)>,
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +351,13 @@ impl EditorState {
 #[derive(Default)]
 pub struct ResultsState {
     pub data: QueryResult,
+    /// The SQL whose execution produced `data` — what row edits and deletes
+    /// resolve their target table from. The editor text is *not* usable for
+    /// that: the user may have typed a new query without running it.
+    pub source_sql: Option<String>,
+    /// The SQL most recently sent for execution; promoted to `source_sql`
+    /// when its result actually arrives.
+    pub sent_sql: Option<String>,
     pub scroll: usize,
     pub col_scroll: usize,
     pub selected_row: usize,
@@ -762,6 +768,8 @@ impl AppState {
             },
             results: ResultsState {
                 data: QueryResult::default(),
+                source_sql: None,
+                sent_sql: None,
                 scroll: 0,
                 col_scroll: 0,
                 selected_row: 0,
@@ -805,6 +813,35 @@ impl AppState {
             tick: 0,
             should_quit: false,
         }
+    }
+
+    /// Resolve every primary key component of a displayed row to its value.
+    ///
+    /// Returns `None` when there is no primary key or any component cannot be
+    /// found in the result set — using a *partial* key instead would make the
+    /// eventual UPDATE/DELETE match more rows than the one the user selected.
+    fn resolve_row_pk(
+        &self,
+        row_idx: usize,
+        pk_columns: &[String],
+    ) -> Option<Vec<(String, String)>> {
+        if pk_columns.is_empty() {
+            return None;
+        }
+        let row = self.results.data.rows.get(row_idx)?;
+        pk_columns
+            .iter()
+            .map(|pk_col| {
+                self.results
+                    .data
+                    .columns
+                    .iter()
+                    .position(|c| c.to_lowercase() == pk_col.to_lowercase())
+                    .and_then(|ci| row.get(ci))
+                    .filter(|val| !val.is_empty())
+                    .map(|val| (pk_col.clone(), val.clone()))
+            })
+            .collect()
     }
 
     // -----------------------------------------------------------------------
@@ -864,7 +901,17 @@ impl AppState {
                     self.results.selected_row = 0;
                     self.results.selected_col = 0;
                 }
-                // Always discard staged changes when a new result set arrives
+                // These rows came from the SQL last sent for execution; record
+                // it so edits/deletes target the table that actually produced
+                // them, not whatever the editor says now.
+                if let Some(sql) = self.results.sent_sql.clone() {
+                    self.results.source_sql = Some(sql);
+                }
+                // A new result set invalidates staged changes — but never
+                // silently. Paging is blocked while changes are staged, so
+                // reaching this with staged work means a new query ran.
+                let discarded =
+                    self.mutation.pending_edits.len() + self.mutation.pending_deletes.len();
                 self.mutation.discard_pending();
 
                 // Preserve previous columns when current page has no rows.
@@ -873,8 +920,29 @@ impl AppState {
                 }
 
                 self.results.data = result;
+                // On page > 0 the selection is not reset, so a shorter page
+                // (typically the last one) could leave selected_row past the
+                // end — every later row op would then read out of bounds or act
+                // on the wrong row. Clamp it to the new row count.
+                let row_count = self.results.data.rows.len();
+                if row_count == 0 {
+                    self.results.selected_row = 0;
+                } else if self.results.selected_row >= row_count {
+                    self.results.selected_row = row_count - 1;
+                }
+                let col_count = self.results.data.columns.len();
+                if col_count == 0 {
+                    self.results.selected_col = 0;
+                } else if self.results.selected_col >= col_count {
+                    self.results.selected_col = col_count - 1;
+                }
                 self.results.col_widths_dirty = true;
                 self.dismiss_notice();
+                if discarded > 0 {
+                    self.report(format!(
+                        "{discarded} staged change(s) discarded — a new result set arrived."
+                    ));
+                }
             }
             CoreEvent::CellUpdated => {
                 self.results.is_loading = false;
@@ -889,41 +957,22 @@ impl AppState {
                 columns,
             } => {
                 self.results.is_loading = false;
-                let pk_col = columns.into_iter().next().unwrap_or_default();
 
                 // Resolve a pending delete if one is waiting for this PK info.
                 if let Some(row_idx) = self.mutation.pending_delete_row.take() {
-                    let pk_val = self
-                        .results
-                        .data
-                        .columns
-                        .iter()
-                        .position(|c| c.to_lowercase() == pk_col.to_lowercase())
-                        .and_then(|pk_ci| {
-                            self.results
-                                .data
-                                .rows
-                                .get(row_idx)
-                                .and_then(|r| r.get(pk_ci))
-                                .cloned()
-                        })
-                        .unwrap_or_default();
-
-                    if pk_col.is_empty() || pk_val.is_empty() {
-                        self.report("Cannot mark for delete: primary key not found.");
-                    } else {
-                        // Toggle: if already marked, unmark
-                        if let std::collections::hash_map::Entry::Vacant(e) =
-                            self.mutation.pending_deletes.entry(row_idx)
-                        {
-                            e.insert(PendingDelete {
-                                schema,
-                                table,
-                                pk_col,
-                                pk_val,
-                            });
-                        } else {
-                            self.mutation.pending_deletes.remove(&row_idx);
+                    match self.resolve_row_pk(row_idx, &columns) {
+                        Some(pk) => {
+                            // Toggle: if already marked, unmark
+                            if let std::collections::hash_map::Entry::Vacant(e) =
+                                self.mutation.pending_deletes.entry(row_idx)
+                            {
+                                e.insert(PendingDelete { schema, table, pk });
+                            } else {
+                                self.mutation.pending_deletes.remove(&row_idx);
+                            }
+                        }
+                        None => {
+                            self.report("Cannot mark for delete: primary key not found.");
                         }
                     }
                     return;
@@ -943,30 +992,14 @@ impl AppState {
                         .and_then(|r| r.get(col_idx))
                         .cloned()
                         .unwrap_or_default();
-                    // Find PK value in result row
-                    let pk_val = self
-                        .results
-                        .data
-                        .columns
-                        .iter()
-                        .position(|c| c.to_lowercase() == pk_col.to_lowercase())
-                        .and_then(|pk_ci| {
-                            self.results
-                                .data
-                                .rows
-                                .get(row_idx)
-                                .and_then(|r| r.get(pk_ci))
-                                .cloned()
-                        })
-                        .unwrap_or_default();
 
-                    if pk_col.is_empty() || pk_val.is_empty() {
+                    let Some(pk) = self.resolve_row_pk(row_idx, &columns) else {
                         self.report("Cannot edit: primary key value not found in result set.");
                         return;
-                    }
+                    };
 
                     self.mutation.cell_edit = Some(CellEditState::new(
-                        row_idx, col_idx, col_name, original, schema, table, pk_col, pk_val,
+                        row_idx, col_idx, col_name, original, schema, table, pk,
                     ));
                 }
             }
@@ -1201,10 +1234,13 @@ mod tests {
     fn core_event_query_result_page_n_preserves_position() {
         let mut state = AppState::new(vec![]);
         state.results.selected_row = 5;
-        state.results.selected_col = 2;
+        state.results.selected_col = 0;
+        // A page that still holds the selected row keeps the position (unlike
+        // page 0, which resets it); the clamp only kicks in when the row no
+        // longer exists — see core_event_query_result_clamps_selection_on_short_page.
         let result = QueryResult {
             columns: vec!["id".into()],
-            rows: vec![vec!["1".into()]],
+            rows: (0..10).map(|i| vec![i.to_string()]).collect(),
             page: 2,
             has_next_page: false,
             total_count: None,
@@ -1242,8 +1278,7 @@ mod tests {
             "1".into(),
             "public".into(),
             "t".into(),
-            "id".into(),
-            "1".into(),
+            vec![("id".into(), "1".into())],
         ));
         state.apply_core_event(CoreEvent::CellUpdated);
         assert!(state.mutation.cell_edit.is_none());
@@ -1320,7 +1355,117 @@ mod tests {
         assert!(state.mutation.cell_edit.is_some());
         let ce = state.mutation.cell_edit.as_ref().unwrap();
         assert_eq!(ce.col_name, "name");
-        assert_eq!(ce.pk_val, "1");
+        assert_eq!(ce.pk, vec![("id".to_string(), "1".to_string())]);
+    }
+
+    /// A composite key must keep every component — reduced to its first
+    /// column, "delete this order line" became "delete the whole order".
+    #[test]
+    fn core_event_primary_keys_composite_delete_keeps_all_components() {
+        let mut state = AppState::new(vec![]);
+        state.results.data.columns = vec!["order_id".into(), "line_no".into(), "qty".into()];
+        state.results.data.rows = vec![
+            vec!["42".into(), "1".into(), "3".into()],
+            vec!["42".into(), "2".into(), "5".into()],
+        ];
+        state.mutation.pending_delete_row = Some(0);
+        state.apply_core_event(CoreEvent::PrimaryKeys {
+            schema: "public".into(),
+            table: "order_lines".into(),
+            columns: vec!["order_id".into(), "line_no".into()],
+        });
+        let del = state
+            .mutation
+            .pending_deletes
+            .get(&0)
+            .expect("row 0 should be marked");
+        assert_eq!(
+            del.pk,
+            vec![
+                ("order_id".to_string(), "42".to_string()),
+                ("line_no".to_string(), "1".to_string()),
+            ]
+        );
+    }
+
+    /// If any PK component cannot be resolved from the result set, refuse:
+    /// a partial key would match more rows than the one the user picked.
+    #[test]
+    fn core_event_primary_keys_missing_component_refuses() {
+        let mut state = AppState::new(vec![]);
+        // The query didn't select line_no, so the key cannot be completed.
+        state.results.data.columns = vec!["order_id".into(), "qty".into()];
+        state.results.data.rows = vec![vec!["42".into(), "3".into()]];
+        state.mutation.pending_delete_row = Some(0);
+        state.apply_core_event(CoreEvent::PrimaryKeys {
+            schema: "public".into(),
+            table: "order_lines".into(),
+            columns: vec!["order_id".into(), "line_no".into()],
+        });
+        assert!(state.mutation.pending_deletes.is_empty());
+        assert!(state.is_failing());
+    }
+
+    /// A shorter later page must not leave the selection past the last row.
+    #[test]
+    fn core_event_query_result_clamps_selection_on_short_page() {
+        let mut state = AppState::new(vec![]);
+        state.results.selected_row = 40;
+        state.results.selected_col = 5;
+        state.apply_core_event(CoreEvent::QueryResult(QueryResult {
+            columns: vec!["id".into(), "name".into()],
+            rows: vec![vec!["1".into(), "a".into()], vec!["2".into(), "b".into()]],
+            page: 3,
+            has_next_page: false,
+            total_count: None,
+        }));
+        assert_eq!(state.results.selected_row, 1, "clamped to last row");
+        assert_eq!(state.results.selected_col, 1, "clamped to last column");
+    }
+
+    /// The result set records the SQL that actually produced it.
+    #[test]
+    fn core_event_query_result_promotes_sent_sql() {
+        let mut state = AppState::new(vec![]);
+        state.results.sent_sql = Some("SELECT * FROM orders".into());
+        state.apply_core_event(CoreEvent::QueryResult(QueryResult {
+            columns: vec!["id".into()],
+            rows: vec![vec!["1".into()]],
+            page: 0,
+            has_next_page: false,
+            total_count: None,
+        }));
+        assert_eq!(
+            state.results.source_sql.as_deref(),
+            Some("SELECT * FROM orders")
+        );
+    }
+
+    /// Staged work must never disappear without a word.
+    #[test]
+    fn core_event_query_result_reports_discarded_staged_changes() {
+        let mut state = AppState::new(vec![]);
+        state.mutation.pending_deletes.insert(
+            0,
+            PendingDelete {
+                schema: "public".into(),
+                table: "users".into(),
+                pk: vec![("id".into(), "1".into())],
+            },
+        );
+        state.apply_core_event(CoreEvent::QueryResult(QueryResult {
+            columns: vec!["id".into()],
+            rows: vec![],
+            page: 0,
+            has_next_page: false,
+            total_count: None,
+        }));
+        assert!(state.mutation.pending_deletes.is_empty());
+        assert!(
+            state.notice_text().is_some_and(|t| t.contains("discarded")),
+            "{:?}",
+            state.notice_text()
+        );
     }
 
     #[test]
@@ -1615,8 +1760,7 @@ mod tests {
                 new_val: "x".into(),
                 schema: "p".into(),
                 table: "t".into(),
-                pk_col: "id".into(),
-                pk_val: "1".into(),
+                pk: vec![("id".into(), "1".into())],
                 col_name: "c".into(),
             },
         );

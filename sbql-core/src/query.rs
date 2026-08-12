@@ -295,10 +295,19 @@ async fn suggest_distinct_values_sqlite(
     let trimmed = sql.trim_end_matches(';').trim();
     let col_ident = quote_ident(column);
     // SQLite: use LIKE with COLLATE NOCASE instead of ILIKE
+    // The `\`-escaping of % and _ only takes effect with an explicit ESCAPE
+    // clause; without it SQLite treats a typed % or _ as a wildcard and the
+    // backslashes as literal text.
     let stmt = format!(
-        "SELECT DISTINCT CAST(_sbql_s.{col_ident} AS TEXT) AS v FROM ({trimmed}) AS _sbql_s WHERE CAST(_sbql_s.{col_ident} AS TEXT) LIKE $1 COLLATE NOCASE ORDER BY v LIMIT $2"
+        "SELECT DISTINCT CAST(_sbql_s.{col_ident} AS TEXT) AS v FROM ({trimmed}) AS _sbql_s WHERE CAST(_sbql_s.{col_ident} AS TEXT) LIKE $1 ESCAPE '\\' COLLATE NOCASE ORDER BY v LIMIT $2"
     );
-    let pattern = format!("{}%", prefix.replace('%', "\\%").replace('_', "\\_"));
+    let pattern = format!(
+        "{}%",
+        prefix
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_")
+    );
     let rows = sqlx::query(&stmt)
         .bind(pattern)
         .bind(limit as i64)
@@ -1449,19 +1458,50 @@ fn pg_value_to_string(row: &PgRow, idx: usize, type_name: &str) -> String {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Case-insensitive substring search without allocation.
-fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
-    haystack
-        .as_bytes()
-        .windows(needle.len())
-        .any(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
+/// Whether `sql` contains `keyword` as a standalone token, ignoring case,
+/// outside single-quoted string literals.
+///
+/// A plain substring match here once disabled pagination for any query that
+/// merely *mentioned* "limit" — `SELECT * FROM rate_limits` would be sent
+/// unwrapped and fetch the whole table into memory. Token boundaries are
+/// ASCII identifier characters, which is what every supported backend uses
+/// for keywords.
+fn contains_keyword(sql: &str, keyword: &str) -> bool {
+    let bytes = sql.as_bytes();
+    let kw = keyword.as_bytes();
+    let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut i = 0;
+    let mut in_string = false;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_string {
+            // A doubled '' reads as close-then-reopen, which still nets out.
+            in_string = b != b'\'';
+            i += 1;
+            continue;
+        }
+        if b == b'\'' {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if i + kw.len() <= bytes.len()
+            && bytes[i..i + kw.len()].eq_ignore_ascii_case(kw)
+            && (i == 0 || !is_ident(bytes[i - 1]))
+            && (i + kw.len() == bytes.len() || !is_ident(bytes[i + kw.len()]))
+        {
+            return true;
+        }
+        i += 1;
+    }
+    false
 }
 
 /// Append LIMIT/OFFSET to `sql` when there is no existing top-level LIMIT.
 pub fn build_paginated_sql(sql: &str, page: usize) -> String {
     let trimmed = sql.trim_end_matches(';').trim();
 
-    let has_limit = contains_ignore_case(trimmed, "LIMIT");
+    let has_limit = contains_keyword(trimmed, "LIMIT");
 
     if has_limit {
         trimmed.to_owned()
@@ -1641,9 +1681,7 @@ fn write_row(
                 if i > 0 {
                     write!(w, ", ")?;
                 }
-                let escaped_col = col.replace('\\', "\\\\").replace('"', "\\\"");
-                let escaped_val = val.replace('\\', "\\\\").replace('"', "\\\"");
-                write!(w, "\"{}\": \"{}\"", escaped_col, escaped_val)?;
+                write!(w, "\"{}\": \"{}\"", json_escape(col), json_escape(val))?;
             }
             write!(w, "}}")
         }
@@ -1676,6 +1714,29 @@ fn write_footer(w: &mut impl Write, fmt: ExportFormat) -> std::io::Result<()> {
     }
 }
 
+/// Escape a string for inclusion inside a JSON double-quoted string literal.
+///
+/// Escaping only `\` and `"` left raw newlines, tabs and other control
+/// characters in the output, which is invalid JSON — a TEXT cell containing a
+/// newline produced a file no JSON parser would read back.
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0c}' => out.push_str("\\f"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn escape_csv_value(s: &str) -> String {
     if s.contains(',') || s.contains('"') || s.contains('\n') {
         format!("\"{}\"", s.replace('"', "\"\""))
@@ -1685,9 +1746,11 @@ fn escape_csv_value(s: &str) -> String {
 }
 
 fn escape_sql_export_value(s: &str) -> String {
-    if s.is_empty() {
-        return "NULL".to_owned();
-    }
+    // An empty cell is emitted as the empty string literal, not NULL. The
+    // result model renders a real NULL as empty too, so the two are already
+    // indistinguishable here — but the CSV and JSON exporters both round-trip
+    // empty as empty, and mapping it to NULL only in SQL made that one format
+    // silently disagree with the others.
     if s.parse::<f64>().is_ok() {
         return s.to_owned();
     }
@@ -1740,6 +1803,34 @@ mod tests {
     fn paginated_existing_limit_case_insensitive() {
         let result = build_paginated_sql("select * from users limit 5", 0);
         assert_eq!(result, "select * from users limit 5");
+    }
+
+    /// "limit" inside an identifier is not a LIMIT clause; these queries must
+    /// still be paginated or a big table gets loaded whole into memory.
+    #[test]
+    fn paginated_ignores_limit_inside_identifiers() {
+        for sql in [
+            "SELECT * FROM rate_limits",
+            "SELECT limit_amount FROM budgets",
+            "SELECT * FROM off_limits_zones WHERE x = 1",
+        ] {
+            let result = build_paginated_sql(sql, 0);
+            assert!(result.contains("LIMIT 101"), "not paginated: {sql}");
+        }
+    }
+
+    #[test]
+    fn paginated_ignores_limit_inside_string_literals() {
+        let result = build_paginated_sql("SELECT * FROM notes WHERE body = 'no limit here'", 0);
+        assert!(result.contains("LIMIT 101"));
+        let quoted = build_paginated_sql("SELECT * FROM notes WHERE body = 'it''s a limit'", 0);
+        assert!(quoted.contains("LIMIT 101"));
+    }
+
+    #[test]
+    fn paginated_still_detects_real_limit_after_string() {
+        let result = build_paginated_sql("SELECT * FROM t WHERE a = 'x' LIMIT 7", 0);
+        assert_eq!(result, "SELECT * FROM t WHERE a = 'x' LIMIT 7");
     }
 
     // -- hex_encode --

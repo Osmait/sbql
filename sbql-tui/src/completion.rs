@@ -130,22 +130,27 @@ pub const SQL_KEYWORDS: &[&str] = &[
 ];
 
 /// Walk backwards from the cursor to find the current word prefix.
+///
+/// `col` is tui-textarea's cursor column, which counts *characters*; it is
+/// converted to a byte offset before slicing. Treating it as a byte index
+/// panicked (or misread continuation bytes) as soon as the line held any
+/// non-ASCII text.
 pub fn extract_prefix(lines: &[String], row: usize, col: usize) -> String {
-    if row >= lines.len() {
+    let Some(line) = lines.get(row) else {
         return String::new();
-    }
-    let line = &lines[row];
-    let bytes = line.as_bytes();
-    let end = col.min(bytes.len());
-    let mut start = end;
-    while start > 0 {
-        let ch = bytes[start - 1] as char;
-        if ch.is_alphanumeric() || ch == '_' || ch == '.' {
-            start -= 1;
-        } else {
-            break;
-        }
-    }
+    };
+    let end = line
+        .char_indices()
+        .nth(col)
+        .map(|(i, _)| i)
+        .unwrap_or(line.len());
+    let start = line[..end]
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| c.is_alphanumeric() || *c == '_' || *c == '.')
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(end);
     line[start..end].to_string()
 }
 
@@ -244,6 +249,28 @@ mod tests {
     fn extract_prefix_after_space() {
         let lines = vec!["SELECT ".to_string()];
         assert_eq!(extract_prefix(&lines, 0, 7), "");
+    }
+
+    /// The cursor column counts characters; with multi-byte text a byte-index
+    /// slice panicked on the next keystroke.
+    #[test]
+    fn extract_prefix_non_ascii() {
+        let lines = vec!["SELECT * FROM café".to_string()];
+        // 18 characters, cursor at end of line.
+        assert_eq!(extract_prefix(&lines, 0, 18), "café");
+    }
+
+    #[test]
+    fn extract_prefix_cursor_inside_multibyte_word() {
+        let lines = vec!["ñañ x".to_string()];
+        assert_eq!(extract_prefix(&lines, 0, 3), "ñañ");
+        assert_eq!(extract_prefix(&lines, 0, 2), "ña");
+    }
+
+    #[test]
+    fn extract_prefix_col_past_line_end() {
+        let lines = vec!["café".to_string()];
+        assert_eq!(extract_prefix(&lines, 0, 99), "café");
     }
 
     #[test]

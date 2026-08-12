@@ -155,8 +155,15 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
 // Expose `extract_schema_table_from_sql` for testing.
 /// Extract `(schema, table)` from the first `FROM <name>` in the SQL.
 pub fn extract_schema_table_from_sql(sql: &str) -> Option<(String, String)> {
-    let upper = sql.to_uppercase();
-    let from_pos = upper.find("FROM ")?;
+    // The needle is matched on the original bytes: an offset found in
+    // `sql.to_uppercase()` is not valid in `sql` (Unicode uppercasing can
+    // change byte length — 'ﬁ' → "FI"), and slicing with it panicked inside a
+    // full-screen TUI. "FROM " is pure ASCII, so a case-insensitive byte match
+    // can only start on a char boundary.
+    let from_pos = sql
+        .as_bytes()
+        .windows(5)
+        .position(|w| w.eq_ignore_ascii_case(b"FROM "))?;
     let rest = sql[from_pos + 5..].trim_start();
 
     fn parse_ident(s: &str) -> (&str, &str) {
@@ -404,5 +411,28 @@ mod tests {
     fn extract_with_where_clause() {
         let result = extract_schema_table_from_sql("SELECT * FROM orders WHERE status = 'active'");
         assert_eq!(result, Some(("public".into(), "orders".into())));
+    }
+
+    /// Characters whose uppercase form has a different UTF-8 byte length used
+    /// to shift the FROM offset and panic on a non-char-boundary slice.
+    #[test]
+    fn extract_survives_byte_growing_unicode_before_from() {
+        // 'ŉ' uppercases to the two-char "ʼN"; six of them make the uppercased
+        // string 6 bytes longer than the original.
+        let result = extract_schema_table_from_sql("SELECT 'ŉŉŉŉŉŉ' FROM t");
+        assert_eq!(result, Some(("public".into(), "t".into())));
+    }
+
+    #[test]
+    fn extract_survives_byte_shrinking_unicode_before_from() {
+        // The ligature 'ﬁ' (3 bytes) uppercases to "FI" (2 bytes).
+        let result = extract_schema_table_from_sql("SELECT 'ﬁﬁﬁ' AS a FROM invoices");
+        assert_eq!(result, Some(("public".into(), "invoices".into())));
+    }
+
+    #[test]
+    fn extract_multibyte_table_name() {
+        let result = extract_schema_table_from_sql("SELECT * from ñtable");
+        assert_eq!(result, Some(("public".into(), "ñtable".into())));
     }
 }

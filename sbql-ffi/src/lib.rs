@@ -490,12 +490,13 @@ impl SbqlEngine {
         new_val: String,
     ) -> Result<(), SbqlFfiError> {
         let mut core = self.core.lock().await;
+        // The FFI surface stays single-column for now; the core takes the full
+        // composite key, so this wraps the one pair it has.
         let events = core
             .handle(sbql_core::CoreCommand::UpdateCell {
                 schema,
                 table,
-                pk_col,
-                pk_val,
+                pk: vec![(pk_col, pk_val)],
                 target_col,
                 new_val,
             })
@@ -517,8 +518,7 @@ impl SbqlEngine {
             .handle(sbql_core::CoreCommand::DeleteRow {
                 schema,
                 table,
-                pk_col,
-                pk_val,
+                pk: vec![(pk_col, pk_val)],
             })
             .await;
         check_for_error(events)

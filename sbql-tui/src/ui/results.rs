@@ -473,15 +473,17 @@ mod tests {
     use sbql_core::QueryResult;
 
     fn state_with(columns: &[&str], rows: usize) -> ResultsState {
-        let mut s = ResultsState::default();
-        s.data = QueryResult {
-            columns: columns.iter().map(|c| c.to_string()).collect(),
-            rows: (0..rows)
-                .map(|r| columns.iter().map(|c| format!("{c}{r}")).collect())
-                .collect(),
-            page: 0,
-            has_next_page: false,
-            total_count: None,
+        let mut s = ResultsState {
+            data: QueryResult {
+                columns: columns.iter().map(|c| c.to_string()).collect(),
+                rows: (0..rows)
+                    .map(|r| columns.iter().map(|c| format!("{c}{r}")).collect())
+                    .collect(),
+                page: 0,
+                has_next_page: false,
+                total_count: None,
+            },
+            ..ResultsState::default()
         };
         s.col_widths_dirty = true;
         s

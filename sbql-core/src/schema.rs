@@ -120,24 +120,30 @@ pub async fn load_diagram(pool: &DbPool) -> Result<DiagramData> {
 }
 
 /// Execute a single-cell UPDATE.
+///
+/// `pk` is every `(column, value)` component of the row's primary key; the
+/// WHERE clause matches all of them, so a composite key addresses exactly one
+/// row rather than every row sharing its first component.
 pub async fn execute_cell_update(
     pool: &DbPool,
     schema: &str,
     table: &str,
-    pk_col: &str,
-    pk_val: &str,
+    pk: &[(String, String)],
     target_col: &str,
     new_val: &str,
 ) -> Result<()> {
+    if pk.is_empty() {
+        return Err(SbqlError::Schema(
+            "Cell update needs at least one primary key column".into(),
+        ));
+    }
     match pool {
         DbPool::Postgres(pg) => {
-            execute_cell_update_pg(pg, schema, table, pk_col, pk_val, target_col, new_val).await
+            execute_cell_update_pg(pg, schema, table, pk, target_col, new_val).await
         }
-        DbPool::Sqlite(sq) => {
-            execute_cell_update_sqlite(sq, table, pk_col, pk_val, target_col, new_val).await
-        }
+        DbPool::Sqlite(sq) => execute_cell_update_sqlite(sq, table, pk, target_col, new_val).await,
         DbPool::Mysql(my) => {
-            execute_cell_update_mysql(my, schema, table, pk_col, pk_val, target_col, new_val).await
+            execute_cell_update_mysql(my, schema, table, pk, target_col, new_val).await
         }
         DbPool::Redis(_) => Err(SbqlError::Schema(
             "Cell update not supported for Redis".into(),
@@ -149,24 +155,27 @@ pub async fn execute_cell_update(
             "Cell update not supported for MongoDB".into(),
         )),
         DbPool::SqlServer(pool) => {
-            execute_cell_update_sqlserver(pool, schema, table, pk_col, pk_val, target_col, new_val)
-                .await
+            execute_cell_update_sqlserver(pool, schema, table, pk, target_col, new_val).await
         }
     }
 }
 
-/// Execute a single-row DELETE identified by its primary key.
+/// Execute a single-row DELETE identified by its full primary key.
 pub async fn execute_row_delete(
     pool: &DbPool,
     schema: &str,
     table: &str,
-    pk_col: &str,
-    pk_val: &str,
+    pk: &[(String, String)],
 ) -> Result<()> {
+    if pk.is_empty() {
+        return Err(SbqlError::Schema(
+            "Row delete needs at least one primary key column".into(),
+        ));
+    }
     match pool {
-        DbPool::Postgres(pg) => execute_row_delete_pg(pg, schema, table, pk_col, pk_val).await,
-        DbPool::Sqlite(sq) => execute_row_delete_sqlite(sq, table, pk_col, pk_val).await,
-        DbPool::Mysql(my) => execute_row_delete_mysql(my, schema, table, pk_col, pk_val).await,
+        DbPool::Postgres(pg) => execute_row_delete_pg(pg, schema, table, pk).await,
+        DbPool::Sqlite(sq) => execute_row_delete_sqlite(sq, table, pk).await,
+        DbPool::Mysql(my) => execute_row_delete_mysql(my, schema, table, pk).await,
         DbPool::Redis(_) => Err(SbqlError::Schema(
             "Row delete not supported for Redis".into(),
         )),
@@ -176,9 +185,7 @@ pub async fn execute_row_delete(
         DbPool::MongoDb(_) => Err(SbqlError::Schema(
             "Row delete not supported for MongoDB".into(),
         )),
-        DbPool::SqlServer(pool) => {
-            execute_row_delete_sqlserver(pool, schema, table, pk_col, pk_val).await
-        }
+        DbPool::SqlServer(pool) => execute_row_delete_sqlserver(pool, schema, table, pk).await,
     }
 }
 
@@ -464,12 +471,21 @@ fn is_safe_pg_type(t: &str) -> bool {
     })
 }
 
+/// `col::text = $n AND ...` for every PK component, with placeholders
+/// starting at `$first_param`.
+fn pg_pk_where(pk: &[(String, String)], first_param: usize) -> String {
+    pk.iter()
+        .enumerate()
+        .map(|(i, (col, _))| format!("{}::text = ${}", quote_ident(col), first_param + i))
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
 async fn execute_cell_update_pg(
     pool: &PgPool,
     schema: &str,
     table: &str,
-    pk_col: &str,
-    pk_val: &str,
+    pk: &[(String, String)],
     target_col: &str,
     new_val: &str,
 ) -> Result<()> {
@@ -480,18 +496,18 @@ async fn execute_cell_update_pg(
         )));
     }
     let sql = format!(
-        "UPDATE {}.{} SET {} = $1::{} WHERE {}::text = $2",
+        "UPDATE {}.{} SET {} = $1::{} WHERE {}",
         quote_ident(schema),
         quote_ident(table),
         quote_ident(target_col),
         target_type,
-        quote_ident(pk_col)
+        pg_pk_where(pk, 2)
     );
-    sqlx::query(&sql)
-        .bind(new_val)
-        .bind(pk_val)
-        .execute(pool)
-        .await?;
+    let mut query = sqlx::query(&sql).bind(new_val);
+    for (_, val) in pk {
+        query = query.bind(val);
+    }
+    query.execute(pool).await?;
     Ok(())
 }
 
@@ -499,16 +515,19 @@ async fn execute_row_delete_pg(
     pool: &PgPool,
     schema: &str,
     table: &str,
-    pk_col: &str,
-    pk_val: &str,
+    pk: &[(String, String)],
 ) -> Result<()> {
     let sql = format!(
-        "DELETE FROM {}.{} WHERE {}::text = $1",
+        "DELETE FROM {}.{} WHERE {}",
         quote_ident(schema),
         quote_ident(table),
-        quote_ident(pk_col)
+        pg_pk_where(pk, 1)
     );
-    sqlx::query(&sql).bind(pk_val).execute(pool).await?;
+    let mut query = sqlx::query(&sql);
+    for (_, val) in pk {
+        query = query.bind(val);
+    }
+    query.execute(pool).await?;
     Ok(())
 }
 
@@ -575,7 +594,7 @@ async fn list_tables_sqlite(pool: &SqlitePool) -> Result<Vec<TableEntry>> {
 }
 
 async fn get_primary_keys_sqlite(pool: &SqlitePool, table: &str) -> Result<Vec<String>> {
-    let sql = format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\""));
+    let sql = format!("PRAGMA table_info({})", quote_ident(table));
     let rows = sqlx::query(&sql).fetch_all(pool).await?;
 
     let mut pks: Vec<(i32, String)> = Vec::new();
@@ -616,7 +635,7 @@ async fn load_diagram_sqlite(pool: &SqlitePool) -> Result<DiagramData> {
 
     for table_name in &table_names {
         // 2. Columns from PRAGMA table_info
-        let col_sql = format!("PRAGMA table_info(\"{}\")", table_name.replace('"', "\"\""));
+        let col_sql = format!("PRAGMA table_info({})", quote_ident(table_name));
         let col_rows = sqlx::query(&col_sql).fetch_all(pool).await?;
 
         let columns: Vec<ColumnInfo> = col_rows
@@ -640,10 +659,7 @@ async fn load_diagram_sqlite(pool: &SqlitePool) -> Result<DiagramData> {
         });
 
         // 3. Foreign keys from PRAGMA foreign_key_list
-        let fk_sql = format!(
-            "PRAGMA foreign_key_list(\"{}\")",
-            table_name.replace('"', "\"\"")
-        );
+        let fk_sql = format!("PRAGMA foreign_key_list({})", quote_ident(table_name));
         let fk_rows = sqlx::query(&fk_sql).fetch_all(pool).await?;
 
         for fk_row in fk_rows {
@@ -666,40 +682,52 @@ async fn load_diagram_sqlite(pool: &SqlitePool) -> Result<DiagramData> {
     })
 }
 
+/// `col = $n AND ...` for every PK component, with placeholders starting at
+/// `$first_param`.
+fn sqlite_pk_where(pk: &[(String, String)], first_param: usize) -> String {
+    pk.iter()
+        .enumerate()
+        .map(|(i, (col, _))| format!("{} = ${}", quote_ident(col), first_param + i))
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
 async fn execute_cell_update_sqlite(
     pool: &SqlitePool,
     table: &str,
-    pk_col: &str,
-    pk_val: &str,
+    pk: &[(String, String)],
     target_col: &str,
     new_val: &str,
 ) -> Result<()> {
     let sql = format!(
-        "UPDATE {} SET {} = $1 WHERE {} = $2",
+        "UPDATE {} SET {} = $1 WHERE {}",
         quote_ident(table),
         quote_ident(target_col),
-        quote_ident(pk_col)
+        sqlite_pk_where(pk, 2)
     );
-    sqlx::query(&sql)
-        .bind(new_val)
-        .bind(pk_val)
-        .execute(pool)
-        .await?;
+    let mut query = sqlx::query(&sql).bind(new_val);
+    for (_, val) in pk {
+        query = query.bind(val);
+    }
+    query.execute(pool).await?;
     Ok(())
 }
 
 async fn execute_row_delete_sqlite(
     pool: &SqlitePool,
     table: &str,
-    pk_col: &str,
-    pk_val: &str,
+    pk: &[(String, String)],
 ) -> Result<()> {
     let sql = format!(
-        "DELETE FROM {} WHERE {} = $1",
+        "DELETE FROM {} WHERE {}",
         quote_ident(table),
-        quote_ident(pk_col)
+        sqlite_pk_where(pk, 1)
     );
-    sqlx::query(&sql).bind(pk_val).execute(pool).await?;
+    let mut query = sqlx::query(&sql);
+    for (_, val) in pk {
+        query = query.bind(val);
+    }
+    query.execute(pool).await?;
     Ok(())
 }
 
@@ -855,26 +883,34 @@ async fn load_diagram_mysql(pool: &MySqlPool) -> Result<DiagramData> {
     })
 }
 
+/// `CAST(col AS CHAR) = ? AND ...` for every PK component.
+fn mysql_pk_where(pk: &[(String, String)]) -> String {
+    pk.iter()
+        .map(|(col, _)| format!("CAST({} AS CHAR) = ?", quote_ident_mysql(col)))
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
 async fn execute_cell_update_mysql(
     pool: &MySqlPool,
     schema: &str,
     table: &str,
-    pk_col: &str,
-    pk_val: &str,
+    pk: &[(String, String)],
     target_col: &str,
     new_val: &str,
 ) -> Result<()> {
     let q_schema = quote_ident_mysql(schema);
     let q_table = quote_ident_mysql(table);
     let q_target = quote_ident_mysql(target_col);
-    let q_pk = quote_ident_mysql(pk_col);
-    let sql =
-        format!("UPDATE {q_schema}.{q_table} SET {q_target} = ? WHERE CAST({q_pk} AS CHAR) = ?");
-    sqlx::query(&sql)
-        .bind(new_val)
-        .bind(pk_val)
-        .execute(pool)
-        .await?;
+    let sql = format!(
+        "UPDATE {q_schema}.{q_table} SET {q_target} = ? WHERE {}",
+        mysql_pk_where(pk)
+    );
+    let mut query = sqlx::query(&sql).bind(new_val);
+    for (_, val) in pk {
+        query = query.bind(val);
+    }
+    query.execute(pool).await?;
     Ok(())
 }
 
@@ -882,14 +918,19 @@ async fn execute_row_delete_mysql(
     pool: &MySqlPool,
     schema: &str,
     table: &str,
-    pk_col: &str,
-    pk_val: &str,
+    pk: &[(String, String)],
 ) -> Result<()> {
     let q_schema = quote_ident_mysql(schema);
     let q_table = quote_ident_mysql(table);
-    let q_pk = quote_ident_mysql(pk_col);
-    let sql = format!("DELETE FROM {q_schema}.{q_table} WHERE CAST({q_pk} AS CHAR) = ?");
-    sqlx::query(&sql).bind(pk_val).execute(pool).await?;
+    let sql = format!(
+        "DELETE FROM {q_schema}.{q_table} WHERE {}",
+        mysql_pk_where(pk)
+    );
+    let mut query = sqlx::query(&sql);
+    for (_, val) in pk {
+        query = query.bind(val);
+    }
+    query.execute(pool).await?;
     Ok(())
 }
 
@@ -1143,27 +1184,48 @@ async fn load_diagram_sqlserver(
     })
 }
 
+/// `CAST(col AS NVARCHAR(MAX)) = @Pn AND ...` for every PK component, with
+/// parameter numbers starting at `first_param`.
+fn sqlserver_pk_where(pk: &[(String, String)], first_param: usize) -> String {
+    pk.iter()
+        .enumerate()
+        .map(|(i, (col, _))| {
+            format!(
+                "CAST({} AS NVARCHAR(MAX)) = @P{}",
+                quote_ident_sqlserver(col),
+                first_param + i
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
 async fn execute_cell_update_sqlserver(
     pool: &bb8::Pool<bb8_tiberius::ConnectionManager>,
     schema: &str,
     table: &str,
-    pk_col: &str,
-    pk_val: &str,
+    pk: &[(String, String)],
     target_col: &str,
     new_val: &str,
 ) -> Result<()> {
     let q_schema = quote_ident_sqlserver(schema);
     let q_table = quote_ident_sqlserver(table);
     let q_target = quote_ident_sqlserver(target_col);
-    let q_pk = quote_ident_sqlserver(pk_col);
     let sql = format!(
-        "UPDATE {q_schema}.{q_table} SET {q_target} = @P1 WHERE CAST({q_pk} AS NVARCHAR(MAX)) = @P2"
+        "UPDATE {q_schema}.{q_table} SET {q_target} = @P1 WHERE {}",
+        sqlserver_pk_where(pk, 2)
     );
+    let pk_vals: Vec<&str> = pk.iter().map(|(_, v)| v.as_str()).collect();
+    let mut params: Vec<&dyn tiberius::ToSql> = Vec::with_capacity(pk_vals.len() + 1);
+    params.push(&new_val);
+    for val in &pk_vals {
+        params.push(val);
+    }
     let mut conn = pool
         .get()
         .await
         .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
-    conn.execute(&sql, &[&new_val, &pk_val])
+    conn.execute(&sql, &params)
         .await
         .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
     Ok(())
@@ -1173,18 +1235,24 @@ async fn execute_row_delete_sqlserver(
     pool: &bb8::Pool<bb8_tiberius::ConnectionManager>,
     schema: &str,
     table: &str,
-    pk_col: &str,
-    pk_val: &str,
+    pk: &[(String, String)],
 ) -> Result<()> {
     let q_schema = quote_ident_sqlserver(schema);
     let q_table = quote_ident_sqlserver(table);
-    let q_pk = quote_ident_sqlserver(pk_col);
-    let sql = format!("DELETE FROM {q_schema}.{q_table} WHERE CAST({q_pk} AS NVARCHAR(MAX)) = @P1");
+    let sql = format!(
+        "DELETE FROM {q_schema}.{q_table} WHERE {}",
+        sqlserver_pk_where(pk, 1)
+    );
+    let pk_vals: Vec<&str> = pk.iter().map(|(_, v)| v.as_str()).collect();
+    let params: Vec<&dyn tiberius::ToSql> = pk_vals
+        .iter()
+        .map(|val| val as &dyn tiberius::ToSql)
+        .collect();
     let mut conn = pool
         .get()
         .await
         .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
-    conn.execute(&sql, &[&pk_val])
+    conn.execute(&sql, &params)
         .await
         .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
     Ok(())

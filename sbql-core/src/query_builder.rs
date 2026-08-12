@@ -11,13 +11,24 @@
 //!   4. Re-serialize back to a SQL string.
 //!   5. On parse failure fall back to a safe subquery wrapper.
 
-use sqlparser::ast::{Expr, Ident, OrderByExpr, Query, Statement};
+use sqlparser::ast::{Expr, Ident, Offset, OffsetRows, OrderByExpr, Query, Statement, Value};
 use sqlparser::dialect::{MsSqlDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
 
 use crate::error::{Result, SbqlError};
 use crate::pool::DbBackend;
 use crate::sql_util::{quote_ident, quote_ident_mysql, quote_ident_sqlserver};
+
+/// The quote character each backend uses for identifiers, for building a
+/// [`sqlparser`] `Ident` that round-trips quoted. SQL Server's `[...]`
+/// brackets are not a single symmetric quote char, so it borrows the ANSI
+/// double quote, which SQL Server also accepts for identifiers.
+fn ident_quote_char(backend: DbBackend) -> char {
+    match backend {
+        DbBackend::Mysql => '`',
+        _ => '"',
+    }
+}
 
 /// Direction for column ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,8 +61,11 @@ pub fn apply_order(
     // SQL Server supports ORDER BY via the same path as Postgres/MySQL
     match parse_single_select(sql, backend) {
         Ok(mut query) => {
+            // Quote the identifier so a mixed-case (`createdAt`) or reserved
+            // column name is not folded or misparsed. A bare `Ident::new`
+            // serialized unquoted, silently sorting by the wrong thing.
             let order_expr = OrderByExpr {
-                expr: Expr::Identifier(Ident::new(column)),
+                expr: Expr::Identifier(Ident::with_quote(ident_quote_char(backend), column)),
                 asc: Some(direction == SortDirection::Ascending),
                 nulls_first: None,
                 with_fill: None,
@@ -60,6 +74,15 @@ pub fn apply_order(
                 exprs: vec![order_expr],
                 interpolate: None,
             });
+            // The paginator wraps this SQL as a derived table, and SQL Server
+            // rejects ORDER BY in a subquery unless it also has OFFSET/TOP.
+            // `OFFSET 0 ROWS` makes it legal without dropping any rows.
+            if backend == DbBackend::SqlServer {
+                query.offset = Some(Offset {
+                    value: Expr::Value(Value::Number("0".into(), false)),
+                    rows: OffsetRows::Rows,
+                });
+            }
             Ok(query.to_string())
         }
         Err(_) => {
@@ -70,11 +93,25 @@ pub fn apply_order(
                 "DESC"
             };
             let trimmed = sql.trim_end_matches(';').trim();
-            let safe_col = quote_ident(column);
+            let safe_col = quote_column(column, backend);
+            let offset_suffix = if backend == DbBackend::SqlServer {
+                " OFFSET 0 ROWS"
+            } else {
+                ""
+            };
             Ok(format!(
-                "SELECT * FROM ({trimmed}) AS _sbql_order ORDER BY {safe_col} {dir}"
+                "SELECT * FROM ({trimmed}) AS _sbql_order ORDER BY {safe_col} {dir}{offset_suffix}"
             ))
         }
+    }
+}
+
+/// Quote a column identifier for the given backend.
+fn quote_column(column: &str, backend: DbBackend) -> String {
+    match backend {
+        DbBackend::Mysql => quote_ident_mysql(column),
+        DbBackend::SqlServer => quote_ident_sqlserver(column),
+        _ => quote_ident(column),
     }
 }
 
@@ -119,7 +156,14 @@ pub fn apply_filter(
     let (col_opt, value) = parse_filter_query(filter_query);
 
     let trimmed = sql.trim_end_matches(';').trim();
-    let escaped = value.replace('\'', "''");
+    // A typed `%` or `_` must match itself, not act as a LIKE wildcard, so the
+    // metacharacters are escaped and every clause declares `ESCAPE '\'`.
+    // Backslash is escaped first so it cannot combine with a following char.
+    let escaped = value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+        .replace('\'', "''");
 
     let like_op = match backend {
         DbBackend::Postgres => "ILIKE",
@@ -132,11 +176,25 @@ pub fn apply_filter(
             " COLLATE NOCASE"
         }
     };
+    // COLLATE binds to the pattern; ESCAPE follows it. Ordering the two the
+    // other way would attach the collation to the escape char instead and
+    // quietly drop case-insensitivity.
+    let match_suffix = format!("{collate_suffix} ESCAPE '\\'");
+    // Identifier quoting and the CAST target are backend syntax, not
+    // preferences: MySQL treats "col" as a string literal (ANSI_QUOTES is off
+    // by default) and only casts to CHAR, and SQL Server has neither "col"
+    // quoting nor a TEXT cast target. Postgres syntax everywhere meant the
+    // filter simply never worked on those backends.
+    let (quote, cast_ty): (fn(&str) -> String, &str) = match backend {
+        DbBackend::Mysql => (quote_ident_mysql, "CHAR"),
+        DbBackend::SqlServer => (quote_ident_sqlserver, "NVARCHAR(MAX)"),
+        _ => (quote_ident, "TEXT"),
+    };
 
     if let Some(col) = col_opt {
-        let col = quote_ident(&col);
+        let col = quote(&col);
         Ok(format!(
-            "SELECT * FROM ({trimmed}) AS _sbql_filter WHERE CAST(_sbql_filter.{col} AS TEXT) {like_op} '%{escaped}%'{collate_suffix}"
+            "SELECT * FROM ({trimmed}) AS _sbql_filter WHERE CAST(_sbql_filter.{col} AS {cast_ty}) {like_op} '%{escaped}%'{match_suffix}"
         ))
     } else {
         match columns {
@@ -146,15 +204,21 @@ pub fn apply_filter(
                     if i > 0 {
                         ors.push_str(" OR ");
                     }
-                    let c = quote_ident(c);
-                    ors.push_str(&format!("CAST(_sbql_filter.{c} AS TEXT) {like_op} '%{escaped}%'{collate_suffix}"));
+                    let c = quote(c);
+                    ors.push_str(&format!("CAST(_sbql_filter.{c} AS {cast_ty}) {like_op} '%{escaped}%'{match_suffix}"));
                 }
                 Ok(format!(
                     "SELECT * FROM ({trimmed}) AS _sbql_filter WHERE {ors}"
                 ))
             }
-            _ => Ok(format!(
-                "SELECT * FROM ({trimmed}) AS _sbql_filter WHERE CAST(_sbql_filter.* AS TEXT) {like_op} '%{escaped}%'{collate_suffix}"
+            // Whole-row cast: only Postgres can do this. On the other backends
+            // the old wildcard SQL was a guaranteed syntax error at the
+            // database, so a clear local error is strictly more honest.
+            _ if backend == DbBackend::Postgres => Ok(format!(
+                "SELECT * FROM ({trimmed}) AS _sbql_filter WHERE CAST(_sbql_filter.* AS TEXT) {like_op} '%{escaped}%'{match_suffix}"
+            )),
+            _ => Err(SbqlError::SqlParse(
+                "Global filter needs a loaded result on this backend — try col:value".into(),
             )),
         }
     }
@@ -502,6 +566,90 @@ mod tests {
         assert!(upper.contains("WHERE"));
         assert!(upper.contains("LIKE"));
         assert!(!upper.contains("ILIKE"));
+    }
+
+    /// The generated filter must be MySQL syntax end to end: backtick-quoted
+    /// identifiers and CAST AS CHAR (MySQL rejects "col" and CAST AS TEXT).
+    #[test]
+    fn test_apply_filter_mysql_uses_mysql_syntax() {
+        let sql = "SELECT * FROM users";
+        let result = apply_filter(sql, "status:active", None, DbBackend::Mysql).unwrap();
+        assert!(result.contains("`status`"), "not backtick-quoted: {result}");
+        assert!(result.contains("AS CHAR)"), "wrong cast target: {result}");
+        assert!(
+            !result.contains("\"status\""),
+            "PG quoting leaked: {result}"
+        );
+        assert!(!result.contains("AS TEXT"), "PG cast leaked: {result}");
+
+        let cols = vec!["name".to_string()];
+        let global = apply_filter(sql, "alice", Some(&cols), DbBackend::Mysql).unwrap();
+        assert!(global.contains("`name`"), "{global}");
+        assert!(global.contains("AS CHAR)"), "{global}");
+    }
+
+    #[test]
+    fn test_apply_filter_sqlserver_uses_sqlserver_syntax() {
+        let sql = "SELECT * FROM users";
+        let result = apply_filter(sql, "status:active", None, DbBackend::SqlServer).unwrap();
+        assert!(result.contains("[status]"), "not bracket-quoted: {result}");
+        assert!(
+            result.contains("AS NVARCHAR(MAX))"),
+            "wrong cast target: {result}"
+        );
+    }
+
+    /// The whole-row wildcard cast only exists on Postgres; other backends get
+    /// a local error instead of SQL that the database is guaranteed to reject.
+    #[test]
+    fn test_apply_filter_wildcard_errors_off_postgres() {
+        let sql = "SELECT * FROM users";
+        assert!(apply_filter(sql, "x", None, DbBackend::Mysql).is_err());
+        assert!(apply_filter(sql, "x", None, DbBackend::SqlServer).is_err());
+        assert!(apply_filter(sql, "x", None, DbBackend::Sqlite).is_err());
+        assert!(apply_filter(sql, "x", None, DbBackend::Postgres).is_ok());
+    }
+
+    /// A mixed-case sort column must be quoted, or Postgres folds it to
+    /// lowercase and sorts by a column that may not exist.
+    #[test]
+    fn test_apply_order_quotes_identifier() {
+        let sql = "SELECT * FROM t";
+        let pg = apply_order(
+            sql,
+            "createdAt",
+            SortDirection::Ascending,
+            DbBackend::Postgres,
+        )
+        .unwrap();
+        assert!(pg.contains("\"createdAt\""), "{pg}");
+        let my = apply_order(sql, "createdAt", SortDirection::Ascending, DbBackend::Mysql).unwrap();
+        assert!(my.contains("`createdAt`"), "{my}");
+    }
+
+    /// SQL Server rejects ORDER BY in a subquery without OFFSET/TOP, and the
+    /// paginator wraps this SQL as one — so the ORDER BY must carry OFFSET.
+    #[test]
+    fn test_apply_order_sqlserver_adds_offset() {
+        let result = apply_order(
+            "SELECT * FROM t",
+            "name",
+            SortDirection::Ascending,
+            DbBackend::SqlServer,
+        )
+        .unwrap();
+        assert!(result.to_uppercase().contains("ORDER BY"), "{result}");
+        assert!(result.to_uppercase().contains("OFFSET 0 ROWS"), "{result}");
+    }
+
+    /// A typed `%` is a literal to match, not a wildcard: it must be escaped
+    /// and the clause must declare its ESCAPE character.
+    #[test]
+    fn test_apply_filter_escapes_like_wildcards() {
+        let result =
+            apply_filter("SELECT * FROM t", "name:50%", None, DbBackend::Postgres).unwrap();
+        assert!(result.contains("50\\%"), "wildcard not escaped: {result}");
+        assert!(result.contains("ESCAPE '\\'"), "no ESCAPE clause: {result}");
     }
 
     #[test]

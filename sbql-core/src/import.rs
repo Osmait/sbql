@@ -64,11 +64,26 @@ pub async fn import_file(
 
 /// Escape a string value for inline inclusion in an INSERT statement.
 /// Empty strings are mapped to NULL.
+///
+/// Suitable for Postgres and SQLite, where a backslash inside a standard
+/// string literal is an ordinary character and only the quote needs doubling.
 fn escape_value(s: &str) -> String {
     if s.is_empty() {
         "NULL".to_owned()
     } else {
         format!("'{}'", s.replace('\'', "''"))
+    }
+}
+
+/// MySQL variant: with the default sql_mode a backslash starts an escape
+/// sequence, so a value ending in `\` would swallow the closing quote and a
+/// crafted cell could break out of the literal entirely (SQL injection via an
+/// imported file). Backslashes are escaped first, then quotes.
+fn escape_value_mysql(s: &str) -> String {
+    if s.is_empty() {
+        "NULL".to_owned()
+    } else {
+        format!("'{}'", s.replace('\\', "\\\\").replace('\'', "''"))
     }
 }
 
@@ -166,15 +181,11 @@ fn read_json(path: &str) -> Result<(Vec<String>, Vec<Vec<String>>)> {
 // Flush helpers — one per backend
 // ---------------------------------------------------------------------------
 
-fn build_values_clause(batch: &[Vec<String>]) -> String {
+fn build_values_clause(batch: &[Vec<String>], escape: fn(&str) -> String) -> String {
     batch
         .iter()
         .map(|row| {
-            let vals = row
-                .iter()
-                .map(|v| escape_value(v))
-                .collect::<Vec<_>>()
-                .join(", ");
+            let vals = row.iter().map(|v| escape(v)).collect::<Vec<_>>().join(", ");
             format!("({})", vals)
         })
         .collect::<Vec<_>>()
@@ -198,7 +209,7 @@ async fn flush_batch_pg(
         "INSERT INTO {} ({}) VALUES {}",
         table_ref,
         col_list,
-        build_values_clause(batch)
+        build_values_clause(batch, escape_value)
     );
     sqlx::query(&sql)
         .execute(pool)
@@ -222,7 +233,7 @@ async fn flush_batch_sqlite(
         "INSERT INTO {} ({}) VALUES {}",
         quote_ident(table),
         col_list,
-        build_values_clause(batch)
+        build_values_clause(batch, escape_value)
     );
     sqlx::query(&sql)
         .execute(pool)
@@ -248,7 +259,7 @@ async fn flush_batch_mysql(
         "INSERT INTO {} ({}) VALUES {}",
         table_ref,
         col_list,
-        build_values_clause(batch)
+        build_values_clause(batch, escape_value_mysql)
     );
     sqlx::query(&sql)
         .execute(pool)
@@ -368,6 +379,19 @@ mod tests {
         assert_eq!(escape_value("it's"), "'it''s'");
     }
 
+    /// A trailing backslash must not be able to swallow the closing quote on
+    /// MySQL, and a crafted cell must stay inside its string literal.
+    #[test]
+    fn test_escape_value_mysql_neutralizes_backslashes() {
+        assert_eq!(escape_value_mysql(r"C:\data\"), r"'C:\\data\\'");
+        assert_eq!(
+            escape_value_mysql(r"x\', (SELECT 1), ('"),
+            r"'x\\'', (SELECT 1), ('''"
+        );
+        assert_eq!(escape_value_mysql("it's"), "'it''s'");
+        assert_eq!(escape_value_mysql(""), "NULL");
+    }
+
     #[test]
     fn test_quote_ident() {
         assert_eq!(quote_ident("col"), "\"col\"");
@@ -383,7 +407,7 @@ mod tests {
     #[test]
     fn test_build_values_clause() {
         let batch = vec![vec!["a".into(), "b".into()], vec!["c".into(), "".into()]];
-        let clause = build_values_clause(&batch);
+        let clause = build_values_clause(&batch, escape_value);
         assert_eq!(clause, "('a', 'b'), ('c', NULL)");
     }
 

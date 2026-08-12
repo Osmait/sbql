@@ -41,10 +41,18 @@ fn apply_enter_cell_edit(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<Co
         return;
     }
 
-    let sql = state.editor.sql();
-    let parsed = crate::handlers::results::extract_schema_table_from_sql(&sql);
-    tracing::info!("enter_cell_edit_mode: sql={:?} parsed={:?}", sql, parsed);
-    let (schema, table_name) = parsed.unwrap_or_else(|| ("public".into(), "unknown".into()));
+    // Resolve the table from the query that produced the displayed rows, not
+    // the editor text — an unexecuted query there redirected the UPDATE at a
+    // different table.
+    let Some((schema, table_name)) = super::results::source_table(state) else {
+        state.report("Cannot edit: no table resolved from the executed query.");
+        return;
+    };
+    tracing::info!(
+        "enter_cell_edit_mode: schema={:?} table={:?}",
+        schema,
+        table_name
+    );
 
     state.mutation.pending_cell_edit = Some((row_idx, col_idx));
     tracing::info!("GetPrimaryKeys: schema={:?} table={:?}", schema, table_name);
@@ -65,8 +73,7 @@ pub(super) fn apply_stage_cell_edit(state: &mut AppState) {
                     new_val,
                     schema: ce.schema,
                     table: ce.table,
-                    pk_col: ce.pk_col,
-                    pk_val: ce.pk_val,
+                    pk: ce.pk,
                     col_name: ce.col_name,
                 },
             );

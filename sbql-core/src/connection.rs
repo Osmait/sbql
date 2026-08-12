@@ -58,100 +58,17 @@ impl ConnectionManager {
         };
         let url = effective_config.connection_string(password);
 
-        let pool = match config.backend {
-            DbBackend::Postgres => {
-                let pg = PgPoolOptions::new()
-                    .max_connections(10)
-                    .acquire_timeout(std::time::Duration::from_secs(10))
-                    .connect(&url)
-                    .await
-                    .map_err(|e| {
-                        SbqlError::Connection(format!(
-                            "Failed to connect to '{}': {e}",
-                            config.name
-                        ))
-                    })?;
-                DbPool::Postgres(pg)
-            }
-            DbBackend::Sqlite => {
-                let sq = SqlitePoolOptions::new()
-                    .max_connections(1)
-                    .acquire_timeout(std::time::Duration::from_secs(10))
-                    .after_connect(|conn, _meta| {
-                        Box::pin(async move {
-                            sqlx::query("PRAGMA foreign_keys = ON")
-                                .execute(&mut *conn)
-                                .await?;
-                            Ok(())
-                        })
-                    })
-                    .connect(&url)
-                    .await
-                    .map_err(|e| {
-                        SbqlError::Connection(format!(
-                            "Failed to connect to '{}': {e}",
-                            config.name
-                        ))
-                    })?;
-                DbPool::Sqlite(sq)
-            }
-            DbBackend::Mysql => {
-                let my = MySqlPoolOptions::new()
-                    .max_connections(10)
-                    .acquire_timeout(std::time::Duration::from_secs(10))
-                    .connect(&url)
-                    .await
-                    .map_err(|e| {
-                        SbqlError::Connection(format!(
-                            "Failed to connect to '{}': {e}",
-                            config.name
-                        ))
-                    })?;
-                DbPool::Mysql(my)
-            }
-            DbBackend::Redis => {
-                let client = redis::Client::open(url.as_str()).map_err(|e| {
-                    SbqlError::Connection(format!("Failed to connect to '{}': {e}", config.name))
-                })?;
-                let cm = redis::aio::ConnectionManager::new(client)
-                    .await
-                    .map_err(|e| {
-                        SbqlError::Connection(format!(
-                            "Failed to connect to '{}': {e}",
-                            config.name
-                        ))
-                    })?;
-                DbPool::Redis(Box::new(cm))
-            }
-            DbBackend::DynamoDb => {
-                let endpoint = url.clone();
-                let region = config.database.clone();
-                let access_key = config.user.clone();
-                let secret_key = password.to_string();
-
-                let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
-                    .region(aws_config::Region::new(region));
-
-                if !access_key.is_empty() && !secret_key.is_empty() {
-                    loader =
-                        loader.credentials_provider(aws_sdk_dynamodb::config::Credentials::new(
-                            access_key, secret_key, None, None, "sbql",
-                        ));
-                }
-
-                let sdk_config = loader.load().await;
-                let mut dynamo_config = aws_sdk_dynamodb::config::Builder::from(&sdk_config);
-
-                if !endpoint.is_empty() && endpoint != "http://:0" {
-                    dynamo_config = dynamo_config.endpoint_url(&endpoint);
-                }
-
-                let client = aws_sdk_dynamodb::Client::from_conf(dynamo_config.build());
-                DbPool::DynamoDb(Box::new(client))
-            }
-            DbBackend::MongoDb => {
-                let client_options =
-                    mongodb::options::ClientOptions::parse(&url)
+        // The SSH tunnel is already open at this point. If building the pool
+        // fails, the tunnel would otherwise leak (a spawned forwarder task and
+        // a bound local port) on every failed reconnect — so the result is
+        // captured and the tunnel torn down on the error path.
+        let pool_result: Result<DbPool> = async {
+            Ok(match config.backend {
+                DbBackend::Postgres => {
+                    let pg = PgPoolOptions::new()
+                        .max_connections(10)
+                        .acquire_timeout(std::time::Duration::from_secs(10))
+                        .connect(&url)
                         .await
                         .map_err(|e| {
                             SbqlError::Connection(format!(
@@ -159,32 +76,139 @@ impl ConnectionManager {
                                 config.name
                             ))
                         })?;
-                let client = mongodb::Client::with_options(client_options).map_err(|e| {
-                    SbqlError::Connection(format!("Failed to connect to '{}': {e}", config.name))
-                })?;
-                let db = client.database(&config.database);
-                DbPool::MongoDb(Box::new(db))
-            }
-            DbBackend::SqlServer => {
-                let mut tib_config = tiberius::Config::new();
-                tib_config.host(&effective_config.host);
-                tib_config.port(effective_config.port);
-                tib_config.database(&config.database);
-                tib_config.authentication(tiberius::AuthMethod::sql_server(&config.user, password));
-                tib_config.trust_cert();
-                let mgr = bb8_tiberius::ConnectionManager::new(tib_config);
-                let pool = bb8::Pool::builder()
-                    .max_size(10)
-                    .connection_timeout(std::time::Duration::from_secs(10))
-                    .build(mgr)
-                    .await
-                    .map_err(|e| {
+                    DbPool::Postgres(pg)
+                }
+                DbBackend::Sqlite => {
+                    let sq = SqlitePoolOptions::new()
+                        .max_connections(1)
+                        .acquire_timeout(std::time::Duration::from_secs(10))
+                        .after_connect(|conn, _meta| {
+                            Box::pin(async move {
+                                sqlx::query("PRAGMA foreign_keys = ON")
+                                    .execute(&mut *conn)
+                                    .await?;
+                                Ok(())
+                            })
+                        })
+                        .connect(&url)
+                        .await
+                        .map_err(|e| {
+                            SbqlError::Connection(format!(
+                                "Failed to connect to '{}': {e}",
+                                config.name
+                            ))
+                        })?;
+                    DbPool::Sqlite(sq)
+                }
+                DbBackend::Mysql => {
+                    let my = MySqlPoolOptions::new()
+                        .max_connections(10)
+                        .acquire_timeout(std::time::Duration::from_secs(10))
+                        .connect(&url)
+                        .await
+                        .map_err(|e| {
+                            SbqlError::Connection(format!(
+                                "Failed to connect to '{}': {e}",
+                                config.name
+                            ))
+                        })?;
+                    DbPool::Mysql(my)
+                }
+                DbBackend::Redis => {
+                    let client = redis::Client::open(url.as_str()).map_err(|e| {
                         SbqlError::Connection(format!(
                             "Failed to connect to '{}': {e}",
                             config.name
                         ))
                     })?;
-                DbPool::SqlServer(Box::new(pool))
+                    let cm = redis::aio::ConnectionManager::new(client)
+                        .await
+                        .map_err(|e| {
+                            SbqlError::Connection(format!(
+                                "Failed to connect to '{}': {e}",
+                                config.name
+                            ))
+                        })?;
+                    DbPool::Redis(Box::new(cm))
+                }
+                DbBackend::DynamoDb => {
+                    let endpoint = url.clone();
+                    let region = config.database.clone();
+                    let access_key = config.user.clone();
+                    let secret_key = password.to_string();
+
+                    let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
+                        .region(aws_config::Region::new(region));
+
+                    if !access_key.is_empty() && !secret_key.is_empty() {
+                        loader = loader.credentials_provider(
+                            aws_sdk_dynamodb::config::Credentials::new(
+                                access_key, secret_key, None, None, "sbql",
+                            ),
+                        );
+                    }
+
+                    let sdk_config = loader.load().await;
+                    let mut dynamo_config = aws_sdk_dynamodb::config::Builder::from(&sdk_config);
+
+                    if !endpoint.is_empty() && endpoint != "http://:0" {
+                        dynamo_config = dynamo_config.endpoint_url(&endpoint);
+                    }
+
+                    let client = aws_sdk_dynamodb::Client::from_conf(dynamo_config.build());
+                    DbPool::DynamoDb(Box::new(client))
+                }
+                DbBackend::MongoDb => {
+                    let client_options = mongodb::options::ClientOptions::parse(&url)
+                        .await
+                        .map_err(|e| {
+                            SbqlError::Connection(format!(
+                                "Failed to connect to '{}': {e}",
+                                config.name
+                            ))
+                        })?;
+                    let client = mongodb::Client::with_options(client_options).map_err(|e| {
+                        SbqlError::Connection(format!(
+                            "Failed to connect to '{}': {e}",
+                            config.name
+                        ))
+                    })?;
+                    let db = client.database(&config.database);
+                    DbPool::MongoDb(Box::new(db))
+                }
+                DbBackend::SqlServer => {
+                    let mut tib_config = tiberius::Config::new();
+                    tib_config.host(&effective_config.host);
+                    tib_config.port(effective_config.port);
+                    tib_config.database(&config.database);
+                    tib_config
+                        .authentication(tiberius::AuthMethod::sql_server(&config.user, password));
+                    tib_config.trust_cert();
+                    let mgr = bb8_tiberius::ConnectionManager::new(tib_config);
+                    let pool = bb8::Pool::builder()
+                        .max_size(10)
+                        .connection_timeout(std::time::Duration::from_secs(10))
+                        .build(mgr)
+                        .await
+                        .map_err(|e| {
+                            SbqlError::Connection(format!(
+                                "Failed to connect to '{}': {e}",
+                                config.name
+                            ))
+                        })?;
+                    DbPool::SqlServer(Box::new(pool))
+                }
+            })
+        }
+        .await;
+
+        let pool = match pool_result {
+            Ok(pool) => pool,
+            Err(e) => {
+                if config.ssh_enabled {
+                    self.tunnel_manager.close(config.id).await;
+                }
+                return Err(e);
             }
         };
 

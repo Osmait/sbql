@@ -50,10 +50,26 @@ pub(crate) async fn save(
         }
     }
 
+    // Editing a connection can leave a live pool built from the old settings:
+    // connect_with_password reuses any pool keyed by this id, so without this
+    // the user "reconnects" to the edited target while every query keeps
+    // hitting the old host/database. If the target changed, the stale pool
+    // (and any SSH tunnel) has to go, and the client has to hear it is now
+    // disconnected.
+    let mut dropped_stale_pool = false;
     if let Some(pos) = core.connections.iter().position(|c| c.id == config.id) {
-        core.connections[pos] = config;
+        let target_changed = !core.connections[pos].same_target(&config);
+        core.connections[pos] = config.clone();
+        if target_changed && core.manager.active_ids().await.contains(&config.id) {
+            core.manager.disconnect(config.id).await;
+            if core.active_connection == Some(config.id) {
+                core.active_connection = None;
+                core.reset_query_state();
+            }
+            dropped_stale_pool = true;
+        }
     } else {
-        core.connections.push(config);
+        core.connections.push(config.clone());
     }
 
     if let Err(e) = save_connections(&core.connections) {
@@ -63,6 +79,9 @@ pub(crate) async fn save(
     // The list stays first so existing consumers keep seeing it at index 0; the
     // warning is applied afterwards and is what the user ends up reading.
     let mut events = vec![CoreEvent::ConnectionList(core.connections.clone())];
+    if dropped_stale_pool {
+        events.push(CoreEvent::Disconnected(config.id));
+    }
     if let Some(warning) = warning {
         events.push(CoreEvent::Error(warning));
     }
@@ -141,6 +160,11 @@ pub(crate) async fn disconnect(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
     core.manager.disconnect(id).await;
     if core.active_connection == Some(id) {
         core.active_connection = None;
+        // Query state belongs to the connection that just closed. Left behind,
+        // the next connection's first ApplyOrder/ApplyFilter/FetchPage would
+        // build on the previous session's base_sql, columns and sort — running
+        // the old query against the new database.
+        core.reset_query_state();
     }
     vec![CoreEvent::Disconnected(id)]
 }
@@ -353,6 +377,75 @@ mod tests {
         let events = core.handle(CoreCommand::Connect(id)).await;
         assert!(matches!(&events[0], CoreEvent::Connected(cid) if *cid == id));
         assert_eq!(core.active_connection, Some(id));
+    }
+
+    /// Editing where a connection points must drop the live pool built from
+    /// the old settings — otherwise the next Connect reuses it and every query
+    /// runs against the pre-edit host/database while the UI claims otherwise.
+    #[tokio::test]
+    async fn test_editing_a_connected_target_drops_the_stale_pool() {
+        isolate_from_the_machine();
+        let mut core = Core::default();
+        core.connections.clear();
+        let config = crate::ConnectionConfig::new_sqlite("editable", ":memory:");
+        let id = config.id;
+        core.connections.push(config.clone());
+        core.password_cache.insert(id, String::new());
+        core.handle(CoreCommand::Connect(id)).await;
+        assert_eq!(core.active_connection, Some(id));
+
+        let mut edited = config.clone();
+        edited.file_path = Some("/somewhere/else.db".into());
+        let events = core
+            .handle(CoreCommand::SaveConnection {
+                config: edited,
+                password: None,
+            })
+            .await;
+
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, CoreEvent::Disconnected(did) if *did == id)),
+            "client must be told the edited connection is no longer live: {events:?}"
+        );
+        assert!(core.active_connection.is_none());
+        assert!(
+            core.manager.get(id).await.is_err(),
+            "stale pool must be gone"
+        );
+    }
+
+    /// A rename does not change where the connection points, so the live pool
+    /// (and the user's session) survives the save.
+    #[tokio::test]
+    async fn test_renaming_a_connected_target_keeps_the_pool() {
+        isolate_from_the_machine();
+        let mut core = Core::default();
+        core.connections.clear();
+        let config = crate::ConnectionConfig::new_sqlite("old-name", ":memory:");
+        let id = config.id;
+        core.connections.push(config.clone());
+        core.password_cache.insert(id, String::new());
+        core.handle(CoreCommand::Connect(id)).await;
+
+        let mut renamed = config.clone();
+        renamed.name = "new-name".into();
+        let events = core
+            .handle(CoreCommand::SaveConnection {
+                config: renamed,
+                password: None,
+            })
+            .await;
+
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, CoreEvent::Disconnected(_))),
+            "a rename must not tear down the session: {events:?}"
+        );
+        assert_eq!(core.active_connection, Some(id));
+        assert!(core.manager.get(id).await.is_ok());
     }
 
     #[tokio::test]

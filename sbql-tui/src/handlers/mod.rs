@@ -287,8 +287,7 @@ mod tests {
             "1".into(),
             "public".into(),
             "users".into(),
-            "id".into(),
-            "1".into(),
+            vec![("id".into(), "1".into())],
         ));
         let act = handle_key(&state, key(KeyCode::Esc));
         assert!(matches!(act, Action::CellEdit(CellEditAction::Cancel)));

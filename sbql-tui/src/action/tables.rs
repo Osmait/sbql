@@ -21,6 +21,14 @@ pub(super) fn apply(
                     &t.name,
                     state.conn.active_backend,
                 );
+                // `table_select_sql` returns an empty string for the non-SQL
+                // backends (Redis/DynamoDB/MongoDB); sending that as a query is
+                // a guaranteed error, so tell the user the action isn't
+                // available here instead.
+                if sql.trim().is_empty() {
+                    state.report("Opening a table this way isn't supported for this backend.");
+                    return;
+                }
                 tracing::info!(
                     "open_selected_table: schema={:?} table={:?} sql={:?}",
                     t.schema,
@@ -35,6 +43,7 @@ pub(super) fn apply(
                     ta.insert_str(&sql);
                     ta
                 };
+                state.results.sent_sql = Some(sql.clone());
                 let _ = cmd_tx.send(CoreCommand::ExecuteQuery { sql });
                 state.focused = FocusedPanel::Results;
             }

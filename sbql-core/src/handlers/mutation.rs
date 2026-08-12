@@ -4,8 +4,7 @@ pub(crate) async fn update_cell(
     core: &mut Core,
     schema_name: String,
     table: String,
-    pk_col: String,
-    pk_val: String,
+    pk: Vec<(String, String)>,
     target_col: String,
     new_val: String,
 ) -> Vec<CoreEvent> {
@@ -13,16 +12,7 @@ pub(crate) async fn update_cell(
         Ok(p) => p,
         Err(e) => return vec![CoreEvent::error(&e)],
     };
-    match schema::execute_cell_update(
-        &pool,
-        &schema_name,
-        &table,
-        &pk_col,
-        &pk_val,
-        &target_col,
-        &new_val,
-    )
-    .await
+    match schema::execute_cell_update(&pool, &schema_name, &table, &pk, &target_col, &new_val).await
     {
         Ok(()) => vec![CoreEvent::CellUpdated],
         Err(e) => vec![CoreEvent::error(&e)],
@@ -33,14 +23,13 @@ pub(crate) async fn delete_row(
     core: &mut Core,
     schema_name: String,
     table: String,
-    pk_col: String,
-    pk_val: String,
+    pk: Vec<(String, String)>,
 ) -> Vec<CoreEvent> {
     let pool = match core.active_pool().await {
         Ok(p) => p,
         Err(e) => return vec![CoreEvent::error(&e)],
     };
-    match schema::execute_row_delete(&pool, &schema_name, &table, &pk_col, &pk_val).await {
+    match schema::execute_row_delete(&pool, &schema_name, &table, &pk).await {
         Ok(()) => vec![CoreEvent::RowDeleted],
         Err(e) => vec![CoreEvent::error(&e)],
     }
@@ -84,8 +73,7 @@ mod tests {
             .handle(CoreCommand::UpdateCell {
                 schema: "main".into(),
                 table: "users".into(),
-                pk_col: "id".into(),
-                pk_val: "1".into(),
+                pk: vec![("id".into(), "1".into())],
                 target_col: "name".into(),
                 new_val: "Bob".into(),
             })
@@ -102,8 +90,7 @@ mod tests {
             .handle(CoreCommand::DeleteRow {
                 schema: "main".into(),
                 table: "users".into(),
-                pk_col: "id".into(),
-                pk_val: "1".into(),
+                pk: vec![("id".into(), "1".into())],
             })
             .await;
         assert!(
@@ -119,8 +106,7 @@ mod tests {
             .handle(CoreCommand::UpdateCell {
                 schema: "main".into(),
                 table: "test_table".into(),
-                pk_col: "id".into(),
-                pk_val: "1".into(),
+                pk: vec![("id".into(), "1".into())],
                 target_col: "name".into(),
                 new_val: "Bob".into(),
             })
@@ -148,8 +134,7 @@ mod tests {
             .handle(CoreCommand::DeleteRow {
                 schema: "main".into(),
                 table: "test_table".into(),
-                pk_col: "id".into(),
-                pk_val: "1".into(),
+                pk: vec![("id".into(), "1".into())],
             })
             .await;
         assert!(matches!(&events[0], CoreEvent::RowDeleted));

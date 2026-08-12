@@ -12,8 +12,12 @@ pub(super) fn apply(
         // -- Results navigation --
         ResultsAction::RowDown => {
             if state.results.move_row_down_with_page_hint() {
-                let next = state.results.current_page + 1;
-                let _ = cmd_tx.send(CoreCommand::FetchPage { page: next });
+                if has_staged_changes(state) {
+                    warn_staged_changes_block_paging(state);
+                } else {
+                    let next = state.results.current_page + 1;
+                    let _ = cmd_tx.send(CoreCommand::FetchPage { page: next });
+                }
             }
         }
 
@@ -39,8 +43,12 @@ pub(super) fn apply(
 
         ResultsAction::HalfPageDown => {
             if state.results.move_row_half_page_down() {
-                let next = state.results.current_page + 1;
-                let _ = cmd_tx.send(CoreCommand::FetchPage { page: next });
+                if has_staged_changes(state) {
+                    warn_staged_changes_block_paging(state);
+                } else {
+                    let next = state.results.current_page + 1;
+                    let _ = cmd_tx.send(CoreCommand::FetchPage { page: next });
+                }
             }
         }
 
@@ -69,9 +77,13 @@ pub(super) fn apply(
 
         ResultsAction::MarkRowForDeletion => {
             let row_idx = state.results.selected_row;
-            let sql = state.editor.sql();
-            let (schema, table) = crate::handlers::results::extract_schema_table_from_sql(&sql)
-                .unwrap_or_else(|| ("public".into(), "unknown".into()));
+            // The table must come from the query that produced these rows —
+            // parsing the live editor text let an unexecuted query redirect
+            // the DELETE at a different table.
+            let Some((schema, table)) = source_table(state) else {
+                state.report("Cannot delete: no table resolved from the executed query.");
+                return;
+            };
             state.mutation.pending_delete_row = Some(row_idx);
             let _ = cmd_tx.send(CoreCommand::GetPrimaryKeys { schema, table });
         }
@@ -110,6 +122,23 @@ pub(super) fn apply(
     }
 }
 
+pub(super) fn has_staged_changes(state: &AppState) -> bool {
+    !state.mutation.pending_edits.is_empty() || !state.mutation.pending_deletes.is_empty()
+}
+
+/// Paging replaces the rows the staged changes were made against, and the
+/// arriving result discards them — so it is refused, loudly, instead.
+pub(super) fn warn_staged_changes_block_paging(state: &mut AppState) {
+    state
+        .inform("Staged changes pending — commit (Ctrl+W) or discard (Esc) before changing pages.");
+}
+
+/// The `(schema, table)` the currently displayed rows came from.
+pub(super) fn source_table(state: &AppState) -> Option<(String, String)> {
+    let sql = state.results.source_sql.as_ref()?;
+    crate::handlers::results::extract_schema_table_from_sql(sql)
+}
+
 pub(super) fn apply_commit_pending(
     state: &mut AppState,
     cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
@@ -126,8 +155,7 @@ pub(super) fn apply_commit_pending(
         let _ = cmd_tx.send(CoreCommand::UpdateCell {
             schema: edit.schema.clone(),
             table: edit.table.clone(),
-            pk_col: edit.pk_col.clone(),
-            pk_val: edit.pk_val.clone(),
+            pk: edit.pk.clone(),
             target_col: edit.col_name.clone(),
             new_val: edit.new_val.clone(),
         });
@@ -137,8 +165,7 @@ pub(super) fn apply_commit_pending(
         let _ = cmd_tx.send(CoreCommand::DeleteRow {
             schema: del.schema.clone(),
             table: del.table.clone(),
-            pk_col: del.pk_col.clone(),
-            pk_val: del.pk_val.clone(),
+            pk: del.pk.clone(),
         });
     }
 

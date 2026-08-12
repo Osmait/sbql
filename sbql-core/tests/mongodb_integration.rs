@@ -227,7 +227,7 @@ async fn test_mongodb_large_collection() {
 
     let coll = db.collection::<Document>("big");
     let docs: Vec<Document> = (0..150)
-        .map(|i| doc! { "idx": i as i32, "label": format!("row_{}", i) })
+        .map(|i| doc! { "idx": i, "label": format!("row_{}", i) })
         .collect();
     coll.insert_many(docs).await.unwrap();
 
