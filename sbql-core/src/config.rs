@@ -440,14 +440,20 @@ impl ConnectionConfig {
 
     /// Build the connection string appropriate for this backend.
     pub fn connection_string(&self, password: &str) -> String {
+        // Every userinfo/path segment is percent-encoded, not just the
+        // password: a user like `domain\user` or a database name with a space
+        // otherwise produced a malformed URL that the driver rejected.
+        let user = urlencoding_simple(&self.user);
+        let pass = urlencoding_simple(password);
+        let db = urlencoding_simple(&self.database);
         match self.backend {
             DbBackend::Postgres => format!(
                 "postgresql://{}:{}@{}:{}/{}?sslmode={}",
-                self.user,
-                urlencoding_simple(password),
+                user,
+                pass,
                 self.host,
                 self.port,
-                self.database,
+                db,
                 self.ssl_mode.as_str(),
             ),
             DbBackend::Sqlite => {
@@ -456,11 +462,7 @@ impl ConnectionConfig {
             }
             DbBackend::Mysql => format!(
                 "mysql://{}:{}@{}:{}/{}",
-                self.user,
-                urlencoding_simple(password),
-                self.host,
-                self.port,
-                self.database,
+                user, pass, self.host, self.port, db,
             ),
             DbBackend::Redis => {
                 let scheme = if self.ssl_mode == SslMode::Require {
@@ -471,14 +473,10 @@ impl ConnectionConfig {
                 if !self.user.is_empty() || !password.is_empty() {
                     format!(
                         "{scheme}://{}:{}@{}:{}/{}",
-                        self.user,
-                        urlencoding_simple(password),
-                        self.host,
-                        self.port,
-                        self.database,
+                        user, pass, self.host, self.port, db,
                     )
                 } else {
-                    format!("{scheme}://{}:{}/{}", self.host, self.port, self.database,)
+                    format!("{scheme}://{}:{}/{}", self.host, self.port, db,)
                 }
             }
             DbBackend::DynamoDb => format!("http://{}:{}", self.host, self.port),
@@ -486,24 +484,16 @@ impl ConnectionConfig {
                 if !self.user.is_empty() || !password.is_empty() {
                     format!(
                         "mongodb://{}:{}@{}:{}/{}",
-                        self.user,
-                        urlencoding_simple(password),
-                        self.host,
-                        self.port,
-                        self.database,
+                        user, pass, self.host, self.port, db,
                     )
                 } else {
-                    format!("mongodb://{}:{}/{}", self.host, self.port, self.database,)
+                    format!("mongodb://{}:{}/{}", self.host, self.port, db,)
                 }
             }
             DbBackend::SqlServer => {
                 format!(
                     "sqlserver://{}:{}@{}:{}/{}",
-                    self.user,
-                    urlencoding_simple(password),
-                    self.host,
-                    self.port,
-                    self.database,
+                    user, pass, self.host, self.port, db,
                 )
             }
         }
@@ -551,8 +541,44 @@ impl ConnectionConfig {
     }
 
     /// Retrieve the SSH password from the OS keyring.
+    ///
+    /// Returns an empty string when nothing is stored — but a store that is
+    /// present-yet-broken is logged rather than silently swallowed, so an SSH
+    /// auth failure that is really an unreadable keyring is diagnosable
+    /// instead of looking like a wrong password.
     pub fn load_ssh_password(&self) -> String {
-        store::get(store::SSH_SERVICE, &self.id.to_string(), &self.name).unwrap_or_default()
+        match store::get(store::SSH_SERVICE, &self.id.to_string(), &self.name) {
+            Ok(pw) => pw,
+            Err(SbqlError::PasswordNotFound(_)) => String::new(),
+            Err(e) => {
+                tracing::warn!(
+                    "SSH password store unreadable for '{}': {e} — proceeding with no password",
+                    self.name
+                );
+                String::new()
+            }
+        }
+    }
+
+    /// Whether `other` connects to the same place, the same way.
+    ///
+    /// Compares every field that feeds the pool or the SSH tunnel — everything
+    /// except `id` and `name`. A live pool built from a config for which this
+    /// returns false is stale and must not be reused.
+    pub fn same_target(&self, other: &ConnectionConfig) -> bool {
+        self.backend == other.backend
+            && self.host == other.host
+            && self.port == other.port
+            && self.user == other.user
+            && self.database == other.database
+            && self.ssl_mode == other.ssl_mode
+            && self.file_path == other.file_path
+            && self.ssh_enabled == other.ssh_enabled
+            && self.ssh_host == other.ssh_host
+            && self.ssh_port == other.ssh_port
+            && self.ssh_user == other.ssh_user
+            && self.ssh_auth_method == other.ssh_auth_method
+            && self.ssh_key_path == other.ssh_key_path
     }
 }
 
@@ -611,13 +637,37 @@ pub fn load_connections_from(path: &std::path::Path) -> Result<Vec<ConnectionCon
 }
 
 /// Persist connections to an arbitrary path (useful for testing).
+///
+/// The write is atomic: the TOML is written to a sibling temp file and renamed
+/// over the target. A plain `std::fs::write` truncates first, so an interrupt
+/// (crash, full disk, power loss) mid-write left a truncated or empty
+/// `connections.toml` — every saved connection gone.
 pub fn save_connections_to(path: &std::path::Path, connections: &[ConnectionConfig]) -> Result<()> {
     let cfg = ConfigFile {
         connections: connections.to_vec(),
     };
     let raw = toml::to_string_pretty(&cfg).map_err(|e| SbqlError::Serialization(e.to_string()))?;
-    std::fs::write(path, raw)?;
-    Ok(())
+
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    // Same directory as the target so the rename stays on one filesystem
+    // (a cross-device rename fails). The pid plus a process-wide counter keeps
+    // concurrent writers on distinct temp files — a pid alone is shared by all
+    // threads and let two saves clobber each other's temp.
+    static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("toml.tmp.{}.{seq}", std::process::id()));
+    std::fs::write(&tmp, raw)?;
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e.into())
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

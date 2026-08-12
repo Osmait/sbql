@@ -20,7 +20,9 @@ pub(super) fn apply(
 
         CompletionAction::Accept => {
             if let Some(item) = state.editor.completion.selected_item().cloned() {
-                let prefix_len = state.editor.completion.prefix.len();
+                // One backspace deletes one *character*, so count chars — with
+                // byte len a multi-byte prefix ate extra characters before it.
+                let prefix_len = state.editor.completion.prefix.chars().count();
                 // Delete the prefix by sending backspace inputs
                 for _ in 0..prefix_len {
                     state.editor.textarea.input(Input {

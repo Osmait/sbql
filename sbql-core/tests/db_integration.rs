@@ -174,8 +174,7 @@ async fn test_database_schema_and_mutations() {
         &pool,
         "public",
         "users",
-        "id",
-        "1", // Alice's ID is 1 (SERIAL starts at 1)
+        &[("id".into(), "1".into())], // Alice's ID is 1 (SERIAL starts at 1)
         "username",
         "alice_updated",
     )
@@ -192,7 +191,7 @@ async fn test_database_schema_and_mutations() {
 
     // 8. Test: execute_row_delete
     // Delete Bob's post (ID 2)
-    execute_row_delete(&pool, "public", "posts", "id", "2")
+    execute_row_delete(&pool, "public", "posts", &[("id".into(), "2".into())])
         .await
         .expect("Failed to delete row");
 

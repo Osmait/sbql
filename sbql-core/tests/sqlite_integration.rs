@@ -133,8 +133,7 @@ async fn test_sqlite_cell_update() {
         &pool,
         "main",
         "users",
-        "id",
-        "1",
+        &[("id".into(), "1".into())],
         "username",
         "alice_updated",
     )
@@ -152,7 +151,7 @@ async fn test_sqlite_cell_update() {
 #[tokio::test]
 async fn test_sqlite_row_delete() {
     let (sq, pool) = setup_sqlite().await;
-    execute_row_delete(&pool, "main", "posts", "id", "2")
+    execute_row_delete(&pool, "main", "posts", &[("id".into(), "2".into())])
         .await
         .expect("row delete failed");
 

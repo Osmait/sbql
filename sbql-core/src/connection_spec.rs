@@ -261,6 +261,15 @@ pub struct ConnectionDraft {
     pub password: String,
     pub file_path: String,
     pub ssl_mode: SslMode,
+    /// SSH tunnel settings. The form does not expose these yet, but a draft
+    /// carries them verbatim so editing a connection that *has* an SSH tunnel
+    /// no longer silently strips it. `build` copies them straight back out.
+    pub ssh_enabled: bool,
+    pub ssh_host: String,
+    pub ssh_port: u16,
+    pub ssh_user: String,
+    pub ssh_auth_method: String,
+    pub ssh_key_path: Option<String>,
 }
 
 impl ConnectionDraft {
@@ -297,6 +306,12 @@ impl ConnectionDraft {
             password: String::new(),
             file_path: cfg.file_path.clone().unwrap_or_default(),
             ssl_mode: cfg.ssl_mode.clone(),
+            ssh_enabled: cfg.ssh_enabled,
+            ssh_host: cfg.ssh_host.clone(),
+            ssh_port: cfg.ssh_port,
+            ssh_user: cfg.ssh_user.clone(),
+            ssh_auth_method: cfg.ssh_auth_method.clone(),
+            ssh_key_path: cfg.ssh_key_path.clone(),
         }
     }
 
@@ -409,6 +424,17 @@ impl ConnectionDraft {
 
         if spec.has(ConnectionField::SslMode) {
             config.ssl_mode = self.ssl_mode.clone();
+        }
+        // Carry SSH settings straight back out. The form cannot edit them, so
+        // for an SSH-tunneled connection this is the difference between an edit
+        // preserving the tunnel and silently deleting it.
+        if self.ssh_enabled {
+            config.ssh_enabled = true;
+            config.ssh_host = self.ssh_host.clone();
+            config.ssh_port = self.ssh_port;
+            config.ssh_user = self.ssh_user.clone();
+            config.ssh_auth_method = self.ssh_auth_method.clone();
+            config.ssh_key_path = self.ssh_key_path.clone();
         }
         if let Some(id) = self.id {
             config.id = id;
@@ -599,6 +625,34 @@ mod tests {
         let mut draft = ConnectionDraft::new(DbBackend::Redis);
         draft.name = "cache".into();
         assert_eq!(draft.password_for_save(), Some(String::new()));
+    }
+
+    /// Editing a connection that has an SSH tunnel must not erase it — the
+    /// form does not show SSH fields, so a draft round-trip has to preserve
+    /// them.
+    #[test]
+    fn editing_preserves_ssh_tunnel_settings() {
+        let mut original = ConnectionConfig::new_postgres("db", "localhost", 5432, "u", "d");
+        original.ssh_enabled = true;
+        original.ssh_host = "bastion.example.com".into();
+        original.ssh_port = 2222;
+        original.ssh_user = "jump".into();
+        original.ssh_auth_method = "key".into();
+        original.ssh_key_path = Some("/home/me/.ssh/id_ed25519".into());
+
+        let rebuilt = ConnectionDraft::from_config(&original)
+            .build()
+            .expect("valid");
+
+        assert!(rebuilt.ssh_enabled);
+        assert_eq!(rebuilt.ssh_host, "bastion.example.com");
+        assert_eq!(rebuilt.ssh_port, 2222);
+        assert_eq!(rebuilt.ssh_user, "jump");
+        assert_eq!(rebuilt.ssh_auth_method, "key");
+        assert_eq!(
+            rebuilt.ssh_key_path.as_deref(),
+            Some("/home/me/.ssh/id_ed25519")
+        );
     }
 
     #[test]

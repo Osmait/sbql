@@ -52,6 +52,9 @@ pub fn make_state_with_results() -> AppState {
         has_next_page: false,
         total_count: None,
     };
+    // The mock rows notionally came from this query; row edits and deletes
+    // resolve their target table from it.
+    state.results.source_sql = Some("SELECT * FROM users".into());
     state.results.viewport_height = 20;
     state.results.viewport_cols = 3;
     state

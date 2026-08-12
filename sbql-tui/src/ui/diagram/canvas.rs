@@ -367,7 +367,7 @@ mod tests {
         let mut c = blank(8, 3);
         draw_hline(&mut c, 0, 5, 1, Style::default(), g);
         assert!(
-            row_text(&c, 1).chars().all(|ch| ch.is_ascii()),
+            row_text(&c, 1).is_ascii(),
             "ascii mode must stay ascii: {:?}",
             row_text(&c, 1)
         );
@@ -396,7 +396,7 @@ mod tests {
         }];
         let lane = find_free_lane(8, &rects, 0, 5, 100);
         assert!(
-            lane < 10 || lane >= 20,
+            !(10..20).contains(&lane),
             "lane {lane} runs straight through the box"
         );
     }

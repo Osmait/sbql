@@ -92,20 +92,22 @@ pub enum CoreCommand {
     /// Load all table schemas and FK relationships for the diagram view.
     LoadDiagram,
     /// Update a single cell in the database.
+    ///
+    /// `pk` carries every `(column, value)` component of the row's primary
+    /// key. Sending only the first component of a composite key once turned
+    /// "update this row" into "update every row sharing that component".
     UpdateCell {
         schema: String,
         table: String,
-        pk_col: String,
-        pk_val: String,
+        pk: Vec<(String, String)>,
         target_col: String,
         new_val: String,
     },
-    /// Delete a single row identified by its primary key.
+    /// Delete a single row identified by its full primary key.
     DeleteRow {
         schema: String,
         table: String,
-        pk_col: String,
-        pk_val: String,
+        pk: Vec<(String, String)>,
     },
 }
 
@@ -257,6 +259,19 @@ impl Core {
         }
     }
 
+    /// Forget everything tied to the previously active query/session: the base
+    /// and effective SQL, the last result's columns and page, and any active
+    /// sort or filter. Called when a connection closes so the next session does
+    /// not inherit the last one's state.
+    pub(crate) fn reset_query_state(&mut self) {
+        self.base_sql = None;
+        self.effective_sql = None;
+        self.last_columns.clear();
+        self.last_page = 0;
+        self.sort_state.clear();
+        self.active_filter = None;
+    }
+
     /// What a client should be told before it sends its first command.
     ///
     /// The connection list, plus anything that went wrong producing it. Lives
@@ -306,22 +321,15 @@ impl Core {
             CoreCommand::UpdateCell {
                 schema,
                 table,
-                pk_col,
-                pk_val,
+                pk,
                 target_col,
                 new_val,
             } => {
-                handlers::mutation::update_cell(
-                    self, schema, table, pk_col, pk_val, target_col, new_val,
-                )
-                .await
+                handlers::mutation::update_cell(self, schema, table, pk, target_col, new_val).await
             }
-            CoreCommand::DeleteRow {
-                schema,
-                table,
-                pk_col,
-                pk_val,
-            } => handlers::mutation::delete_row(self, schema, table, pk_col, pk_val).await,
+            CoreCommand::DeleteRow { schema, table, pk } => {
+                handlers::mutation::delete_row(self, schema, table, pk).await
+            }
         }
     }
 

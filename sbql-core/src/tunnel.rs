@@ -52,7 +52,10 @@ impl TunnelManager {
         let mut handle = russh::client::connect(
             ssh_config,
             (config.ssh_host.as_str(), config.ssh_port),
-            SshHandler,
+            SshHandler {
+                host: config.ssh_host.clone(),
+                port: config.ssh_port,
+            },
         )
         .await
         .map_err(|e| SbqlError::SshTunnel(format!("SSH connect failed: {e}")))?;
@@ -143,19 +146,61 @@ impl TunnelManager {
     }
 }
 
-/// Minimal SSH client handler required by russh.
-struct SshHandler;
+/// SSH client handler: verifies the server's host key against the user's
+/// `known_hosts` file.
+struct SshHandler {
+    host: String,
+    port: u16,
+}
 
 #[async_trait::async_trait]
 impl russh::client::Handler for SshHandler {
     type Error = SbqlError;
 
+    /// Same policy as OpenSSH's `StrictHostKeyChecking=accept-new`: a host
+    /// already in `~/.ssh/known_hosts` must present the recorded key, an
+    /// unknown host is trusted on first use and recorded, and a *changed* key
+    /// is refused outright — accepting everything silently, as this handler
+    /// once did, hands the SSH password and all database traffic to whoever
+    /// answers on the wire.
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh_keys::PublicKey,
+        server_public_key: &russh_keys::PublicKey,
     ) -> std::result::Result<bool, Self::Error> {
-        // Accept all server keys (equivalent to StrictHostKeyChecking=no).
-        // A future improvement could verify against known_hosts.
-        Ok(true)
+        match russh_keys::check_known_hosts(&self.host, self.port, server_public_key) {
+            Ok(true) => Ok(true),
+            Ok(false) => {
+                russh_keys::known_hosts::learn_known_hosts(
+                    &self.host,
+                    self.port,
+                    server_public_key,
+                )
+                .map_err(|e| {
+                    SbqlError::SshTunnel(format!(
+                        "Could not record host key for {}:{} in known_hosts: {e}",
+                        self.host, self.port
+                    ))
+                })?;
+                tracing::info!(
+                    "Trusting {}:{} on first use; host key {} recorded in known_hosts",
+                    self.host,
+                    self.port,
+                    server_public_key.fingerprint(russh_keys::HashAlg::Sha256)
+                );
+                Ok(true)
+            }
+            Err(russh_keys::Error::KeyChanged { line }) => Err(SbqlError::SshTunnel(format!(
+                "HOST KEY CHANGED for {}:{} — offered key {} does not match known_hosts line \
+                 {line}. This can mean a man-in-the-middle attack; connection refused. If the \
+                 server key really changed, remove that line and reconnect.",
+                self.host,
+                self.port,
+                server_public_key.fingerprint(russh_keys::HashAlg::Sha256)
+            ))),
+            Err(e) => Err(SbqlError::SshTunnel(format!(
+                "Could not verify host key for {}:{}: {e}",
+                self.host, self.port
+            ))),
+        }
     }
 }

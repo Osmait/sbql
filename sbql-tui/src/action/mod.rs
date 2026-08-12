@@ -241,6 +241,13 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
         // -- Side effects --
         Action::SendCommand(cmd) => {
             let cmd = *cmd;
+            // Every arriving result set discards staged edits/deletes, so a
+            // page change while changes are staged would silently destroy
+            // them. This is the one choke point all paging keys go through.
+            if matches!(cmd, CoreCommand::FetchPage { .. }) && results::has_staged_changes(state) {
+                results::warn_staged_changes_block_paging(state);
+                return;
+            }
             let _ = cmd_tx.send(cmd);
         }
 
@@ -548,8 +555,7 @@ mod tests {
             "1".into(),
             "public".into(),
             "users".into(),
-            "id".into(),
-            "1".into(),
+            vec![("id".into(), "1".into())],
         ));
         let (tx, _rx) = cmd_channel();
         apply(Action::CellEdit(CellEditAction::Cancel), &mut state, &tx);
@@ -566,8 +572,7 @@ mod tests {
             "1".into(),
             "public".into(),
             "users".into(),
-            "id".into(),
-            "1".into(),
+            vec![("id".into(), "1".into())],
         );
         ce.textarea = tui_textarea::TextArea::default();
         ce.textarea.insert_str("999");
@@ -588,8 +593,7 @@ mod tests {
             "1".into(),
             "public".into(),
             "users".into(),
-            "id".into(),
-            "1".into(),
+            vec![("id".into(), "1".into())],
         );
         state.mutation.cell_edit = Some(ce);
         let (tx, _rx) = cmd_channel();
@@ -626,8 +630,7 @@ mod tests {
                 new_val: "new".into(),
                 schema: "public".into(),
                 table: "users".into(),
-                pk_col: "id".into(),
-                pk_val: "1".into(),
+                pk: vec![("id".into(), "1".into())],
                 col_name: "name".into(),
             },
         );
@@ -636,8 +639,7 @@ mod tests {
             PendingDelete {
                 schema: "public".into(),
                 table: "users".into(),
-                pk_col: "id".into(),
-                pk_val: "3".into(),
+                pk: vec![("id".into(), "3".into())],
             },
         );
         let (tx, mut rx) = cmd_channel();
@@ -656,6 +658,72 @@ mod tests {
         assert!(cmds.len() >= 3);
     }
 
+    /// Fetching another page replaces the rows staged changes refer to and
+    /// discards them — so paging is refused while anything is staged.
+    #[test]
+    fn paging_is_blocked_while_changes_are_staged() {
+        let mut state = make_state_with_results();
+        state.results.data.has_next_page = true;
+        state.results.selected_row = state.results.data.rows.len() - 1;
+        state.mutation.pending_edits.insert(
+            (0, 0),
+            PendingEdit {
+                new_val: "x".into(),
+                schema: "public".into(),
+                table: "users".into(),
+                pk: vec![("id".into(), "1".into())],
+                col_name: "name".into(),
+            },
+        );
+        let (tx, mut rx) = cmd_channel();
+
+        // Cursor-past-bottom auto-fetch.
+        apply(Action::Results(ResultsAction::RowDown), &mut state, &tx);
+        assert!(rx.try_recv().is_err(), "RowDown must not fetch a page");
+
+        // Explicit page keys go through SendCommand.
+        apply(
+            Action::send(CoreCommand::FetchPage { page: 1 }),
+            &mut state,
+            &tx,
+        );
+        assert!(rx.try_recv().is_err(), "FetchPage must be refused");
+        assert!(state.notice_text().is_some(), "the refusal must be said");
+    }
+
+    /// The delete targets the table of the query that produced the rows, not
+    /// whatever is currently typed (and unexecuted) in the editor.
+    #[test]
+    fn mark_for_deletion_targets_the_executed_query_table() {
+        let mut state = make_state_with_results();
+        state.results.source_sql = Some("SELECT * FROM orders".into());
+        state.editor.textarea.insert_str("SELECT * FROM users");
+        let (tx, mut rx) = cmd_channel();
+        apply(
+            Action::Results(ResultsAction::MarkRowForDeletion),
+            &mut state,
+            &tx,
+        );
+        match rx.try_recv().expect("a GetPrimaryKeys command") {
+            CoreCommand::GetPrimaryKeys { table, .. } => assert_eq!(table, "orders"),
+            other => panic!("expected GetPrimaryKeys, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mark_for_deletion_without_an_executed_query_reports() {
+        let mut state = make_state_with_results();
+        state.results.source_sql = None;
+        let (tx, mut rx) = cmd_channel();
+        apply(
+            Action::Results(ResultsAction::MarkRowForDeletion),
+            &mut state,
+            &tx,
+        );
+        assert!(rx.try_recv().is_err(), "no command without a source query");
+        assert!(state.is_failing());
+    }
+
     // -----------------------------------------------------------------------
     // Discard pending
     // -----------------------------------------------------------------------
@@ -669,8 +737,7 @@ mod tests {
                 new_val: "x".into(),
                 schema: "p".into(),
                 table: "t".into(),
-                pk_col: "id".into(),
-                pk_val: "1".into(),
+                pk: vec![("id".into(), "1".into())],
                 col_name: "c".into(),
             },
         );

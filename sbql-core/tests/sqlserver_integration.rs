@@ -202,8 +202,7 @@ async fn test_sqlserver_integration() {
             &pool,
             "dbo",
             "users",
-            "id",
-            "1",
+            &[("id".into(), "1".into())],
             "username",
             "alice_updated",
         )
@@ -222,7 +221,7 @@ async fn test_sqlserver_integration() {
 
     // --- 7. row delete ---
     {
-        execute_row_delete(&pool, "dbo", "posts", "id", "2")
+        execute_row_delete(&pool, "dbo", "posts", &[("id".into(), "2".into())])
             .await
             .expect("Failed to delete row");
 

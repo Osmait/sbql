@@ -15,23 +15,20 @@ name = "sbql_ffi"
 name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 
-[features]
-default = ["keyring"]
-
-# Same shape as sbql-tui. The workspace pins `sbql-core` with
-# `default-features = false` — Cargo ignores a member's own
-# `default-features = false` on an inherited dependency — so the credential
-# store is opted back into here rather than inherited.
-keyring = ["sbql-core/keyring"]
-
 [dependencies]
-# Inherited from the workspace rather than a bare `path`, because a bare path
-# carries no version requirement and `cargo package` refuses to verify the
-# manifest without one ("all dependencies must have a version requirement
-# specified when packaging"). That failure aborted every `release-plz
-# release-pr` run. sbql-tui was fixed this way in March; sbql-ffi arrived
-# afterwards and reintroduced the bare path.
-sbql-core = { workspace = true, default-features = false }
+# The FFI is the macOS/iOS bridge, where the Keychain is always present, so
+# the credential store is a hard requirement — not an optional feature. Making
+# it non-optional means a `--no-default-features` build cannot silently produce
+# an FFI that keeps passwords in memory only while `save_connection` still
+# reports success. `features = ["keyring"]` enables it on top of the
+# workspace-inherited `default-features = false`.
+#
+# The dependency is inherited (`workspace = true`) rather than a bare `path`
+# for consistency with sbql-tui and so the version is managed in one place.
+# release-plz does not package this crate (`release = false` in
+# release-plz.toml), so the version requirement is no longer load-bearing for
+# releases — it is simply the workspace default.
+sbql-core = { workspace = true, features = ["keyring"] }
 uniffi = { version = "0.29", features = ["tokio", "cli"] }
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }

@@ -142,8 +142,7 @@ async fn test_mysql_cell_update() {
         &pool,
         "test",
         "users",
-        "id",
-        "1",
+        &[("id".into(), "1".into())],
         "username",
         "alice_updated",
     )
@@ -161,7 +160,7 @@ async fn test_mysql_cell_update() {
 #[tokio::test]
 async fn test_mysql_row_delete() {
     let (my, pool, _container) = setup_mysql().await;
-    execute_row_delete(&pool, "test", "posts", "id", "2")
+    execute_row_delete(&pool, "test", "posts", &[("id".into(), "2".into())])
         .await
         .expect("row delete failed");
 

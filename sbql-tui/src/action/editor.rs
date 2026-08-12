@@ -27,6 +27,9 @@ pub(super) fn apply(
                 state.results.sort_state.clear();
                 state.active_filter = None;
                 state.editor.completion.dismiss();
+                // Promoted to `source_sql` when its result arrives, so
+                // edits/deletes know which table produced the rows on screen.
+                state.results.sent_sql = Some(sql.clone());
                 let _ = cmd_tx.send(CoreCommand::ExecuteQuery { sql });
                 state.focused = FocusedPanel::Results;
             }
