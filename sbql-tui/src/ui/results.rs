@@ -230,11 +230,7 @@ pub fn draw(frame: &mut Frame, view: &ResultsView, layout: &ResultsLayout, area:
         .skip(col_scroll)
         .take(visible_col_count)
         .map(|(i, col)| {
-            let sort_indicator = match results.sort_state.get(col) {
-                Some(SortDirection::Ascending) => " ▲",
-                Some(SortDirection::Descending) => " ▼",
-                None => "",
-            };
+            let sort_indicator = sort_indicator(results.sort.as_ref(), col);
             let is_selected_col = i == results.selected_col && is_focused;
             let style = if is_selected_col {
                 Style::default()
@@ -439,6 +435,20 @@ pub fn draw_filter_bar(frame: &mut Frame, filter: &mut FilterBar, results_area: 
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// The arrow drawn beside `col` in the header.
+///
+/// Reads the sort core last reported and nothing else. The header used to
+/// consult a map the TUI maintained itself, which kept an arrow up after core
+/// had already dropped the sort — on a disconnect, or when a connection's
+/// target was edited out from under the session.
+fn sort_indicator(sort: Option<&(String, SortDirection)>, col: &str) -> &'static str {
+    match sort {
+        Some((sorted, SortDirection::Ascending)) if sorted == col => " ▲",
+        Some((sorted, SortDirection::Descending)) if sorted == col => " ▼",
+        _ => "",
+    }
+}
+
 fn compute_col_widths(columns: &[String], rows: &[Vec<String>]) -> Vec<u16> {
     columns
         .iter()
@@ -562,5 +572,32 @@ mod tests {
     fn measuring_twice_gives_the_same_layout() {
         let s = state_with(&["a", "b"], 5);
         assert_eq!(measure(&s, area(80, 24)), measure(&s, area(80, 24)));
+    }
+
+    // -- Header sort indicator --
+
+    #[test]
+    fn the_sorted_column_gets_an_arrow() {
+        let asc = ("name".to_string(), SortDirection::Ascending);
+        assert_eq!(sort_indicator(Some(&asc), "name"), " ▲");
+        assert_eq!(sort_indicator(Some(&asc), "id"), "");
+
+        let desc = ("name".to_string(), SortDirection::Descending);
+        assert_eq!(sort_indicator(Some(&desc), "name"), " ▼");
+    }
+
+    /// Disconnecting drops the sort in core, which reports `SortChanged(None)`.
+    /// Once that lands there must be no arrow left anywhere in the header —
+    /// this is the drift the separate TUI-side sort map used to leave behind.
+    #[test]
+    fn a_dropped_sort_leaves_no_arrow() {
+        let mut s = state_with(&["id", "name"], 3);
+        s.sort = Some(("name".into(), SortDirection::Ascending));
+
+        s.sort = None; // what CoreEvent::SortChanged(None) writes
+
+        for col in &s.data.columns {
+            assert_eq!(sort_indicator(s.sort.as_ref(), col), "", "column {col}");
+        }
     }
 }

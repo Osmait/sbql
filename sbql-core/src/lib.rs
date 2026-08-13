@@ -69,6 +69,12 @@ pub enum CoreCommand {
     ExecuteQuery { sql: String },
     /// Fetch a specific page of the last executed query.
     FetchPage { page: usize },
+    /// Count the rows the current query would return, out of band.
+    ///
+    /// Deliberately its own command: counting used to happen inside page 0,
+    /// which meant every query's first page waited on a `COUNT(*)` that most
+    /// clients never display.
+    FetchTotalCount,
     /// Re-execute with an ORDER BY injected via AST manipulation.
     ApplyOrder {
         column: String,
@@ -126,7 +132,8 @@ impl CoreCommand {
             CoreCommand::GetPrimaryKeys { .. }
             | CoreCommand::Disconnect(_)
             | CoreCommand::LoadDiagram
-            | CoreCommand::SuggestFilterValues { .. } => false,
+            | CoreCommand::SuggestFilterValues { .. }
+            | CoreCommand::FetchTotalCount => false,
 
             // Work the user asked for and is waiting on.
             CoreCommand::SaveConnection { .. }
@@ -158,6 +165,17 @@ pub enum CoreEvent {
     TableList(Vec<TableEntry>),
     /// Query result page.
     QueryResult(QueryResult),
+    /// Total row count for the current query, or `None` when there isn't one
+    /// to be had — see [`query::total_count`]. Only ever sent in reply to
+    /// [`CoreCommand::FetchTotalCount`].
+    TotalCount(Option<u64>),
+    /// The sort core is now applying, or `None` for "no sort".
+    ///
+    /// Core owns this. Clients used to keep their own copy and update it
+    /// optimistically, which drifted the moment core dropped the sort without
+    /// being asked — disconnecting still left the TUI drawing a sort arrow for
+    /// an ORDER BY that was no longer in the query.
+    SortChanged(Option<(String, SortDirection)>),
     /// A cell UPDATE completed successfully.
     CellUpdated,
     /// A row DELETE completed successfully.
@@ -213,8 +231,12 @@ pub struct Core {
     pub last_columns: Vec<String>,
     /// The page number of the most recently returned query result.
     pub last_page: usize,
-    /// Active sort state: column name → direction.
-    pub sort_state: HashMap<String, SortDirection>,
+    /// The sort currently baked into `effective_sql`, if any.
+    ///
+    /// One sort at a time — this was a `HashMap` that handlers cleared before
+    /// every insert and read back with `.iter().next()`, so it could only ever
+    /// hold the one entry anyway.
+    pub sort_state: Option<(String, SortDirection)>,
     /// Active filter string (raw, as the user typed it).
     pub active_filter: Option<String>,
     /// In-memory password cache so reconnects work even if keyring lookup fails.
@@ -263,13 +285,35 @@ impl Core {
     /// and effective SQL, the last result's columns and page, and any active
     /// sort or filter. Called when a connection closes so the next session does
     /// not inherit the last one's state.
-    pub(crate) fn reset_query_state(&mut self) {
+    ///
+    /// Returns the [`CoreEvent::SortChanged`] the client still has to hear, if
+    /// a sort was dropped. It comes back rather than being emitted here so the
+    /// `#[must_use]` catches a caller that forgets: a client left holding the
+    /// old sort keeps drawing an indicator for an ORDER BY that is gone, which
+    /// is exactly the bug this reset used to cause.
+    #[must_use = "the dropped sort has to reach the client"]
+    pub(crate) fn reset_query_state(&mut self) -> Option<CoreEvent> {
         self.base_sql = None;
         self.effective_sql = None;
         self.last_columns.clear();
         self.last_page = 0;
-        self.sort_state.clear();
         self.active_filter = None;
+        self.set_sort(None)
+    }
+
+    /// Record the sort now baked into `effective_sql`.
+    ///
+    /// Returns the event announcing it, or `None` when the sort did not
+    /// actually move — core is the single owner of the applied sort, and
+    /// clients cache only what this reports, so an event that says nothing new
+    /// is pure noise.
+    #[must_use = "a changed sort has to reach the client"]
+    pub(crate) fn set_sort(&mut self, sort: Option<(String, SortDirection)>) -> Option<CoreEvent> {
+        if self.sort_state == sort {
+            return None;
+        }
+        self.sort_state = sort;
+        Some(CoreEvent::SortChanged(self.sort_state.clone()))
     }
 
     /// What a client should be told before it sends its first command.
@@ -297,6 +341,7 @@ impl Core {
             CoreCommand::ListTables => handlers::schema::list_tables(self).await,
             CoreCommand::ExecuteQuery { sql } => handlers::query::execute(self, sql).await,
             CoreCommand::FetchPage { page } => handlers::query::fetch_page(self, page).await,
+            CoreCommand::FetchTotalCount => handlers::query::fetch_total_count(self).await,
             CoreCommand::ApplyOrder { column, direction } => {
                 handlers::order_filter::apply_order(self, column, direction).await
             }
@@ -536,7 +581,7 @@ mod tests {
             .await;
         assert_eq!(core.base_sql, Some("SELECT 1".into()));
         assert_eq!(core.effective_sql, Some("SELECT 1".into()));
-        assert!(core.sort_state.is_empty());
+        assert!(core.sort_state.is_none());
         assert!(core.active_filter.is_none());
     }
 
@@ -634,5 +679,45 @@ mod tests {
         assert!(core.active_connection.is_none());
         assert_eq!(events.len(), 1);
         assert!(matches!(&events[0], CoreEvent::Disconnected(d) if *d == id));
+    }
+
+    /// Closing the active connection drops its sort along with the rest of the
+    /// query state — and the client has to be told, or it goes on drawing a
+    /// sort indicator for an ORDER BY that no query is applying any more.
+    #[tokio::test]
+    async fn disconnecting_reports_the_sort_it_dropped() {
+        let mut core = Core::default();
+        let id = Uuid::new_v4();
+        core.active_connection = Some(id);
+        core.sort_state = Some(("name".into(), SortDirection::Ascending));
+
+        let events = core.handle(CoreCommand::Disconnect(id)).await;
+
+        assert!(core.sort_state.is_none());
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, CoreEvent::SortChanged(None))),
+            "{events:?}"
+        );
+    }
+
+    /// Disconnecting some *other* connection leaves the active session — and
+    /// its sort — alone, so there is nothing to report about it.
+    #[tokio::test]
+    async fn disconnecting_an_inactive_connection_says_nothing_about_sort() {
+        let mut core = Core::default();
+        core.active_connection = Some(Uuid::new_v4());
+        core.sort_state = Some(("name".into(), SortDirection::Ascending));
+
+        let events = core.handle(CoreCommand::Disconnect(Uuid::new_v4())).await;
+
+        assert!(core.sort_state.is_some());
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, CoreEvent::SortChanged(_))),
+            "{events:?}"
+        );
     }
 }

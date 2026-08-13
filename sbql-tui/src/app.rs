@@ -364,7 +364,14 @@ pub struct ResultsState {
     pub selected_col: usize,
     pub current_page: usize,
     pub is_loading: bool,
-    pub sort_state: HashMap<String, SortDirection>,
+    /// The sort core last said it was applying — a cache, never a decision.
+    ///
+    /// Written only from [`CoreEvent::SortChanged`]. The TUI used to keep its
+    /// own sort map and update it optimistically on the `o` key, which drifted
+    /// the moment core dropped the sort on its own: after a disconnect (or
+    /// editing a connection's target) the header still drew an arrow for an
+    /// ORDER BY no query was applying.
+    pub sort: Option<(String, SortDirection)>,
     /// Height of the results viewport in rows (updated each draw cycle).
     pub viewport_height: usize,
     /// Number of visible columns in the results viewport (updated each draw cycle).
@@ -497,23 +504,21 @@ impl ResultsState {
         self.data.columns.get(self.selected_col).map(String::as_str)
     }
 
-    /// Toggle the sort direction for a column. Cycles None → Asc → Desc → None.
-    pub fn toggle_sort(&mut self, col: &str) -> (String, Option<SortDirection>) {
-        let next = match self.sort_state.get(col) {
-            None => Some(SortDirection::Ascending),
-            Some(SortDirection::Ascending) => Some(SortDirection::Descending),
-            Some(SortDirection::Descending) => None,
-        };
-        match next {
-            Some(dir) => {
-                self.sort_state.clear();
-                self.sort_state.insert(col.to_owned(), dir);
-                (col.to_owned(), Some(dir))
+    /// The sort direction the `o` key should ask core for next on `col`.
+    /// Cycles None → Asc → Desc → None; `None` means "clear the sort".
+    ///
+    /// Read-only on purpose. The cycle is computed from what core last
+    /// reported, and the answer is sent as a command — writing the new sort
+    /// locally as well is what let the cached sort survive a disconnect that
+    /// had already dropped it.
+    pub fn next_sort_direction(&self, col: &str) -> Option<SortDirection> {
+        match &self.sort {
+            Some((sorted, SortDirection::Ascending)) if sorted == col => {
+                Some(SortDirection::Descending)
             }
-            None => {
-                self.sort_state.remove(col);
-                (col.to_owned(), None)
-            }
+            Some((sorted, SortDirection::Descending)) if sorted == col => None,
+            // Unsorted, or sorted by a different column: start the cycle over.
+            _ => Some(SortDirection::Ascending),
         }
     }
 }
@@ -776,7 +781,7 @@ impl AppState {
                 selected_col: 0,
                 current_page: 0,
                 is_loading: false,
-                sort_state: HashMap::new(),
+                sort: None,
                 viewport_height: 20,
                 viewport_cols: 5,
                 col_widths_dirty: true,
@@ -944,6 +949,16 @@ impl AppState {
                     ));
                 }
             }
+            // The only place the sort cache is written. Deliberately does not
+            // touch `is_loading`: this rides along with whatever command
+            // changed the sort, and clearing the spinner here would hide the
+            // query that is still running.
+            CoreEvent::SortChanged(sort) => {
+                self.results.sort = sort;
+            }
+            // The TUI derives its "rows 1–N" range from the page it is showing,
+            // so it never asks for a count and has nothing to do with one.
+            CoreEvent::TotalCount(_) => {}
             CoreEvent::CellUpdated => {
                 self.results.is_loading = false;
                 self.mutation.cell_edit = None;
@@ -1102,27 +1117,81 @@ mod tests {
         assert_eq!(state.results.selected_col, 0);
     }
 
+    /// The `o` cycle, read off the cache core keeps up to date.
     #[test]
     fn test_app_state_sort_toggle() {
         let mut state = AppState::new(vec![]);
 
-        // Toggle ASC
-        let (col, dir) = state.results.toggle_sort("id");
-        assert_eq!(col, "id");
-        assert_eq!(dir, Some(SortDirection::Ascending));
         assert_eq!(
-            state.results.sort_state.get("id"),
-            Some(&SortDirection::Ascending)
+            state.results.next_sort_direction("id"),
+            Some(SortDirection::Ascending)
         );
 
-        // Toggle DESC
-        let (_, dir) = state.results.toggle_sort("id");
-        assert_eq!(dir, Some(SortDirection::Descending));
+        state.apply_core_event(CoreEvent::SortChanged(Some((
+            "id".into(),
+            SortDirection::Ascending,
+        ))));
+        assert_eq!(
+            state.results.next_sort_direction("id"),
+            Some(SortDirection::Descending)
+        );
 
-        // Toggle OFF
-        let (_, dir) = state.results.toggle_sort("id");
-        assert_eq!(dir, None);
-        assert!(state.results.sort_state.is_empty());
+        state.apply_core_event(CoreEvent::SortChanged(Some((
+            "id".into(),
+            SortDirection::Descending,
+        ))));
+        assert_eq!(state.results.next_sort_direction("id"), None);
+
+        state.apply_core_event(CoreEvent::SortChanged(None));
+        assert_eq!(
+            state.results.next_sort_direction("id"),
+            Some(SortDirection::Ascending)
+        );
+    }
+
+    /// Sorting a second column starts that column's cycle at ascending rather
+    /// than inheriting the first column's position in it.
+    #[test]
+    fn sorting_a_different_column_restarts_the_cycle() {
+        let mut state = AppState::new(vec![]);
+        state.apply_core_event(CoreEvent::SortChanged(Some((
+            "id".into(),
+            SortDirection::Descending,
+        ))));
+
+        assert_eq!(
+            state.results.next_sort_direction("name"),
+            Some(SortDirection::Ascending)
+        );
+    }
+
+    /// Core drops the sort on its own when a connection closes. Before the
+    /// cache was fed solely from `SortChanged`, the TUI never heard about it
+    /// and went on drawing an arrow for an ORDER BY that was gone.
+    #[test]
+    fn a_dropped_sort_leaves_nothing_behind() {
+        let mut state = AppState::new(vec![]);
+        state.apply_core_event(CoreEvent::SortChanged(Some((
+            "name".into(),
+            SortDirection::Ascending,
+        ))));
+
+        state.apply_core_event(CoreEvent::Disconnected(uuid::Uuid::new_v4()));
+        state.apply_core_event(CoreEvent::SortChanged(None));
+
+        assert!(state.results.sort.is_none());
+    }
+
+    /// A count arriving from core is a no-op here — the TUI shows "rows 1–N"
+    /// from the page it has — but it must not disturb anything either.
+    #[test]
+    fn a_total_count_changes_nothing() {
+        let mut state = AppState::new(vec![]);
+        state.results.is_loading = true;
+
+        state.apply_core_event(CoreEvent::TotalCount(Some(1_000)));
+
+        assert!(state.results.is_loading);
     }
 
     // -----------------------------------------------------------------------

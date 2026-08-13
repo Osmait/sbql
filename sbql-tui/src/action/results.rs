@@ -104,14 +104,13 @@ pub(super) fn apply(
         }
 
         ResultsAction::ToggleSort => {
-            if let Some(col) = state.results.selected_column_name().map(str::to_owned) {
-                let (col, dir) = state.results.toggle_sort(&col);
-                match dir {
-                    Some(d) => {
-                        let _ = cmd_tx.send(CoreCommand::ApplyOrder {
-                            column: col,
-                            direction: d,
-                        });
+            if let Some(column) = state.results.selected_column_name().map(str::to_owned) {
+                // Ask, don't assume: the cached sort is refreshed when core
+                // replies with `SortChanged`, so a sort core refuses (or
+                // silently drops) never shows up in the header.
+                match state.results.next_sort_direction(&column) {
+                    Some(direction) => {
+                        let _ = cmd_tx.send(CoreCommand::ApplyOrder { column, direction });
                     }
                     None => {
                         let _ = cmd_tx.send(CoreCommand::ClearOrder);
@@ -180,4 +179,66 @@ pub(super) fn apply_commit_pending(
         "Committed: {} edit(s), {} delete(s).",
         edit_count, delete_count
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_helpers::{cmd_channel, make_state_with_results};
+    use sbql_core::{CoreEvent, SortDirection};
+
+    fn toggle_sort(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCommand>) {
+        apply(ResultsAction::ToggleSort, state, cmd_tx);
+    }
+
+    /// `o` cycles ascending → descending → off. The cache it reads is only
+    /// ever written by core's reply, so the test has to feed those back in —
+    /// which is the point: without them the key would stop cycling.
+    #[test]
+    fn o_cycles_ascending_then_descending_then_off() {
+        let mut state = make_state_with_results();
+        let (tx, mut rx) = cmd_channel();
+
+        toggle_sort(&mut state, &tx);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(CoreCommand::ApplyOrder { ref column, direction: SortDirection::Ascending })
+                if column == "id"
+        ));
+
+        state.apply_core_event(CoreEvent::SortChanged(Some((
+            "id".into(),
+            SortDirection::Ascending,
+        ))));
+        toggle_sort(&mut state, &tx);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(CoreCommand::ApplyOrder { ref column, direction: SortDirection::Descending })
+                if column == "id"
+        ));
+
+        state.apply_core_event(CoreEvent::SortChanged(Some((
+            "id".into(),
+            SortDirection::Descending,
+        ))));
+        toggle_sort(&mut state, &tx);
+        assert!(matches!(rx.try_recv(), Ok(CoreCommand::ClearOrder)));
+    }
+
+    /// The key must not write the sort itself. It used to, and the optimistic
+    /// write outlived every path where core dropped the sort without being
+    /// asked — a disconnect left the header sorted by a column nothing was
+    /// ordering on.
+    #[test]
+    fn o_does_not_touch_the_cached_sort() {
+        let mut state = make_state_with_results();
+        let (tx, _rx) = cmd_channel();
+
+        toggle_sort(&mut state, &tx);
+
+        assert!(
+            state.results.sort.is_none(),
+            "the applied sort is core's to report"
+        );
+    }
 }

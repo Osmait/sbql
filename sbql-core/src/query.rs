@@ -41,7 +41,10 @@ pub struct QueryResult {
     pub page: usize,
     /// Whether there might be more pages after this one.
     pub has_next_page: bool,
-    /// Total row count for the query (fetched on page 0 via COUNT(*)).
+    /// Total row count for the query, when a client has been told one.
+    ///
+    /// Always `None` on a page returned by [`execute_page`] — the count is a
+    /// separate, opt-in lookup ([`total_count`]) so it cannot delay the rows.
     pub total_count: Option<u64>,
 }
 
@@ -73,10 +76,16 @@ pub async fn export_all(
 }
 
 /// Execute a raw SQL string and return the first `PAGE_SIZE` rows of page
-/// `page` (0-indexed). On page 0, also fetches the total row count.
+/// `page` (0-indexed).
+///
+/// The returned page never carries a `total_count`. It used to: page 0 waited
+/// on `SELECT COUNT(*)` before returning, so the rows the user was actually
+/// looking at were held back by up to [`COUNT_TIMEOUT`] for a number most
+/// frontends never render. Callers that want the count ask for it separately
+/// via [`total_count`], off the path the user is waiting on.
 #[tracing::instrument(skip_all, fields(backend = pool_backend_name(pool), page))]
 pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<QueryResult> {
-    let mut result = match pool {
+    match pool {
         DbPool::Postgres(pg) => execute_page_pg(pg, sql, page).await,
         DbPool::Sqlite(sq) => execute_page_sqlite(sq, sql, page).await,
         DbPool::Mysql(my) => execute_page_mysql(my, sql, page).await,
@@ -84,24 +93,29 @@ pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<Query
         DbPool::DynamoDb(client) => execute_page_dynamodb(client, sql).await,
         DbPool::MongoDb(db) => execute_page_mongodb(db, sql).await,
         DbPool::SqlServer(pool) => execute_page_sqlserver(pool, sql, page).await,
-    }?;
-
-    // Fetch total count on page 0 for SQL backends.
-    // Timeout after COUNT_TIMEOUT to prevent hanging on huge tables.
-    if page == 0
-        && !matches!(
-            pool,
-            DbPool::Redis(_) | DbPool::DynamoDb(_) | DbPool::MongoDb(_)
-        )
-    {
-        result.total_count =
-            match tokio::time::timeout(COUNT_TIMEOUT, fetch_total_count(pool, sql)).await {
-                Ok(Ok(count)) => Some(count),
-                _ => None, // Timeout or error — skip count
-            };
     }
+}
 
-    Ok(result)
+/// Total row count for `sql`, or `None` when it cannot be had cheaply.
+///
+/// The three "no count" cases collapse into one because no caller can act on
+/// them differently: the backend has no cheap `COUNT(*)` (Redis, DynamoDB,
+/// MongoDB), the query is a shape a count would have to re-run wholesale
+/// (GROUP BY / UNION / HAVING), or the count did not come back within
+/// [`COUNT_TIMEOUT`]. In every case the honest answer is "unknown".
+#[tracing::instrument(skip_all, fields(backend = pool_backend_name(pool)))]
+pub async fn total_count(pool: &DbPool, sql: &str) -> Option<u64> {
+    match tokio::time::timeout(COUNT_TIMEOUT, fetch_total_count(pool, sql)).await {
+        Ok(Ok(count)) => Some(count),
+        Ok(Err(e)) => {
+            tracing::debug!("Skipping total count: {e}");
+            None
+        }
+        Err(_) => {
+            tracing::debug!("Total count timed out after {COUNT_TIMEOUT:?}");
+            None
+        }
+    }
 }
 
 /// Run `SELECT COUNT(*) FROM (sql)` to get the total row count.
@@ -651,7 +665,7 @@ async fn execute_page_sqlserver(
         rows: result_rows,
         page,
         has_next_page,
-        total_count: None, // Count is handled by the shared timeout-guarded path in execute_page
+        total_count: None, // Counting is a separate lookup — see `total_count`
     })
 }
 
@@ -744,7 +758,81 @@ async fn execute_page_redis(
     }
 
     let value: redis::Value = cmd.query_async(&mut cm.clone()).await?;
-    Ok(redis_value_to_query_result(&value))
+    Ok(redis_value_to_query_result_with_shape(
+        &value,
+        redis_reply_shape(&tokens),
+    ))
+}
+
+/// How the elements of a Redis array reply should be laid out for display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RedisReplyShape {
+    /// One element per row, in a single `value` column.
+    #[default]
+    Flat,
+    /// Alternating field/value elements, rendered two to a row.
+    Pairs,
+}
+
+/// Commands whose array reply is always field/value pairs.
+const ALWAYS_PAIRED: &[&str] = &["HGETALL", "ZPOPMIN", "ZPOPMAX"];
+
+/// Commands that return pairs only when asked to, via a trailing modifier.
+const PAIRED_ON_REQUEST: &[&str] = &[
+    "ZRANGE",
+    "ZREVRANGE",
+    "ZRANGEBYSCORE",
+    "ZREVRANGEBYSCORE",
+    "ZDIFF",
+    "ZUNION",
+    "ZINTER",
+    "ZRANDMEMBER",
+    "HRANDFIELD",
+];
+
+/// The modifiers that turn a [`PAIRED_ON_REQUEST`] reply into pairs.
+const PAIRING_MODIFIERS: &[&str] = &["WITHSCORES", "WITHVALUES"];
+
+/// Decide a reply's layout from the command that produced it.
+///
+/// This has to come from the command, not the data. The rule used to be "an
+/// even number of string elements means field/value pairs", which quietly
+/// misrepresented every reply that happened to be even: `LRANGE mylist 0 3`
+/// came back as two two-column rows, and so did any `SMEMBERS` of a set with
+/// an even number of members. Anything not on the lists below is flat.
+pub fn redis_reply_shape(tokens: &[String]) -> RedisReplyShape {
+    let Some(command) = tokens.first() else {
+        return RedisReplyShape::Flat;
+    };
+
+    if ALWAYS_PAIRED
+        .iter()
+        .any(|c| command.eq_ignore_ascii_case(c))
+    {
+        return RedisReplyShape::Pairs;
+    }
+
+    // CONFIG is a container command; only its GET form replies with pairs.
+    if command.eq_ignore_ascii_case("CONFIG") {
+        return match tokens.get(1) {
+            Some(sub) if sub.eq_ignore_ascii_case("GET") => RedisReplyShape::Pairs,
+            _ => RedisReplyShape::Flat,
+        };
+    }
+
+    if PAIRED_ON_REQUEST
+        .iter()
+        .any(|c| command.eq_ignore_ascii_case(c))
+        && tokens[1..].iter().any(|arg| {
+            PAIRING_MODIFIERS
+                .iter()
+                .any(|m| arg.eq_ignore_ascii_case(m))
+        })
+    {
+        return RedisReplyShape::Pairs;
+    }
+
+    RedisReplyShape::Flat
 }
 
 /// Tokenize a Redis command string, respecting double-quoted and single-quoted strings.
@@ -816,36 +904,59 @@ fn kv_result(col_a: &str, col_b: &str, rows: Vec<Vec<String>>) -> QueryResult {
     }
 }
 
+/// Build an `index`/`value` `QueryResult`, one element per row.
+///
+/// The position is kept rather than showing the values alone: for a list reply
+/// it is the element's actual index, which is what `LINDEX`/`LSET` address.
+/// This is only about how a *flat* reply is displayed — whether a reply is flat
+/// at all is [`redis_reply_shape`]'s decision.
+fn flat_result<'a>(items: impl Iterator<Item = &'a redis::Value>) -> QueryResult {
+    kv_result(
+        "index",
+        "value",
+        items
+            .enumerate()
+            .map(|(i, v)| vec![i.to_string(), redis_value_to_string(v)])
+            .collect(),
+    )
+}
+
+/// Build a two-column `QueryResult` from a flat run of alternating
+/// field/value elements. A trailing odd element keeps its own row rather than
+/// being dropped, so a malformed reply is visible instead of truncated.
+fn paired_result<'a>(items: impl Iterator<Item = &'a redis::Value>) -> QueryResult {
+    let values: Vec<String> = items.map(redis_value_to_string).collect();
+    let rows = values.chunks(2).map(<[String]>::to_vec).collect();
+    kv_result("field", "value", rows)
+}
+
 /// Convert a `redis::Value` into a `QueryResult` for display.
+///
+/// Renders arrays flat, because with no command in hand there is nothing to
+/// decide a pair layout from. Callers that know which command produced the
+/// reply must go through [`redis_value_to_query_result_with_shape`]: inferring
+/// pairs from the data alone is what turned `LRANGE mylist 0 3` into two
+/// two-column rows.
 pub fn redis_value_to_query_result(value: &redis::Value) -> QueryResult {
+    redis_value_to_query_result_with_shape(value, RedisReplyShape::Flat)
+}
+
+/// Convert a `redis::Value` into a `QueryResult`, laying arrays out as `shape`
+/// says the issuing command replies. Use [`redis_reply_shape`] to derive it.
+pub fn redis_value_to_query_result_with_shape(
+    value: &redis::Value,
+    shape: RedisReplyShape,
+) -> QueryResult {
     match value {
         redis::Value::Nil => single_value_result("(nil)".into()),
         redis::Value::Int(i) => single_value_result(i.to_string()),
         redis::Value::BulkString(b) => single_value_result(String::from_utf8_lossy(b).into_owned()),
         redis::Value::SimpleString(s) => single_value_result(s.clone()),
         redis::Value::Okay => single_value_result("OK".into()),
-        redis::Value::Array(arr) => {
-            // Check if this looks like HGETALL output (even-length, key-value pairs)
-            if arr.len() >= 2 && arr.len() % 2 == 0 && arr.iter().all(is_string_like) {
-                let rows = arr
-                    .chunks(2)
-                    .map(|pair| {
-                        vec![
-                            redis_value_to_string(&pair[0]),
-                            redis_value_to_string(&pair[1]),
-                        ]
-                    })
-                    .collect();
-                kv_result("field", "value", rows)
-            } else {
-                let rows = arr
-                    .iter()
-                    .enumerate()
-                    .map(|(i, v)| vec![i.to_string(), redis_value_to_string(v)])
-                    .collect();
-                kv_result("index", "value", rows)
-            }
-        }
+        redis::Value::Array(arr) => match shape {
+            RedisReplyShape::Pairs => paired_result(arr.iter()),
+            RedisReplyShape::Flat => flat_result(arr.iter()),
+        },
         redis::Value::Double(f) => single_value_result(f.to_string()),
         redis::Value::Boolean(b) => single_value_result(b.to_string()),
         redis::Value::VerbatimString { text, .. } => QueryResult {
@@ -856,6 +967,7 @@ pub fn redis_value_to_query_result(value: &redis::Value) -> QueryResult {
             total_count: None,
         },
         redis::Value::BigNumber(n) => single_value_result(n.to_string()),
+        // A RESP3 map is pairs by protocol, whatever the command was.
         redis::Value::Map(pairs) => {
             let rows = pairs
                 .iter()
@@ -863,23 +975,12 @@ pub fn redis_value_to_query_result(value: &redis::Value) -> QueryResult {
                 .collect();
             kv_result("field", "value", rows)
         }
-        redis::Value::Set(items) => {
-            let rows = items
-                .iter()
-                .enumerate()
-                .map(|(i, v)| vec![i.to_string(), redis_value_to_string(v)])
-                .collect();
-            kv_result("index", "value", rows)
-        }
-        redis::Value::Attribute { data, .. } => redis_value_to_query_result(data),
-        redis::Value::Push { data, .. } => {
-            let rows = data
-                .iter()
-                .enumerate()
-                .map(|(i, v)| vec![i.to_string(), redis_value_to_string(v)])
-                .collect();
-            kv_result("index", "value", rows)
-        }
+        // A set has no pair structure and no meaningful order.
+        redis::Value::Set(items) => flat_result(items.iter()),
+        // The attribute is metadata; the payload is what the command replied
+        // with, so it keeps the command's shape.
+        redis::Value::Attribute { data, .. } => redis_value_to_query_result_with_shape(data, shape),
+        redis::Value::Push { data, .. } => flat_result(data.iter()),
         redis::Value::ServerError(e) => QueryResult {
             columns: vec!["error".into()],
             rows: vec![vec![format!("ERR {}", e.details().unwrap_or_default())]],
@@ -938,13 +1039,6 @@ fn redis_value_to_string(value: &redis::Value) -> String {
         redis::Value::Attribute { data, .. } => redis_value_to_string(data),
         redis::Value::Push { data, .. } => join_redis_values("[", "]", data.iter(), ", "),
     }
-}
-
-fn is_string_like(value: &redis::Value) -> bool {
-    matches!(
-        value,
-        redis::Value::BulkString(_) | redis::Value::SimpleString(_) | redis::Value::Int(_)
-    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1860,5 +1954,159 @@ mod tests {
     #[test]
     fn quote_ident_with_quotes() {
         assert_eq!(quote_ident("col\"name"), "\"col\"\"name\"");
+    }
+
+    // -- Redis reply shape --
+    //
+    // The shape used to be guessed from the reply: any even-length array of
+    // strings was rendered as field/value pairs. These tests pin the shape to
+    // the command instead, which is the only thing that actually knows.
+
+    fn bulk_array(items: &[&str]) -> redis::Value {
+        redis::Value::Array(
+            items
+                .iter()
+                .map(|s| redis::Value::BulkString(s.as_bytes().to_vec()))
+                .collect(),
+        )
+    }
+
+    /// Render `reply` the way `command` would have it rendered.
+    fn render(command: &str, reply: &redis::Value) -> QueryResult {
+        let tokens = tokenize_redis_command(command);
+        redis_value_to_query_result_with_shape(reply, redis_reply_shape(&tokens))
+    }
+
+    /// The original bug: four list elements came back as two two-column rows,
+    /// silently pairing values that have nothing to do with each other.
+    #[test]
+    fn lrange_with_an_even_number_of_elements_stays_flat() {
+        let reply = bulk_array(&["a", "b", "c", "d"]);
+
+        let result = render("LRANGE mylist 0 3", &reply);
+
+        // Flat means one element per row, keeping its position — not two
+        // unrelated elements paired onto one row.
+        assert_eq!(result.columns, vec!["index", "value"]);
+        assert_eq!(
+            result.rows,
+            vec![
+                vec!["0", "a"],
+                vec!["1", "b"],
+                vec!["2", "c"],
+                vec!["3", "d"]
+            ]
+        );
+    }
+
+    /// Same reply, same parity — a set is still a flat list of members.
+    #[test]
+    fn smembers_with_an_even_number_of_members_stays_flat() {
+        let reply = bulk_array(&["x", "y"]);
+
+        let result = render("SMEMBERS myset", &reply);
+
+        assert_eq!(result.columns, vec!["index", "value"]);
+        assert_eq!(result.rows, vec![vec!["0", "x"], vec!["1", "y"]]);
+    }
+
+    #[test]
+    fn hgetall_renders_as_pairs() {
+        let reply = bulk_array(&["field1", "value1", "field2", "value2"]);
+
+        let result = render("HGETALL myhash", &reply);
+
+        assert_eq!(result.columns, vec!["field", "value"]);
+        assert_eq!(
+            result.rows,
+            vec![vec!["field1", "value1"], vec!["field2", "value2"]]
+        );
+    }
+
+    #[test]
+    fn zrange_only_pairs_with_withscores() {
+        let reply = bulk_array(&["alice", "100", "bob", "200"]);
+
+        let plain = render("ZRANGE leaderboard 0 -1", &reply);
+        assert_eq!(plain.columns, vec!["index", "value"]);
+        assert_eq!(plain.rows.len(), 4);
+
+        let scored = render("ZRANGE leaderboard 0 -1 WITHSCORES", &reply);
+        assert_eq!(scored.columns, vec!["field", "value"]);
+        assert_eq!(scored.rows, vec![vec!["alice", "100"], vec!["bob", "200"]]);
+    }
+
+    /// The modifier is a Redis keyword, so its case is the user's business.
+    #[test]
+    fn the_pairing_modifier_is_case_insensitive() {
+        assert_eq!(
+            redis_reply_shape(&tokenize_redis_command("HRANDFIELD h 2 withvalues")),
+            RedisReplyShape::Pairs
+        );
+    }
+
+    /// CONFIG is a container command — only `CONFIG GET` replies with pairs.
+    #[test]
+    fn config_pairs_only_for_get() {
+        assert_eq!(
+            redis_reply_shape(&tokenize_redis_command("CONFIG GET maxmemory")),
+            RedisReplyShape::Pairs
+        );
+        assert_eq!(
+            redis_reply_shape(&tokenize_redis_command("CONFIG RESETSTAT")),
+            RedisReplyShape::Flat
+        );
+    }
+
+    #[test]
+    fn zpopmin_always_pairs() {
+        assert_eq!(
+            redis_reply_shape(&tokenize_redis_command("ZPOPMIN leaderboard")),
+            RedisReplyShape::Pairs
+        );
+    }
+
+    /// An empty command line has no shape to derive; flat is the answer that
+    /// cannot misrepresent anything.
+    #[test]
+    fn an_empty_command_is_flat() {
+        assert_eq!(redis_reply_shape(&[]), RedisReplyShape::Flat);
+    }
+
+    /// A RESP3 attribute wraps the real reply, so the command's shape has to
+    /// survive the unwrapping.
+    #[test]
+    fn attributes_keep_the_commands_shape() {
+        let reply = redis::Value::Attribute {
+            data: Box::new(bulk_array(&["f", "v"])),
+            attributes: vec![],
+        };
+
+        assert_eq!(render("HGETALL h", &reply).columns, vec!["field", "value"]);
+        assert_eq!(
+            render("LRANGE l 0 1", &reply).columns,
+            vec!["index", "value"]
+        );
+    }
+
+    /// A pair-shaped command with an odd reply is malformed. The odd element
+    /// keeps its own row rather than being dropped, so it stays visible.
+    #[test]
+    fn an_odd_pair_reply_keeps_its_last_element() {
+        let reply = bulk_array(&["f1", "v1", "orphan"]);
+
+        let result = render("HGETALL myhash", &reply);
+
+        assert_eq!(result.rows, vec![vec!["f1", "v1"], vec!["orphan"]]);
+    }
+
+    /// With no command in hand there is nothing to derive a shape from, so the
+    /// shape-less entry point must not start guessing again.
+    #[test]
+    fn the_shapeless_entry_point_is_flat() {
+        let result = redis_value_to_query_result(&bulk_array(&["a", "b"]));
+
+        assert_eq!(result.columns, vec!["index", "value"]);
+        assert_eq!(result.rows.len(), 2);
     }
 }

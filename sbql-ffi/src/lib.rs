@@ -349,6 +349,20 @@ impl SbqlEngine {
         extract_query_result(events)
     }
 
+    /// Total row count for the current query, or `nil` when there is none to
+    /// be had (no active query, an unsupported backend, an expensive query
+    /// shape, or a count that took too long).
+    ///
+    /// Separate from `execute_query` on purpose: the count used to ride along
+    /// with page 0 and held the rows back by up to three seconds. Call this
+    /// after the page has been shown.
+    #[uniffi::method(async_runtime = "tokio")]
+    pub async fn fetch_total_count(&self) -> Result<Option<u64>, SbqlFfiError> {
+        let mut core = self.core.lock().await;
+        let events = core.handle(sbql_core::CoreCommand::FetchTotalCount).await;
+        extract_total_count(events)
+    }
+
     // -------------------------------------------------------------------
     // Sort / Filter
     // -------------------------------------------------------------------
@@ -593,6 +607,19 @@ fn extract_query_result(events: Vec<sbql_core::CoreEvent>) -> Result<FfiQueryRes
     })
 }
 
+fn extract_total_count(events: Vec<sbql_core::CoreEvent>) -> Result<Option<u64>, SbqlFfiError> {
+    if let Some(failure) = first_failure(&events) {
+        return Err(failure);
+    }
+    for ev in events {
+        if let sbql_core::CoreEvent::TotalCount(count) = ev {
+            return Ok(count);
+        }
+    }
+    // No count event is the same answer as a count that could not be taken.
+    Ok(None)
+}
+
 fn check_for_error(events: Vec<sbql_core::CoreEvent>) -> Result<(), SbqlFfiError> {
     if let Some(failure) = first_failure(&events) {
         return Err(failure);
@@ -603,6 +630,33 @@ fn check_for_error(events: Vec<sbql_core::CoreEvent>) -> Result<(), SbqlFfiError
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
+
+    /// Keep the test suite away from the developer's machine.
+    ///
+    /// `SbqlEngine::new()` builds a real `Core`, and `save_connection` really
+    /// persists — so without this every run rewrote the developer's own
+    /// `~/.config/sbql/connections.toml`, and a suite that saves nothing but
+    /// its own fixtures left it holding `connections = []`. That is exactly
+    /// how a real set of saved connections gets destroyed by running the
+    /// tests. `sbql-core` has guarded this since its first test; the FFI
+    /// suite never did.
+    ///
+    /// Passwords are kept out of the OS credential store for the same reason:
+    /// on a desktop with a locked keyring every run would otherwise pop an
+    /// unlock prompt and leave test credentials behind.
+    ///
+    /// The temp dir is created once per test process and leaked, so it
+    /// outlives every test that reads it back.
+    fn isolate_from_the_machine() {
+        static SCRATCH: OnceLock<tempfile::TempDir> = OnceLock::new();
+        let dir = SCRATCH.get_or_init(|| {
+            #[allow(clippy::expect_used)]
+            tempfile::tempdir().expect("create temp config dir")
+        });
+        std::env::set_var(sbql_core::CONFIG_DIR_ENV, dir.path());
+        std::env::set_var(sbql_core::NO_KEYRING_ENV, "1");
+    }
 
     // --- parse_uuid tests ---
 
@@ -693,6 +747,53 @@ mod tests {
         assert!(result.columns.is_empty());
     }
 
+    // --- extract_total_count tests ---
+
+    #[test]
+    fn extract_total_count_with_count() {
+        let events = vec![sbql_core::CoreEvent::TotalCount(Some(42))];
+        assert_eq!(extract_total_count(events).unwrap(), Some(42));
+    }
+
+    /// A count that could not be taken is `nil`, not a thrown error — Swift
+    /// asked for a number it can live without.
+    #[test]
+    fn extract_total_count_without_count() {
+        let events = vec![sbql_core::CoreEvent::TotalCount(None)];
+        assert_eq!(extract_total_count(events).unwrap(), None);
+    }
+
+    #[test]
+    fn extract_total_count_with_error() {
+        let events = vec![sbql_core::CoreEvent::Error(sbql_core::CoreError::new(
+            sbql_core::ErrorKind::Query,
+            "boom",
+        ))];
+        assert!(extract_total_count(events).is_err());
+    }
+
+    /// `SortChanged` is one of the events every command can now carry along.
+    /// The extractors have to walk past it, not stop at it.
+    #[test]
+    fn extract_query_result_ignores_sort_changed() {
+        let qr = sbql_core::QueryResult {
+            columns: vec!["id".into()],
+            rows: vec![vec!["1".into()]],
+            page: 0,
+            has_next_page: false,
+            total_count: None,
+        };
+        let events = vec![
+            sbql_core::CoreEvent::SortChanged(Some((
+                "id".into(),
+                sbql_core::SortDirection::Ascending,
+            ))),
+            sbql_core::CoreEvent::QueryResult(qr),
+        ];
+        let result = extract_query_result(events).unwrap();
+        assert_eq!(result.columns, vec!["id"]);
+    }
+
     // --- check_for_error tests ---
 
     #[test]
@@ -720,11 +821,13 @@ mod tests {
 
     #[test]
     fn engine_new_does_not_panic() {
+        isolate_from_the_machine();
         let _engine = SbqlEngine::new();
     }
 
     #[test]
     fn engine_get_connections_initially_empty_or_loaded() {
+        isolate_from_the_machine();
         let engine = SbqlEngine::new();
         // Should not panic; returns whatever is on disk (may be empty or not)
         let _conns = engine.get_connections();
@@ -735,6 +838,7 @@ mod tests {
 
     #[tokio::test]
     async fn engine_connect_nonexistent_id() {
+        isolate_from_the_machine();
         let engine = SbqlEngine::new();
         let result = engine
             .connect("550e8400-e29b-41d4-a716-446655440000".into())
@@ -747,6 +851,7 @@ mod tests {
 
     #[tokio::test]
     async fn engine_save_connection_invalid_uuid() {
+        isolate_from_the_machine();
         let engine = SbqlEngine::new();
         let config = FfiConnectionConfig {
             id: "invalid-uuid".into(),
@@ -774,6 +879,7 @@ mod tests {
 
     #[tokio::test]
     async fn engine_full_lifecycle_sqlite() {
+        isolate_from_the_machine();
         let engine = SbqlEngine::new();
         let id = uuid::Uuid::new_v4().to_string();
         let config = FfiConnectionConfig {

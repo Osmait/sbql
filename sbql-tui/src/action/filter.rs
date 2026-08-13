@@ -116,7 +116,12 @@ pub(super) fn apply_refresh_filter_suggestions(
         return;
     }
 
-    let Some((col_raw, value_prefix)) = parse_filter_input(trimmed) else {
+    // The same parser the WHERE-builder uses, so the suggestions can only ever
+    // describe the query that will actually run. `None` means the core will
+    // treat this as a whole-text match, and there is no single column to
+    // suggest values for.
+    let (col_opt, value_prefix) = sbql_core::query_builder::parse_filter_query(trimmed);
+    let Some(col_raw) = col_opt else {
         state.filter.suggestions.clear();
         state.filter.show_suggestions = false;
         state.filter.loading_suggestions = false;
@@ -175,16 +180,6 @@ pub(super) fn apply_refresh_filter_suggestions(
         limit: 20,
         token: state.filter.suggestion_token,
     });
-}
-
-pub(super) fn parse_filter_input(input: &str) -> Option<(String, &str)> {
-    let colon = input.find(':')?;
-    let col = input[..colon].trim();
-    if col.is_empty() {
-        return None;
-    }
-    let value = input[colon + 1..].trim_start();
-    Some((col.to_owned(), value))
 }
 
 fn apply_selected_filter_suggestion(state: &mut AppState) -> bool {

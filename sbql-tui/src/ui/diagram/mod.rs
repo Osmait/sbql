@@ -283,7 +283,10 @@ fn draw_canvas(
 
     let inner_h = area.height.saturating_sub(2) as usize;
     let inner_w = area.width.saturating_sub(2) as usize;
-    let lines = cache.diagram_canvas().unwrap_or_default().to_vec();
+    // Borrowed, not copied: the cached canvas is rebuilt only when the diagram
+    // changes, but this runs every frame, so cloning every row of it — most of
+    // them off-screen — was pure waste. Only the visible rows get cloned.
+    let lines = cache.diagram_canvas().unwrap_or_default();
     let canvas_height = lines.len();
 
     // Position indicator
@@ -295,10 +298,10 @@ fn draw_canvas(
 
     // Apply scroll (vertical + horizontal)
     let scrolled: Vec<Line> = lines
-        .into_iter()
+        .iter()
         .skip(state.scroll_y as usize)
-        .map(|line| crop_line(line, state.scroll_x as usize, inner_w))
         .take(inner_h)
+        .map(|line| crop_line(line.clone(), state.scroll_x as usize, inner_w))
         .collect();
 
     let paragraph = Paragraph::new(scrolled)
@@ -1195,9 +1198,15 @@ mod tests {
     fn test_line_cropping() {
         let line = Line::from("hello world");
         let cropped = crop_line(line, 6, 5);
-        assert_eq!(cropped.spans.len(), 5);
-        assert_eq!(cropped.spans[0].content, "w");
-        assert_eq!(cropped.spans[4].content, "d");
+        // Asserted on the visible text rather than the span count: spans now
+        // hold runs of same-styled characters instead of one character each.
+        let text: String = cropped
+            .spans
+            .iter()
+            .flat_map(|sp| sp.content.chars())
+            .collect();
+        assert_eq!(text, "world");
+        assert_eq!(line_width(&cropped), 5);
     }
 
     #[test]
