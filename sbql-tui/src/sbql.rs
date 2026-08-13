@@ -104,8 +104,13 @@ impl Sbql {
                     self.dispatch(action);
                 }
                 AppEvent::Mouse(mouse) => {
+                    // The handler is pure, so the bookkeeping a click leaves
+                    // behind is done here — and *after* the action is computed,
+                    // so double-click detection compares against the previous
+                    // click rather than this one.
                     let action = handlers::mouse::handle(&self.state, mouse);
                     self.dispatch(action);
+                    self.remember_pointer(mouse);
                 }
                 AppEvent::Resize => self.state.layout.needs_redraw = true,
                 // Nothing to paint this on: without a reader there are no more
@@ -196,6 +201,25 @@ impl Sbql {
         if let Some(cfg) = target {
             let _ = self.cmd_tx.send(CoreCommand::Connect(cfg.id));
             self.auto_connected = true;
+        }
+    }
+
+    /// Record where the pointer was, for double-click and drag-by-delta.
+    fn remember_pointer(&mut self, mouse: crossterm::event::MouseEvent) {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let layout = &mut self.state.layout;
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                layout.last_click = Some((mouse.column, mouse.row, self.state.tick));
+                layout.last_drag = Some((mouse.column, mouse.row));
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                layout.last_drag = Some((mouse.column, mouse.row));
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                layout.last_drag = None;
+            }
+            _ => {}
         }
     }
 

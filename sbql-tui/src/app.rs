@@ -13,6 +13,7 @@ use crate::completion::CompletionState;
 use crate::highlight::SqlHighlighter;
 use crate::list_cursor::ListCursor;
 use crate::notice::Notice;
+use crate::ui::hit::HitMap;
 
 // ---------------------------------------------------------------------------
 // Focus model
@@ -389,6 +390,11 @@ pub struct EditorState {
     pub highlighter: SqlHighlighter,
     // Autocomplete
     pub completion: CompletionState,
+    /// Whether a mouse drag is currently extending a selection.
+    ///
+    /// The selection anchor is dropped on the first drag event rather than on
+    /// mouse-down, so an ordinary click does not leave a live selection behind.
+    pub dragging: bool,
 }
 
 impl EditorState {
@@ -604,12 +610,52 @@ pub struct VimState {
 }
 
 pub struct LayoutCache {
-    pub last_areas: Option<LastAreas>,
+    /// The results grid's rect from the last draw.
+    ///
+    /// The only panel rect still needed outside drawing: the cell-edit popup
+    /// floats over the selected cell, so it has to know where the grid was.
+    /// Everything else that used to be cached here is answered by `hits`.
+    pub results_area: Option<Rect>,
     pub last_col_widths: Vec<u16>,
     pub spinner_frame: usize,
     pub sidebar_hidden: bool,
     /// When false, skip the terminal.draw() call to avoid redundant repaints.
     pub needs_redraw: bool,
+    /// What the last frame painted where, so a click can find it.
+    pub hits: HitMap,
+    /// The editor's text region from the last frame.
+    ///
+    /// Held apart from the hit map because a drag has to keep addressing the
+    /// editor after the pointer has left it — the selection should follow the
+    /// mouse past the edge, as it does everywhere else.
+    pub editor_text_rect: Option<Rect>,
+    /// The pointer's position during a drag, for panning by delta.
+    pub last_drag: Option<(u16, u16)>,
+    /// Where and when the last left-click landed: `(col, row, tick)`.
+    ///
+    /// Double-click is measured in ticks rather than wall-clock so the mouse
+    /// handler stays a pure function of state — the same reason notices expire
+    /// on ticks instead of reading a clock.
+    pub last_click: Option<(u16, u16, u64)>,
+}
+
+/// Ticks within which a second click at the same spot is a double-click.
+///
+/// The loop ticks every 100ms, so this is 400ms — the usual system default.
+const DOUBLE_CLICK_TICKS: u64 = 4;
+
+impl LayoutCache {
+    /// Whether a click at this point continues the previous one.
+    ///
+    /// Same cell, close enough in time. Requiring the exact cell rather than a
+    /// neighbourhood is deliberate: a terminal cell is already a large target,
+    /// and a drifting double-click that acts on the row *next* to the one the
+    /// user pointed at is worse than no double-click at all.
+    pub fn is_double_click(&self, col: u16, row: u16, tick: u64) -> bool {
+        self.last_click.is_some_and(|(c, r, t)| {
+            c == col && r == row && tick.wrapping_sub(t) <= DOUBLE_CLICK_TICKS
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -678,15 +724,6 @@ pub struct AppState {
 
     // ---- quit ----
     pub should_quit: bool,
-}
-
-/// Snapshot of the rects from the last draw cycle.
-#[derive(Debug, Clone, Copy)]
-pub struct LastAreas {
-    pub conn_list: Rect,
-    pub table_list: Rect,
-    pub editor: Rect,
-    pub results: Rect,
 }
 
 impl AppState {
@@ -826,6 +863,7 @@ impl AppState {
                 revision: 0,
                 highlighter: SqlHighlighter::new(),
                 completion: CompletionState::default(),
+                dragging: false,
             },
             results: ResultsState {
                 data: QueryResult::default(),
@@ -857,11 +895,15 @@ impl AppState {
                 pending_g: false,
             },
             layout: LayoutCache {
-                last_areas: None,
+                results_area: None,
                 last_col_widths: Vec::new(),
                 spinner_frame: 0,
                 sidebar_hidden: false,
                 needs_redraw: true,
+                hits: HitMap::default(),
+                editor_text_rect: None,
+                last_drag: None,
+                last_click: None,
             },
 
             filter: FilterBar::default(),

@@ -103,6 +103,23 @@ pub(super) fn apply(
             }
         }
 
+        // Clicking a header sorts that column, and moves the cursor there so
+        // the keyboard picks up where the mouse left off.
+        ResultsAction::SortColumn(idx) => {
+            let Some(column) = state.results.data.columns.get(idx).cloned() else {
+                return;
+            };
+            state.results.selected_col = idx;
+            match state.results.next_sort_direction(&column) {
+                Some(direction) => {
+                    let _ = cmd_tx.send(CoreCommand::ApplyOrder { column, direction });
+                }
+                None => {
+                    let _ = cmd_tx.send(CoreCommand::ClearOrder);
+                }
+            }
+        }
+
         ResultsAction::ToggleSort => {
             if let Some(column) = state.results.selected_column_name().map(str::to_owned) {
                 // Ask, don't assume: the cached sort is refreshed when core

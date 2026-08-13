@@ -121,16 +121,30 @@ pub fn measure(state: &mut DiagramState, cache: &mut crate::ui::cache::RenderCac
 }
 
 /// Render the diagram. Reads state only — call [`measure`] first.
-pub fn draw(frame: &mut Frame, state: &DiagramState, cache: &crate::ui::cache::RenderCache) {
+pub fn draw(
+    frame: &mut Frame,
+    state: &DiagramState,
+    cache: &crate::ui::cache::RenderCache,
+    hits: &mut crate::ui::hit::HitMap,
+) {
     let full = frame.area();
     let split = panes(full);
 
-    draw_sidebar(frame, state, split[0]);
+    // The canvas takes the whole right pane; dragging inside it pans.
+    hits.register(split[1], crate::ui::hit::Zone::DiagramCanvas);
+
+    draw_sidebar(frame, state, split[0], hits);
     draw_canvas(frame, state, cache, split[1]);
     draw_help_bar(frame, full, state.focus_mode);
 }
 
-fn visible_table_indices(state: &DiagramState) -> Vec<usize> {
+/// Which tables the diagram shows, as indices into `data.tables`.
+///
+/// Shared with the action layer: the sidebar draws this list and
+/// `DiagramAction::SelectIndex` resolves against it, so a second copy of the
+/// rule would mean a click selecting a different table than the one it landed
+/// on the moment the two drifted.
+pub(crate) fn visible_table_indices(state: &DiagramState) -> Vec<usize> {
     let tables = &state.data.tables;
     if tables.is_empty() {
         return Vec::new();
@@ -185,7 +199,12 @@ fn visible_foreign_keys<'a>(
 // Left sidebar: table list
 // ---------------------------------------------------------------------------
 
-fn draw_sidebar(frame: &mut Frame, state: &DiagramState, area: Rect) {
+fn draw_sidebar(
+    frame: &mut Frame,
+    state: &DiagramState,
+    area: Rect,
+    hits: &mut crate::ui::hit::HitMap,
+) {
     let visible_indices = visible_table_indices(state);
     let tables = &state.data.tables;
 
@@ -248,6 +267,39 @@ fn draw_sidebar(frame: &mut Frame, state: &DiagramState, area: Rect) {
     });
 
     frame.render_stateful_widget(list, list_area, &mut list_state);
+
+    // Registered after the render, because the render is what decides the
+    // scroll offset: a fresh `ListState` starts at 0 and ratatui pushes it down
+    // until the selected row is on screen. Reading it back afterwards is the
+    // only way to know which item ended up on which row.
+    let offset = list_state.offset();
+    let rows = list_area.inner(ratatui::layout::Margin::new(1, 1));
+    for (pos, &table_idx) in filtered_indices
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(rows.height as usize)
+    {
+        let Ok(dy) = u16::try_from(pos - offset) else {
+            break;
+        };
+        let Some(y) = rows.y.checked_add(dy) else {
+            break;
+        };
+
+        // `DiagramAction::SelectIndex` looks the row up in the focus-mode list,
+        // which the search box then filters *further* before this draws it. So
+        // the row number on screen is not the index the action wants: map the
+        // table back through the list the action indexes, or a click during a
+        // search selects some other table.
+        let Some(select) = visible_indices.iter().position(|&v| v == table_idx) else {
+            continue;
+        };
+        hits.register(
+            Rect::new(rows.x, y, rows.width, 1),
+            crate::ui::hit::Zone::DiagramTable(select),
+        );
+    }
 
     // Draw search input at bottom
     if let Some(sa) = search_area {
@@ -1109,6 +1161,160 @@ mod tests {
         );
     }
 
+    // -----------------------------------------------------------------------
+    // Sidebar hit zones
+    // -----------------------------------------------------------------------
+
+    /// The text painted inside a rect, so a test can check a zone against the
+    /// pixels it claims rather than against coordinates it worked out itself.
+    fn text_at(buf: &ratatui::buffer::Buffer, rect: Rect) -> String {
+        let mut out = String::new();
+        for y in rect.y..rect.bottom() {
+            for x in rect.x..rect.right() {
+                if let Some(cell) = buf.cell((x, y)) {
+                    out.push_str(cell.symbol());
+                }
+            }
+        }
+        out
+    }
+
+    fn diagram_with(names: &[String]) -> DiagramData {
+        DiagramData {
+            tables: names
+                .iter()
+                .map(|n| {
+                    let (schema, name) = n.split_once('.').unwrap_or(("public", n));
+                    TableSchema {
+                        schema: schema.to_owned(),
+                        name: name.to_owned(),
+                        columns: vec![ColumnInfo {
+                            name: "id".into(),
+                            data_type: "integer".into(),
+                            is_pk: true,
+                            is_nullable: false,
+                        }],
+                    }
+                })
+                .collect(),
+            foreign_keys: vec![],
+        }
+    }
+
+    /// Draw the diagram through the app's own root draw, so the zones land in
+    /// `state.layout.hits` exactly as they do at runtime.
+    fn render(state: &mut crate::app::AppState, w: u16, h: u16) -> ratatui::buffer::Buffer {
+        let mut cache = crate::ui::cache::RenderCache::new();
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).expect("backend");
+        terminal
+            .draw(|frame| crate::ui::draw(frame, state, &mut cache))
+            .expect("draw");
+        terminal.backend().buffer().clone()
+    }
+
+    /// The sidebar row whose painted text holds `name`.
+    fn row_showing(
+        state: &crate::app::AppState,
+        buffer: &ratatui::buffer::Buffer,
+        height: u16,
+        name: &str,
+    ) -> Option<Rect> {
+        (0..height).find_map(|y| match state.layout.hits.hit(1, y) {
+            Some((rect, crate::ui::hit::Zone::DiagramTable(_)))
+                if text_at(buffer, rect).contains(name) =>
+            {
+                Some(rect)
+            }
+            _ => None,
+        })
+    }
+
+    /// Click through the real mouse handler and action pipeline: the zone index
+    /// is only right if `SelectIndex` resolves it back to the table that was
+    /// painted there, so the test asserts on the end of that chain.
+    fn click(state: &mut crate::app::AppState, col: u16, row: u16) {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let event = crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: col,
+            row,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        let action = crate::handlers::mouse::handle(state, event);
+        crate::action::apply(action, state, &tx);
+    }
+
+    fn selected(state: &crate::app::AppState) -> Option<usize> {
+        state.diagram.as_ref().map(|d| d.selected_table)
+    }
+
+    #[test]
+    fn clicking_a_sidebar_row_selects_the_table_painted_on_it() {
+        let names: Vec<String> = ["s.alpha", "s.bravo", "s.charlie", "s.delta"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+        let mut state = crate::app::AppState::new(vec![]);
+        state.diagram = Some(DiagramState::new(diagram_with(&names)));
+
+        let buffer = render(&mut state, 100, 30);
+        let row = row_showing(&state, &buffer, 30, "s.charlie").expect("charlie is drawn");
+        click(&mut state, row.x + 1, row.y);
+
+        assert_eq!(selected(&state), Some(2));
+    }
+
+    /// The search box filters the sidebar *below* the list `SelectIndex`
+    /// indexes, so the row number on screen is not the index the action wants.
+    /// Registering the row number here would select alpha instead of bravo.
+    #[test]
+    fn a_search_filtered_row_still_selects_the_table_it_shows() {
+        let names: Vec<String> = ["s.alpha", "s.bravo", "s.charlie", "s.delta"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+        let mut state = crate::app::AppState::new(vec![]);
+        let mut diagram = DiagramState::new(diagram_with(&names));
+        // Matches bravo and charlie only, so the top row is absolute index 1.
+        diagram.search_active = true;
+        diagram.search_query = "r".into();
+        state.diagram = Some(diagram);
+
+        let buffer = render(&mut state, 100, 30);
+        assert!(
+            row_showing(&state, &buffer, 30, "s.alpha").is_none(),
+            "a table the search filtered out is still drawn"
+        );
+
+        let row = row_showing(&state, &buffer, 30, "s.bravo").expect("bravo is drawn");
+        click(&mut state, row.x + 1, row.y);
+        assert_eq!(selected(&state), Some(1));
+    }
+
+    /// Ratatui scrolls the list while it renders so the selected row stays on
+    /// screen. Assuming the top row is item 0 would select the wrong table for
+    /// every row of a schema too long to fit.
+    #[test]
+    fn a_scrolled_sidebar_registers_the_rows_it_actually_painted() {
+        let names: Vec<String> = (0..60).map(|i| format!("s.t{i:02}")).collect();
+        let mut state = crate::app::AppState::new(vec![]);
+        let mut diagram = DiagramState::new(diagram_with(&names));
+        diagram.selected_table = 50;
+        state.diagram = Some(diagram);
+
+        let buffer = render(&mut state, 100, 30);
+        // 28 rows fit inside the bordered list, so showing item 50 puts item 23
+        // on top.
+        let row = row_showing(&state, &buffer, 30, "s.t23").expect("t23 is drawn");
+        click(&mut state, row.x + 1, row.y);
+
+        assert_eq!(selected(&state), Some(23));
+        assert!(
+            row_showing(&state, &buffer, 30, "s.t00").is_none(),
+            "a row scrolled off the top is still clickable"
+        );
+    }
+
     #[test]
     fn test_diagram_rendering() {
         // Setup mock diagram data
@@ -1173,7 +1379,7 @@ mod tests {
             .draw(|f| {
                 // measure settles the canvas cache; draw is a pure read.
                 measure(&mut state, &mut cache, f.area());
-                draw(f, &state, &cache);
+                draw(f, &state, &cache, &mut crate::ui::hit::HitMap::default());
             })
             .unwrap();
 
@@ -1385,7 +1591,7 @@ mod tests {
             .draw(|f| {
                 // measure settles the canvas cache; draw is a pure read.
                 measure(&mut state, &mut cache, f.area());
-                draw(f, &state, &cache);
+                draw(f, &state, &cache, &mut crate::ui::hit::HitMap::default());
             })
             .unwrap();
 

@@ -97,6 +97,9 @@ pub enum ResultsAction {
     SetRow(usize),
     SetCol(usize),
     ToggleSort,
+    /// Cycle the sort of a named column — what clicking its header does.
+    /// `ToggleSort` acts on the cursor's column; this one names its target.
+    SortColumn(usize),
     MarkRowForDeletion,
     CommitPending,
     DiscardPendingOrEsc,
@@ -115,6 +118,20 @@ pub enum EditorAction {
     Input(Input),
     CursorMove(CursorMove),
     RunQuery,
+    /// Put the cursor where the user clicked, in text coordinates.
+    ClickAt {
+        row: usize,
+        col: usize,
+    },
+    /// Extend the selection to here — a drag in progress.
+    DragTo {
+        row: usize,
+        col: usize,
+    },
+    /// The button came up: the next drag starts a fresh selection.
+    DragEnd,
+    /// Scroll the view without moving the cursor. Positive scrolls down.
+    Scroll(i16),
 }
 
 #[derive(Debug)]
@@ -144,6 +161,8 @@ pub enum FormAction {
     Close,
     NextField,
     PrevField,
+    /// Put the form cursor on a field the user clicked.
+    FocusField(usize),
     Input(char),
     Backspace,
     CycleBackend,
@@ -162,6 +181,8 @@ pub enum FilterAction {
     Open,
     Close,
     CloseSuggestions,
+    /// Move the suggestion cursor to a row the user pointed at.
+    SelectSuggestion(usize),
     Input(Input),
     SuggestionUp,
     SuggestionDown,
@@ -173,7 +194,12 @@ pub enum FilterAction {
 pub enum DiagramAction {
     Open,
     Close,
-    Scroll { dx: i16, dy: i16 },
+    Scroll {
+        dx: i16,
+        dy: i16,
+    },
+    /// Select the sidebar row at this index, as drawn.
+    SelectIndex(usize),
     SelectNext,
     SelectPrev,
     SelectFirst,

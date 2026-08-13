@@ -38,9 +38,22 @@ pub(super) fn apply(
             }
         }
 
+        DiagramAction::SelectIndex(idx) => {
+            if let Some(ref mut diag) = state.diagram {
+                // The sidebar draws only the visible rows, so the clicked row
+                // is an index into that list, not into every table in the
+                // schema. Same list the sidebar drew from, by construction.
+                let visible = crate::ui::diagram::visible_table_indices(diag);
+                if let Some(&table) = visible.get(idx) {
+                    diag.selected_table = table;
+                    diag.canvas_dirty = true;
+                }
+            }
+        }
+
         DiagramAction::SelectNext => {
             if let Some(ref mut diag) = state.diagram {
-                let visible = diagram_visible_table_indices(diag);
+                let visible = crate::ui::diagram::visible_table_indices(diag);
                 if !visible.is_empty() {
                     let pos = visible
                         .iter()
@@ -56,7 +69,7 @@ pub(super) fn apply(
 
         DiagramAction::SelectPrev => {
             if let Some(ref mut diag) = state.diagram {
-                let visible = diagram_visible_table_indices(diag);
+                let visible = crate::ui::diagram::visible_table_indices(diag);
                 if !visible.is_empty() {
                     let pos = visible
                         .iter()
@@ -71,7 +84,7 @@ pub(super) fn apply(
 
         DiagramAction::SelectFirst => {
             if let Some(ref mut diag) = state.diagram {
-                let visible = diagram_visible_table_indices(diag);
+                let visible = crate::ui::diagram::visible_table_indices(diag);
                 if !visible.is_empty() {
                     diag.selected_table = visible[0];
                 }
@@ -82,7 +95,7 @@ pub(super) fn apply(
 
         DiagramAction::SelectLast => {
             if let Some(ref mut diag) = state.diagram {
-                let visible = diagram_visible_table_indices(diag);
+                let visible = crate::ui::diagram::visible_table_indices(diag);
                 if !visible.is_empty() {
                     diag.selected_table = visible[visible.len() - 1];
                 }
@@ -95,7 +108,7 @@ pub(super) fn apply(
                 diag.focus_mode = !diag.focus_mode;
                 diag.canvas_dirty = true;
                 if diag.focus_mode {
-                    let vis = diagram_visible_table_indices(diag);
+                    let vis = crate::ui::diagram::visible_table_indices(diag);
                     if !vis.is_empty() && !vis.contains(&diag.selected_table) {
                         diag.selected_table = vis[0];
                     }
@@ -143,7 +156,7 @@ pub(super) fn apply(
                 diag.search_query.push(c);
                 // Auto-select first matching table
                 let query = diag.search_query.to_ascii_lowercase();
-                let visible = diagram_visible_table_indices(diag);
+                let visible = crate::ui::diagram::visible_table_indices(diag);
                 if let Some(&idx) = visible.iter().find(|&&i| {
                     diag.data
                         .tables
@@ -162,7 +175,7 @@ pub(super) fn apply(
                 diag.search_query.pop();
                 if !diag.search_query.is_empty() {
                     let query = diag.search_query.to_ascii_lowercase();
-                    let visible = diagram_visible_table_indices(diag);
+                    let visible = crate::ui::diagram::visible_table_indices(diag);
                     if let Some(&idx) = visible.iter().find(|&&i| {
                         diag.data
                             .tables
@@ -217,37 +230,6 @@ pub(super) fn diagram_keep_in_view(diag: &mut crate::app::DiagramState) {
             diag.scroll_y = (ty + 4).saturating_sub(vh) as u16;
         }
     }
-}
-
-fn diagram_visible_table_indices(diag: &crate::app::DiagramState) -> Vec<usize> {
-    let tables = &diag.data.tables;
-    if tables.is_empty() {
-        return Vec::new();
-    }
-    if !diag.focus_mode {
-        return (0..tables.len()).collect();
-    }
-
-    let selected = diag.selected_table.min(tables.len().saturating_sub(1));
-    let selected_key = tables[selected].qualified();
-    let mut keys = std::collections::HashSet::new();
-    keys.insert(selected_key.clone());
-
-    for fk in &diag.data.foreign_keys {
-        let from_key = format!("{}.{}", fk.from_schema, fk.from_table);
-        let to_key = format!("{}.{}", fk.to_schema, fk.to_table);
-        if from_key == selected_key {
-            keys.insert(to_key);
-        } else if to_key == selected_key {
-            keys.insert(from_key);
-        }
-    }
-
-    tables
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, t)| keys.contains(&t.qualified()).then_some(idx))
-        .collect()
 }
 
 // Make parse_filter_input available for testing.

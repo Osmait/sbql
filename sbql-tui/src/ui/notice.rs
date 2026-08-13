@@ -21,7 +21,7 @@ use crate::notice::{Level, Notice};
 const WIDTH_PCT: u16 = 70;
 const HEIGHT_PCT: u16 = 50;
 
-pub fn draw(frame: &mut Frame, notice: &Notice, area: Rect) {
+pub fn draw(frame: &mut Frame, notice: &Notice, area: Rect, hits: &mut crate::ui::hit::HitMap) {
     let popup = centred(area, WIDTH_PCT, HEIGHT_PCT);
 
     let (title, accent) = match notice.level {
@@ -74,6 +74,11 @@ pub fn draw(frame: &mut Frame, notice: &Notice, area: Rect) {
 
     frame.render_widget(Clear, popup);
     frame.render_widget(body, popup);
+
+    // One zone over the whole popup: the overlay is opaque (it clears what it
+    // covers) and the only thing to do with it is dismiss it, so every point in
+    // it means the same thing — and none of them may reach the panel beneath.
+    hits.register(popup, crate::ui::hit::Zone::NoticeDetail);
 }
 
 /// A rect of `pct_x` × `pct_y` percent, centred in `area`.
@@ -97,7 +102,14 @@ mod tests {
     fn render(notice: &Notice, width: u16, height: u16) -> String {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("backend");
         terminal
-            .draw(|frame| draw(frame, notice, frame.area()))
+            .draw(|frame| {
+                draw(
+                    frame,
+                    notice,
+                    frame.area(),
+                    &mut crate::ui::hit::HitMap::default(),
+                )
+            })
             .expect("draw");
         terminal
             .backend()
@@ -143,6 +155,48 @@ mod tests {
         let screen = render(&notice, 100, 20);
         assert!(screen.contains("Warning"), "{screen}");
         assert!(!screen.contains("Error"), "{screen}");
+    }
+
+    /// The overlay is registered after the panels it covers, so it answers the
+    /// click instead of the results grid showing through it. The corners of the
+    /// registered rect are checked against the painted border, because a zone
+    /// that does not line up with the pixels is the bug this guards.
+    #[test]
+    fn the_overlay_takes_the_click_from_whatever_is_under_it() {
+        use crate::app::FocusedPanel;
+        use crate::ui::hit::{HitMap, Zone};
+
+        let notice = Notice::error("boom", 0);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("backend");
+
+        let mut hits = HitMap::default();
+        // Stands in for the panel bodies the root draw registers first.
+        hits.register(Rect::new(0, 0, 80, 24), Zone::Panel(FocusedPanel::Results));
+        terminal
+            .draw(|frame| draw(frame, &notice, frame.area(), &mut hits))
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer();
+        let (rect, zone) = hits.hit(40, 12).expect("a hit in the middle of the popup");
+        assert_eq!(zone, Zone::NoticeDetail);
+        assert_eq!(
+            buffer.cell((rect.x, rect.y)).map(|c| c.symbol()),
+            Some("┌"),
+            "the zone does not start where the popup was painted"
+        );
+        assert_eq!(
+            buffer
+                .cell((rect.right() - 1, rect.bottom() - 1))
+                .map(|c| c.symbol()),
+            Some("┘"),
+            "the zone does not end where the popup was painted"
+        );
+
+        // Outside it, the panel underneath still answers.
+        assert_eq!(
+            hits.hit(0, 0).map(|(_, z)| z),
+            Some(Zone::Panel(FocusedPanel::Results))
+        );
     }
 
     /// Overlays get drawn at whatever size the terminal happens to be.

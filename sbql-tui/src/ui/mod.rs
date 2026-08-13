@@ -3,6 +3,7 @@ pub mod cell_edit;
 pub mod connections;
 pub mod diagram;
 pub mod editor;
+pub mod hit;
 pub mod layout;
 pub mod notice;
 pub mod results;
@@ -15,43 +16,78 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{AppState, EditorMode, LastAreas, NavMode};
+use crate::app::{AppState, EditorMode, FocusedPanel, NavMode};
 use crate::notice::Level;
+use crate::ui::hit::Zone;
 
 /// Root draw function — dispatches to each panel.
+///
+/// Also rebuilds the hit map: every panel registers what it painted, in paint
+/// order, so the mouse handler resolves a click the same way the screen does.
 pub fn draw(frame: &mut Frame, state: &mut AppState, cache: &mut cache::RenderCache) {
+    // A zone must never outlive the frame that drew it.
+    state.layout.hits.clear();
+
     // Diagram mode replaces the entire layout when active.
     if let Some(ref mut diag) = state.diagram {
         // Measure first: this settles the canvas cache and clamps scroll, so
         // rendering below is a pure read.
         let full = frame.area();
         diagram::measure(diag, cache, full);
-        diagram::draw(frame, diag, cache);
+        diagram::draw(frame, diag, cache, &mut state.layout.hits);
         return;
     }
 
     let areas = layout::compute(frame.area(), state.layout.sidebar_hidden);
 
-    // Save layout so mouse handler can do accurate hit-testing
-    state.layout.last_areas = Some(LastAreas {
-        conn_list: areas.connections,
-        table_list: areas.tables,
-        editor: areas.editor,
-        results: areas.results,
-    });
+    state.layout.results_area = Some(areas.results);
+
+    // Panel bodies first: they are the fallback under everything each panel
+    // registers on top of them.
+    if !state.layout.sidebar_hidden {
+        state
+            .layout
+            .hits
+            .register(areas.connections, Zone::Panel(FocusedPanel::Connections));
+        state
+            .layout
+            .hits
+            .register(areas.tables, Zone::Panel(FocusedPanel::Tables));
+    }
+    state
+        .layout
+        .hits
+        .register(areas.editor, Zone::Panel(FocusedPanel::Editor));
+    state
+        .layout
+        .hits
+        .register(areas.results, Zone::Panel(FocusedPanel::Results));
 
     if !state.layout.sidebar_hidden {
-        connections::draw_connections(frame, &state.conn, state.focused, areas.connections);
+        connections::draw_connections(
+            frame,
+            &state.conn,
+            state.focused,
+            areas.connections,
+            &mut state.layout.hits,
+        );
         connections::draw_tables(
             frame,
             &state.tables,
             state.focused,
             state.results.is_loading,
             areas.tables,
+            &mut state.layout.hits,
         );
     }
     // The diagram is closed, so a canvas from a previous one must not linger.
     cache.clear_diagram_canvas();
+
+    // The text sits inside the border. Registered here rather than inside the
+    // editor's draw so the rect is also kept for drags that leave the panel.
+    let editor_text = areas.editor.inner(ratatui::layout::Margin::new(1, 1));
+    state.layout.editor_text_rect = Some(editor_text);
+    state.layout.hits.register(editor_text, Zone::EditorText);
 
     editor::draw(
         frame,
@@ -79,30 +115,55 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, cache: &mut cache::RenderCa
         spinner_frame: state.layout.spinner_frame,
         has_active_connection: state.conn.active_id.is_some(),
     };
-    results::draw(frame, &results_view, &results_layout, areas.results);
+    results::draw(
+        frame,
+        &results_view,
+        &results_layout,
+        areas.results,
+        &mut state.layout.hits,
+    );
 
     // Overlays (drawn on top)
     if state.conn.form.visible {
-        connections::draw_form(frame, &state.conn.form, frame.area());
+        connections::draw_form(
+            frame,
+            &state.conn.form,
+            frame.area(),
+            &mut state.layout.hits,
+        );
     }
 
     if let Some(ref mut ce) = state.mutation.cell_edit {
-        cell_edit::draw(frame, ce, &state.layout, &state.results, frame.area());
+        let mut hits = std::mem::take(&mut state.layout.hits);
+        cell_edit::draw(
+            frame,
+            ce,
+            &state.layout,
+            &state.results,
+            frame.area(),
+            &mut hits,
+        );
+        state.layout.hits = hits;
     }
 
     if state.filter.visible {
-        results::draw_filter_bar(frame, &mut state.filter, areas.results);
+        let mut hits = std::mem::take(&mut state.layout.hits);
+        results::draw_filter_bar(frame, &mut state.filter, areas.results, &mut hits);
+        state.layout.hits = hits;
     }
 
     // Drawn last so it sits over everything else, including the other overlays.
     if state.notice_detail_open {
         if let Some(ref n) = state.notice {
-            notice::draw(frame, n, frame.area());
+            notice::draw(frame, n, frame.area(), &mut state.layout.hits);
         }
     }
 
-    // Status bar — always visible at the bottom
-    draw_status_bar(frame, state, areas.status_bar);
+    // Status bar — always visible at the bottom. Drawn from a detached hit map
+    // because it reads the whole state while registering its own zones.
+    let mut hits = std::mem::take(&mut state.layout.hits);
+    draw_status_bar(frame, state, areas.status_bar, &mut hits);
+    state.layout.hits = hits;
 }
 
 /// Fit `text` to `width`, and say so when it does not fit.
@@ -121,16 +182,40 @@ fn fit(text: &str, width: usize) -> String {
     chars.into_iter().take(keep).chain(['…']).collect()
 }
 
-fn draw_status_bar(frame: &mut Frame, state: &AppState, area: ratatui::layout::Rect) {
+fn draw_status_bar(
+    frame: &mut Frame,
+    state: &AppState,
+    area: ratatui::layout::Rect,
+    hits: &mut hit::HitMap,
+) {
     if let Some((_, ref name)) = state.conn.pending_delete {
-        let bar = Paragraph::new(Line::from(Span::styled(
-            format!(" ! Delete connection '{name}'? y/Enter confirm, n/Esc cancel"),
-            Style::default()
-                .fg(theme::BASE)
-                .bg(theme::YELLOW)
-                .add_modifier(Modifier::BOLD),
-        )));
-        frame.render_widget(bar, area);
+        let style = Style::default()
+            .fg(theme::BASE)
+            .bg(theme::YELLOW)
+            .add_modifier(Modifier::BOLD);
+        // Laid out as parts so the two answers can be clicked. Built by walking
+        // the widths rather than counting characters by hand, which is how a
+        // hit region silently drifts off its own label.
+        let parts = [
+            (format!(" ! Delete connection '{name}'? "), None),
+            ("y/Enter confirm".to_owned(), Some(Zone::ConfirmDeleteYes)),
+            (", ".to_owned(), None),
+            ("n/Esc cancel".to_owned(), Some(Zone::ConfirmDeleteNo)),
+        ];
+        let mut x = area.x;
+        let mut spans = Vec::with_capacity(parts.len());
+        for (text, zone) in parts {
+            let width = u16::try_from(text.chars().count()).unwrap_or(u16::MAX);
+            if let Some(zone) = zone {
+                hits.register(
+                    ratatui::layout::Rect::new(x, area.y, width.min(area.right() - x), 1),
+                    zone,
+                );
+            }
+            x = x.saturating_add(width).min(area.right());
+            spans.push(Span::styled(text, style));
+        }
+        frame.render_widget(Paragraph::new(Line::from(spans)), area);
     } else if let Some(ref notice) = state.notice {
         let (marker, style) = match notice.level {
             Level::Error => (
@@ -159,6 +244,19 @@ fn draw_status_bar(frame: &mut Frame, state: &AppState, area: ratatui::layout::R
         // user cannot expand is worse than one they know how to expand.
         let room = (area.width as usize).saturating_sub(more.chars().count());
         let text = fit(&format!(" {marker} {}", notice.text), room);
+
+        // Clicking the affordance does what it says, the same as Ctrl+E.
+        if !more.is_empty() {
+            let used = u16::try_from(text.chars().count()).unwrap_or(u16::MAX);
+            let width = u16::try_from(more.chars().count()).unwrap_or(u16::MAX);
+            let x = area.x.saturating_add(used);
+            if x < area.right() {
+                hits.register(
+                    ratatui::layout::Rect::new(x, area.y, width.min(area.right() - x), 1),
+                    Zone::NoticeDetailHint,
+                );
+            }
+        }
 
         let bar = Paragraph::new(Line::from(vec![
             Span::styled(text, style),
