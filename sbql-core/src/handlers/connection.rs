@@ -157,16 +157,7 @@ pub(crate) async fn save_discovered(core: &mut Core, id: Uuid) -> Vec<CoreEvent>
 }
 
 pub(crate) async fn connect(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
-    // Saved connections first, then this session's discoveries: a discovered
-    // one that has since been saved is the same id, and the saved copy is the
-    // one the user chose to keep.
-    let found = core.connections.iter().find(|c| c.id == id).or_else(|| {
-        core.discovered
-            .iter()
-            .map(|d| &d.config)
-            .find(|c| c.id == id)
-    });
-    let cfg = match found {
+    let cfg = match core.config_for(id) {
         Some(c) => c.clone(),
         None => {
             return vec![CoreEvent::error(SbqlError::ConnectionNotFound(
@@ -464,6 +455,59 @@ mod tests {
             core.connections.is_empty(),
             "connecting must not persist a discovered connection"
         );
+    }
+
+    /// Connecting and querying a discovered connection worked, but sorting and
+    /// filtering did not: those go through `active_backend`, which searched
+    /// only the saved list and answered "Connection not found" for an id the
+    /// user was actively connected to.
+    #[tokio::test]
+    async fn test_sort_and_filter_work_on_a_discovered_connection() {
+        isolate_from_the_machine();
+        let mut core = Core::default();
+        core.connections.clear();
+        let config = ConnectionConfig::new_sqlite("from_docker", ":memory:");
+        let id = config.id;
+        core.discovered.push(sbql_discovery(config));
+        core.password_cache.insert(id, String::new());
+        core.handle(CoreCommand::Connect(id)).await;
+
+        let pool = core.active_pool().await.expect("a live pool");
+        if let crate::pool::DbPool::Sqlite(sq) = &pool {
+            sqlx::query("CREATE TABLE t (name TEXT)")
+                .execute(sq)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO t (name) VALUES ('alice'), ('bob')")
+                .execute(sq)
+                .await
+                .unwrap();
+        }
+        core.handle(CoreCommand::ExecuteQuery {
+            sql: "SELECT * FROM t".into(),
+        })
+        .await;
+
+        for cmd in [
+            CoreCommand::ApplyFilter {
+                query: "ali".into(),
+            },
+            CoreCommand::ClearFilter,
+            CoreCommand::ApplyOrder {
+                column: "name".into(),
+                direction: crate::SortDirection::Ascending,
+            },
+            CoreCommand::ClearOrder,
+        ] {
+            let label = format!("{cmd:?}");
+            let events = core.handle(cmd).await;
+            assert!(
+                !events
+                    .iter()
+                    .any(|e| matches!(e, CoreEvent::Error(err) if !err.is_warning())),
+                "{label} failed on a discovered connection: {events:?}"
+            );
+        }
     }
 
     /// Saving is the one moment scraped credentials are written anywhere, and

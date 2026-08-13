@@ -450,14 +450,26 @@ impl Core {
         self.manager.get(id).await
     }
 
+    /// The config for a connection id, saved or discovered.
+    ///
+    /// The single place that answers "which connection is this?". A connection
+    /// the user can open lives in one of two lists, and every lookup has to
+    /// know that: searching only `connections` made a Docker-discovered
+    /// connection openable and queryable but unsortable and unfilterable,
+    /// because those are the paths that need its backend.
+    pub(crate) fn config_for(&self, id: Uuid) -> Option<&ConnectionConfig> {
+        self.connections
+            .iter()
+            .chain(self.discovered.iter().map(|d| &d.config))
+            .find(|c| c.id == id)
+    }
+
     pub(crate) fn active_backend(&self) -> Result<DbBackend> {
         let id = self
             .active_connection
             .ok_or(SbqlError::NoActiveConnection)?;
         let cfg = self
-            .connections
-            .iter()
-            .find(|c| c.id == id)
+            .config_for(id)
             .ok_or_else(|| SbqlError::ConnectionNotFound(id.to_string()))?;
         Ok(cfg.backend)
     }
