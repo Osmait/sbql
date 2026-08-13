@@ -27,6 +27,7 @@ Most database tools force a trade-off:
 ### Core capabilities
 
 - Save and reuse named connections
+- Discover databases already running in Docker and offer them as connections
 - Store passwords in the system keyring
 - Execute SQL with server-side pagination
 - Apply sorting and filtering through SQL AST manipulation instead of string concatenation
@@ -38,6 +39,7 @@ Most database tools force a trade-off:
 ### TUI experience
 
 - Multi-panel workspace for Connections, Tables, Editor, Results, and Diagram
+- Docker-discovered databases listed under your saved ones, ready to connect
 - Tree-sitter SQL highlighting and autocomplete
 - Keyboard-first navigation with mouse support
 - Filter suggestions and staged result editing/deletion workflows
@@ -275,6 +277,22 @@ If you already have saved connections, you can start with one by name:
 ```bash
 cargo run -p sbql-tui -- my-connection
 ```
+
+### Databases already running in Docker
+
+On startup sbql asks Docker what is running and lists any supported database
+below your saved connections, with its real published port and the credentials
+from the container's environment. The compose project rooted in the directory
+you launched sbql from comes first, so `cd my-project && sbql` puts that stack's
+database at the top. Press `Enter` to connect — there is nothing to fill in.
+
+These entries are for the session only: nothing is written to `connections.toml`
+and no password reaches the keyring. Press `s` on one to save it for good.
+
+A container with no published port is deliberately not offered. It may be
+running, but without a `ports:` mapping it is reachable only from inside the
+Docker network, so the connection could only ever fail. sbql stays quiet when
+Docker is not installed or not running.
 
 ## Benchmarks
 

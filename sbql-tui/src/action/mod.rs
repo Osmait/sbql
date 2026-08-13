@@ -13,7 +13,8 @@ use tokio::sync::mpsc;
 use tui_textarea::{CursorMove, Input};
 
 use crate::app::{
-    AppState, ConnectionForm, DiagramGlyphMode, EditorMode, FocusedPanel, NavMode, PendingEdit,
+    AppState, ConnectionEntry, ConnectionForm, DiagramGlyphMode, EditorMode, FocusedPanel, NavMode,
+    PendingEdit,
 };
 use crate::completion;
 use crate::list_cursor::Overflow;
@@ -131,6 +132,8 @@ pub enum ConnectionsAction {
     DisconnectActive,
     OpenNewForm,
     OpenEditForm,
+    /// Persist the Docker-discovered connection under the cursor.
+    SaveDiscovered,
     InitDelete,
     ConfirmDelete,
     CancelDelete,
@@ -812,6 +815,76 @@ mod tests {
             &tx,
         );
         assert_eq!(state.conn.selected(), 1);
+    }
+
+    /// A state with one saved connection and one Docker discovery, cursor on
+    /// the discovery.
+    fn state_on_a_discovered_connection() -> AppState {
+        let mut state = AppState::new(vec![sbql_core::ConnectionConfig::new_postgres(
+            "saved", "h", 5432, "u", "d",
+        )]);
+        state.conn.discovered = vec![sbql_core::DiscoveredConnection {
+            config: sbql_core::ConnectionConfig::new_postgres("from-docker", "h", 5432, "u", "d"),
+            source: sbql_core::DiscoverySource::Container { name: "pg".into() },
+        }];
+        state.conn.cursor.select(1, state.conn.len());
+        state
+    }
+
+    #[test]
+    fn saving_a_discovered_connection_asks_the_core_to_persist_it() {
+        let mut state = state_on_a_discovered_connection();
+        let expected = state.conn.discovered[0].config.id;
+        let (tx, mut rx) = cmd_channel();
+
+        apply(
+            Action::Connections(ConnectionsAction::SaveDiscovered),
+            &mut state,
+            &tx,
+        );
+
+        match rx.try_recv().expect("a SaveDiscovered command") {
+            CoreCommand::SaveDiscovered(id) => assert_eq!(id, expected),
+            other => panic!("expected SaveDiscovered, got {other:?}"),
+        }
+    }
+
+    /// There is nothing on disk behind a discovery, so delete has nothing to
+    /// do — and must say so rather than appearing to work.
+    #[test]
+    fn deleting_a_discovered_connection_is_refused() {
+        let mut state = state_on_a_discovered_connection();
+        let (tx, mut rx) = cmd_channel();
+
+        apply(
+            Action::Connections(ConnectionsAction::InitDelete),
+            &mut state,
+            &tx,
+        );
+
+        assert!(rx.try_recv().is_err(), "nothing to send");
+        assert!(state.conn.pending_delete.is_none());
+        assert!(state.is_failing());
+    }
+
+    /// Connecting is the one thing a discovery is *for*, so the cursor landing
+    /// on one must still produce a Connect.
+    #[test]
+    fn connecting_to_a_discovered_connection_works() {
+        let mut state = state_on_a_discovered_connection();
+        let expected = state.conn.discovered[0].config.id;
+        let (tx, mut rx) = cmd_channel();
+
+        apply(
+            Action::Connections(ConnectionsAction::ConnectSelected),
+            &mut state,
+            &tx,
+        );
+
+        match rx.try_recv().expect("a Connect command") {
+            CoreCommand::Connect(id) => assert_eq!(id, expected),
+            other => panic!("expected Connect, got {other:?}"),
+        }
     }
 
     #[test]

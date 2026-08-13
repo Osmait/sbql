@@ -8,7 +8,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{ConnectionForm, ConnectionState, FocusedPanel, TableBrowserState};
+use crate::app::{
+    ConnectionEntry, ConnectionForm, ConnectionState, FocusedPanel, TableBrowserState,
+};
 use crate::ui::theme;
 
 // ---------------------------------------------------------------------------
@@ -24,10 +26,10 @@ pub fn draw_connections(
     let is_focused = focused == FocusedPanel::Connections;
 
     let conn_items: Vec<ListItem> = conn
-        .connections
-        .iter()
+        .entries()
         .enumerate()
-        .map(|(i, c)| {
+        .map(|(i, entry)| {
+            let c = entry.config();
             let is_active = conn.active_id == Some(c.id);
             let indicator = if is_active { "● " } else { "  " };
             let style = if i == conn.selected() && is_focused {
@@ -37,10 +39,15 @@ pub fn draw_connections(
                     .add_modifier(Modifier::BOLD)
             } else if is_active {
                 Style::default().fg(theme::GREEN)
+            } else if entry.is_discovered() {
+                // Dimmed so the list reads at a glance as "yours" and "found
+                // for you" — these vanish when the container stops.
+                Style::default().fg(theme::OVERLAY1)
             } else {
                 Style::default()
             };
-            ListItem::new(Line::from(vec![
+
+            let mut spans = vec![
                 Span::styled(
                     indicator,
                     Style::default().fg(if is_active {
@@ -50,13 +57,23 @@ pub fn draw_connections(
                     }),
                 ),
                 Span::styled(c.name.clone(), style),
-            ]))
+            ];
+            if let ConnectionEntry::Discovered(found) = entry {
+                spans.push(Span::styled(
+                    format!("  {}", found.source.label()),
+                    Style::default().fg(theme::OVERLAY0),
+                ));
+            }
+            ListItem::new(Line::from(spans))
         })
         .collect();
 
-    let conn_title = if is_focused {
+    let has_discovered = !conn.discovered.is_empty();
+    let conn_title = if is_focused && has_discovered {
+        " Connections (Enter=connect  n=new  e=edit  d=delete  s=save docker one) "
+    } else if is_focused {
         " Connections (Enter=connect  n=new  e=edit  d=delete) "
-    } else if conn.connections.is_empty() {
+    } else if conn.is_empty() {
         " Connections (n=new) "
     } else {
         " Connections "

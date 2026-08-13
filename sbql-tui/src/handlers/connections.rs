@@ -6,7 +6,9 @@ use crate::app::{AppState, FocusedPanel};
 pub fn handle(state: &AppState, key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => {
-            if !state.conn.connections.is_empty() {
+            // `conn.len()`, not `connections.len()`: the cursor also walks the
+            // Docker-discovered rows below the saved ones.
+            if !state.conn.is_empty() {
                 let next = state.conn.selected() + 1;
                 Action::Batch(vec![
                     Action::Nav(NavAction::ClearPendingG),
@@ -23,12 +25,10 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
             )),
         ]),
         KeyCode::Char('G') => {
-            if !state.conn.connections.is_empty() {
+            if !state.conn.is_empty() {
                 Action::Batch(vec![
                     Action::Nav(NavAction::ClearPendingG),
-                    Action::Connections(ConnectionsAction::Select(
-                        state.conn.connections.len() - 1,
-                    )),
+                    Action::Connections(ConnectionsAction::Select(state.conn.len() - 1)),
                 ])
             } else {
                 Action::Nav(NavAction::ClearPendingG)
@@ -59,6 +59,10 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
         KeyCode::Char('d') => Action::Batch(vec![
             Action::Nav(NavAction::ClearPendingG),
             Action::Connections(ConnectionsAction::InitDelete),
+        ]),
+        KeyCode::Char('s') => Action::Batch(vec![
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Connections(ConnectionsAction::SaveDiscovered),
         ]),
         KeyCode::Char('x') => Action::Batch(vec![
             Action::Nav(NavAction::ClearPendingG),

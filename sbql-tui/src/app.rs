@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use ratatui::layout::Rect;
 use sbql_core::{
-    ConnectionConfig, ConnectionDraft, CoreEvent, DbBackend, DiagramData, FieldSpec, QueryResult,
-    SortDirection, SslMode, TableEntry,
+    ConnectionConfig, ConnectionDraft, CoreEvent, DbBackend, DiagramData, DiscoveredConnection,
+    FieldSpec, QueryResult, SortDirection, SslMode, TableEntry,
 };
 use tui_textarea::TextArea;
 use uuid::Uuid;
@@ -298,6 +298,9 @@ impl DiagramState {
 
 pub struct ConnectionState {
     pub connections: Vec<ConnectionConfig>,
+    /// Databases found running in Docker this session. Offered below the saved
+    /// ones and never written to disk unless the user asks.
+    pub discovered: Vec<DiscoveredConnection>,
     pub cursor: ListCursor,
     pub active_id: Option<Uuid>,
     pub active_backend: DbBackend,
@@ -305,9 +308,61 @@ pub struct ConnectionState {
     pub pending_delete: Option<(Uuid, String)>,
 }
 
+/// One row of the connections panel.
+///
+/// The panel shows two lists that behave differently — saved connections can be
+/// edited and deleted, discovered ones can only be connected to or saved — but
+/// the cursor moves through them as one. Making that a type means every call
+/// site has to say which kind it is looking at instead of assuming.
+#[derive(Debug, Clone, Copy)]
+pub enum ConnectionEntry<'a> {
+    Saved(&'a ConnectionConfig),
+    Discovered(&'a DiscoveredConnection),
+}
+
+impl<'a> ConnectionEntry<'a> {
+    pub fn config(self) -> &'a ConnectionConfig {
+        match self {
+            ConnectionEntry::Saved(c) => c,
+            ConnectionEntry::Discovered(d) => &d.config,
+        }
+    }
+
+    pub fn is_discovered(self) -> bool {
+        matches!(self, ConnectionEntry::Discovered(_))
+    }
+}
+
 impl ConnectionState {
     pub fn selected(&self) -> usize {
         self.cursor.index()
+    }
+
+    /// Every row the panel draws, saved first.
+    pub fn entries(&self) -> impl Iterator<Item = ConnectionEntry<'_>> {
+        self.connections
+            .iter()
+            .map(ConnectionEntry::Saved)
+            .chain(self.discovered.iter().map(ConnectionEntry::Discovered))
+    }
+
+    /// How many rows the cursor can land on. Not `connections.len()` — that
+    /// would make the discovered ones unreachable.
+    pub fn len(&self) -> usize {
+        self.connections.len() + self.discovered.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn entry(&self, idx: usize) -> Option<ConnectionEntry<'_>> {
+        self.entries().nth(idx)
+    }
+
+    /// The row the cursor is on.
+    pub fn selected_entry(&self) -> Option<ConnectionEntry<'_>> {
+        self.entry(self.selected())
     }
 }
 
@@ -752,6 +807,7 @@ impl AppState {
 
             conn: ConnectionState {
                 connections,
+                discovered: Vec::new(),
                 cursor: ListCursor::new(),
                 active_id: None,
                 active_backend: DbBackend::Postgres,
@@ -860,21 +916,38 @@ impl AppState {
             CoreEvent::ConnectionList(conns) => {
                 self.results.is_loading = false;
                 self.conn.connections = conns;
-                self.conn.cursor.clamp(self.conn.connections.len());
+                self.conn.cursor.clamp(self.conn.len());
+            }
+            CoreEvent::DiscoveredConnections(found) => {
+                // Startup discovery, so it must not touch `is_loading`: the
+                // user may already be waiting on a query they asked for.
+                let count = found.len();
+                self.conn.discovered = found;
+                self.conn.cursor.clamp(self.conn.len());
+                // Only worth saying when there is something to say. Silence is
+                // the right answer on a machine with no Docker.
+                if count > 0 && self.notice.is_none() {
+                    self.inform(format!(
+                        "Found {count} database(s) running in Docker — listed below your saved ones."
+                    ));
+                }
             }
             CoreEvent::Connected(id) => {
                 self.results.is_loading = false;
                 self.conn.active_id = Some(id);
-                if let Some(cfg) = self.conn.connections.iter().find(|c| c.id == id) {
-                    self.conn.active_backend = cfg.backend;
-                }
-                let name = self
+                // A discovered connection is connectable too, so both lists are
+                // searched — otherwise the backend and the name would be wrong
+                // for exactly the connections Docker found for us.
+                let found = self
                     .conn
-                    .connections
-                    .iter()
+                    .entries()
+                    .map(|e| e.config())
                     .find(|c| c.id == id)
-                    .map(|c| c.name.clone())
-                    .unwrap_or_else(|| id.to_string());
+                    .map(|c| (c.backend, c.name.clone()));
+                if let Some(backend) = found.as_ref().map(|(b, _)| *b) {
+                    self.conn.active_backend = backend;
+                }
+                let name = found.map_or_else(|| id.to_string(), |(_, name)| name);
                 self.inform(format!("Connected to {name}"));
             }
             CoreEvent::Disconnected(id) => {
@@ -1207,6 +1280,53 @@ mod tests {
         ];
         state.apply_core_event(CoreEvent::ConnectionList(conns));
         assert_eq!(state.conn.connections.len(), 2);
+    }
+
+    /// Build a discovery the way the core would report one.
+    fn discovered(name: &str) -> DiscoveredConnection {
+        DiscoveredConnection {
+            config: ConnectionConfig::new_postgres(name, "127.0.0.1", 5432, "u", "d"),
+            source: sbql_core::DiscoverySource::Container { name: name.into() },
+        }
+    }
+
+    /// Two lists, one cursor. Indexing only the saved ones would leave the
+    /// discovered rows drawn but unreachable.
+    #[test]
+    fn the_cursor_walks_saved_and_discovered_as_one_list() {
+        let mut state = AppState::new(vec![ConnectionConfig::new_postgres(
+            "saved", "h", 5432, "u", "d",
+        )]);
+        state.conn.discovered = vec![discovered("from-docker")];
+
+        assert_eq!(state.conn.len(), 2);
+
+        state.conn.cursor.select(1, state.conn.len());
+        let entry = state.conn.selected_entry().expect("a row under the cursor");
+        assert!(entry.is_discovered());
+        assert_eq!(entry.config().name, "from-docker");
+
+        state.conn.cursor.select(0, state.conn.len());
+        assert!(!state.conn.selected_entry().expect("a row").is_discovered());
+    }
+
+    /// A discovery arriving must not disturb a query the user is waiting on,
+    /// and must not be mistaken for the saved list.
+    #[test]
+    fn core_event_discovered_connections_leaves_saved_ones_alone() {
+        let mut state = AppState::new(vec![ConnectionConfig::new_postgres(
+            "saved", "h", 5432, "u", "d",
+        )]);
+        state.results.is_loading = true;
+
+        state.apply_core_event(CoreEvent::DiscoveredConnections(vec![discovered("pg")]));
+
+        assert_eq!(state.conn.connections.len(), 1, "saved list untouched");
+        assert_eq!(state.conn.discovered.len(), 1);
+        assert!(
+            state.results.is_loading,
+            "a startup scan must not clear a spinner the user is waiting on"
+        );
     }
 
     #[test]

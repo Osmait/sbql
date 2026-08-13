@@ -40,7 +40,8 @@ pub fn handle(state: &AppState, mouse: MouseEvent) -> Action {
         MouseEventKind::ScrollDown => match state.focused {
             FocusedPanel::Results => Action::Results(ResultsAction::RowDown),
             FocusedPanel::Connections => {
-                if !state.conn.connections.is_empty() {
+                // Includes the discovered rows, same as the keyboard.
+                if !state.conn.is_empty() {
                     let next = state.conn.selected() + 1;
                     Action::Connections(ConnectionsAction::Select(next))
                 } else {

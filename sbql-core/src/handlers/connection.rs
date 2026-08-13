@@ -105,8 +105,68 @@ pub(crate) async fn delete(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
     vec![CoreEvent::ConnectionList(core.connections.clone())]
 }
 
+/// Ask Docker what is running and offer it as session-only connections.
+///
+/// Nothing is persisted and nothing already saved is disturbed: the result
+/// replaces the previous scan's offer, and each connection's password goes
+/// straight into the session cache so selecting one just connects.
+pub(crate) async fn discover(core: &mut Core, dir: std::path::PathBuf) -> Vec<CoreEvent> {
+    let found = crate::discovery::discover(&dir).await;
+
+    // A container the user is already connected to keeps its pool: ids are
+    // derived from the container id, so a re-scan re-identifies it rather than
+    // orphaning the connection.
+    core.discovered = found
+        .into_iter()
+        .map(|d| {
+            core.password_cache
+                .insert(d.connection.config.id, d.password);
+            d.connection
+        })
+        .collect();
+
+    tracing::info!("discovered {} database(s) in Docker", core.discovered.len());
+    vec![CoreEvent::DiscoveredConnections(core.discovered.clone())]
+}
+
+/// Promote a discovered connection to a saved one.
+///
+/// Goes through the normal save path so the password reaches the keyring and
+/// the config reaches `connections.toml` — the one moment scraped credentials
+/// are written anywhere, and only because the user asked.
+pub(crate) async fn save_discovered(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
+    let Some(found) = core.discovered.iter().find(|d| d.config.id == id).cloned() else {
+        return vec![CoreEvent::error(SbqlError::ConnectionNotFound(
+            id.to_string(),
+        ))];
+    };
+    if core.connections.iter().any(|c| c.id == id) {
+        return vec![CoreEvent::error(CoreError::new(
+            ErrorKind::Config,
+            format!("'{}' is already saved", found.config.name),
+        ))];
+    }
+
+    let password = core.password_cache.get(&id).cloned();
+    let mut events = save(core, found.config.clone(), password).await;
+    // It is a saved connection now, so it must not also be offered as a
+    // discovery — the list would show it twice, under two different rules.
+    core.discovered.retain(|d| d.config.id != id);
+    events.push(CoreEvent::DiscoveredConnections(core.discovered.clone()));
+    events
+}
+
 pub(crate) async fn connect(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
-    let cfg = match core.connections.iter().find(|c| c.id == id) {
+    // Saved connections first, then this session's discoveries: a discovered
+    // one that has since been saved is the same id, and the saved copy is the
+    // one the user chose to keep.
+    let found = core.connections.iter().find(|c| c.id == id).or_else(|| {
+        core.discovered
+            .iter()
+            .map(|d| &d.config)
+            .find(|c| c.id == id)
+    });
+    let cfg = match found {
         Some(c) => c.clone(),
         None => {
             return vec![CoreEvent::error(SbqlError::ConnectionNotFound(
@@ -384,6 +444,79 @@ mod tests {
         let events = core.handle(CoreCommand::Connect(id)).await;
         assert!(matches!(&events[0], CoreEvent::Connected(cid) if *cid == id));
         assert_eq!(core.active_connection, Some(id));
+    }
+
+    /// A discovered connection is not in `connections`, but selecting it has
+    /// to just work — that is the whole point of offering it.
+    #[tokio::test]
+    async fn test_connect_uses_a_discovered_connection() {
+        isolate_from_the_machine();
+        let mut core = Core::default();
+        let config = ConnectionConfig::new_sqlite("from_docker", ":memory:");
+        let id = config.id;
+        core.discovered.push(sbql_discovery(config));
+        core.password_cache.insert(id, String::new());
+
+        let events = core.handle(CoreCommand::Connect(id)).await;
+
+        assert!(matches!(&events[0], CoreEvent::Connected(cid) if *cid == id));
+        assert!(
+            core.connections.is_empty(),
+            "connecting must not persist a discovered connection"
+        );
+    }
+
+    /// Saving is the one moment scraped credentials are written anywhere, and
+    /// afterwards the connection must be offered once, not twice.
+    #[tokio::test]
+    async fn test_save_discovered_persists_it_and_stops_offering_it() {
+        isolate_from_the_machine();
+        let mut core = Core::default();
+        core.connections.clear();
+        let config = ConnectionConfig::new_sqlite("from_docker", ":memory:");
+        let id = config.id;
+        core.discovered.push(sbql_discovery(config));
+        core.password_cache.insert(id, "scraped".into());
+
+        let events = core.handle(CoreCommand::SaveDiscovered(id)).await;
+
+        assert!(
+            core.connections.iter().any(|c| c.id == id),
+            "it should now be a saved connection"
+        );
+        assert!(
+            core.discovered.is_empty(),
+            "and no longer offered as a discovery"
+        );
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, CoreEvent::DiscoveredConnections(d) if d.is_empty())));
+        // The password survives the promotion, or the saved connection could
+        // never open.
+        assert_eq!(
+            core.password_cache.get(&id).map(String::as_str),
+            Some("scraped")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_save_discovered_rejects_an_unknown_id() {
+        isolate_from_the_machine();
+        let mut core = Core::default();
+        let events = core
+            .handle(CoreCommand::SaveDiscovered(uuid::Uuid::new_v4()))
+            .await;
+        assert!(matches!(&events[0], CoreEvent::Error(_)));
+    }
+
+    /// Wrap a config the way discovery would.
+    fn sbql_discovery(config: ConnectionConfig) -> crate::DiscoveredConnection {
+        crate::DiscoveredConnection {
+            config,
+            source: crate::DiscoverySource::Container {
+                name: "test-container".into(),
+            },
+        }
     }
 
     /// Editing where a connection points must drop the live pool built from

@@ -60,7 +60,9 @@ toml = "0.8"
 keyring = "3"
 
 # Identifiers
-uuid = { version = "1", features = ["v4", "serde"] }
+# v5 as well as v4: discovered Docker connections derive their id from the
+# container id so a re-scan re-identifies the same container.
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
 
 # Date/time
 chrono = { version = "0.4", features = ["serde"] }
