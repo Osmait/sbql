@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1](https://github.com/Osmait/sbql/compare/sbql-tui-v0.3.0...sbql-tui-v0.3.1) - 2026-08-14
+
+### Added
+
+- *(tui)* nine themes and a picker that previews as you move
+- *(tui)* Alt+hjkl navigates panels wherever Ctrl+hjkl does
+- *(tui)* Ctrl+hjkl moves between panels from anywhere
+
+### Fixed
+
+- *(tui)* let scrolling up cross a page boundary too
+- *(tui)* keep scrolling smooth across a page boundary
+
+### Other
+
+- fold the two branches that land at the top
+
 ## [0.2.0](https://github.com/Osmait/sbql/compare/sbql-tui-v0.1.0...sbql-tui-v0.2.0) - 2026-07-28
 
 ### Added
