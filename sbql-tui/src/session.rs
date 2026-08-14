@@ -29,6 +29,26 @@ pub fn remember(id: &Uuid) {
     }
 }
 
+/// `theme`, alongside the connection file for the same reason.
+fn theme_path() -> Option<PathBuf> {
+    sbql_core::config_path()
+        .ok()
+        .map(|p| p.with_file_name("theme"))
+}
+
+/// The theme chosen in a previous run, if one was recorded.
+pub fn last_theme() -> Option<String> {
+    let raw = std::fs::read_to_string(theme_path()?).ok()?;
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+pub fn remember_theme(name: &str) {
+    if let Some(path) = theme_path() {
+        let _ = std::fs::write(path, name);
+    }
+}
+
 pub fn forget() {
     if let Some(path) = path() {
         let _ = std::fs::remove_file(path);
@@ -38,6 +58,22 @@ pub fn forget() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The chosen theme has to survive a restart, and an empty file must not
+    /// be mistaken for a choice.
+    #[test]
+    fn a_theme_round_trips() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::env::set_var(sbql_core::CONFIG_DIR_ENV, dir.path());
+
+        assert_eq!(last_theme(), None, "nothing chosen yet");
+        remember_theme("Nord");
+        assert_eq!(last_theme().as_deref(), Some("Nord"));
+
+        // Whitespace is trimmed, and a blank file reads as no choice.
+        remember_theme("   ");
+        assert_eq!(last_theme(), None);
+    }
 
     /// The file sits next to connections.toml, so pointing SBQL_CONFIG_DIR at a
     /// scratch directory isolates the session file too.

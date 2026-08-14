@@ -8,6 +8,7 @@ mod form;
 mod nav;
 mod results;
 mod tables;
+mod theme;
 
 use tokio::sync::mpsc;
 use tui_textarea::{CursorMove, Input};
@@ -46,6 +47,8 @@ pub enum Action {
     Filter(FilterAction),
     /// The full-screen schema diagram.
     Diagram(DiagramAction),
+    /// The theme picker.
+    Theme(ThemeAction),
 
     // -- Cross-cutting --
     /// Say something in the status bar. The reducer stamps the time, so key
@@ -214,6 +217,23 @@ pub enum DiagramAction {
     SearchConfirm,
 }
 
+/// The theme picker.
+///
+/// Moving the cursor applies the theme at once — the whole UI is the preview —
+/// so closing has to say whether the change is kept or undone.
+#[derive(Debug)]
+pub enum ThemeAction {
+    Open,
+    Next,
+    Prev,
+    /// Preview the theme at this index — what the mouse does.
+    Select(usize),
+    /// Keep the highlighted theme and remember it for next launch.
+    Confirm,
+    /// Put back the theme that was in use when the picker opened.
+    Cancel,
+}
+
 impl Action {
     /// Wrap a core command for dispatch.
     pub fn send(cmd: CoreCommand) -> Self {
@@ -238,6 +258,7 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
         Action::Tables(a) => tables::apply(a, state, cmd_tx),
         Action::Filter(a) => filter::apply(a, state, cmd_tx),
         Action::Diagram(a) => diagram::apply(a, state, cmd_tx),
+        Action::Theme(a) => theme::apply(a, state),
 
         // -- Status --
         Action::Inform(msg) => {

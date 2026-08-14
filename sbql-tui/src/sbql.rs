@@ -93,6 +93,7 @@ impl Sbql {
     /// Takes any [`Renderer`], so the loop can be driven with no terminal — and
     /// so this layer never names a UI framework.
     pub async fn run<R: Renderer>(&mut self, renderer: &mut R) -> Result<()> {
+        Self::restore_theme_impl();
         self.ask_docker_what_is_running();
         self.draw(renderer)?;
 
@@ -201,6 +202,18 @@ impl Sbql {
         if let Some(cfg) = target {
             let _ = self.cmd_tx.send(CoreCommand::Connect(cfg.id));
             self.auto_connected = true;
+        }
+    }
+
+    /// Put back the theme chosen in a previous run.
+    ///
+    /// Best-effort in both directions: no file means the default, and a name
+    /// this build does not know — a theme removed since it was written — is
+    /// ignored rather than reported, because a colour scheme is never worth
+    /// greeting someone with an error.
+    fn restore_theme_impl() {
+        if let Some(name) = crate::session::last_theme() {
+            let _ = crate::ui::theme::set_by_name(&name);
         }
     }
 

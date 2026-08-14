@@ -37,7 +37,7 @@ fn data_type_color(data_type: &str) -> ratatui::style::Color {
     let dt = data_type.to_ascii_lowercase();
     // Check temporal first (before numeric, since "timestamp"/"interval" contain "int")
     if dt.contains("date") || dt.contains("time") || dt.contains("interval") {
-        theme::SKY
+        theme::sky()
     // Structured types (before numeric, since "_int4" array types contain "int")
     } else if dt.contains("json")
         || dt.contains("xml")
@@ -45,13 +45,13 @@ fn data_type_color(data_type: &str) -> ratatui::style::Color {
         || dt.contains("hstore")
         || dt.starts_with("_")
     {
-        theme::MAUVE
+        theme::mauve()
     } else if dt.contains("bool") {
-        theme::FLAMINGO
+        theme::flamingo()
     } else if dt.contains("uuid") {
-        theme::LAVENDER
+        theme::lavender()
     } else if dt.contains("bytea") || dt.contains("blob") || dt.contains("binary") {
-        theme::MAROON
+        theme::maroon()
     } else if dt.contains("int")
         || dt.contains("float")
         || dt.contains("double")
@@ -61,16 +61,16 @@ fn data_type_color(data_type: &str) -> ratatui::style::Color {
         || dt.contains("real")
         || dt.starts_with("money")
     {
-        theme::PEACH
+        theme::peach()
     } else if dt.contains("char")
         || dt.contains("text")
         || dt.contains("citext")
         || dt.contains("name")
         || dt.contains("string")
     {
-        theme::GREEN
+        theme::green()
     } else {
-        theme::OVERLAY0
+        theme::overlay0()
     }
 }
 
@@ -251,7 +251,7 @@ fn draw_sidebar(
         )
         .highlight_style(
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("> ");
@@ -305,9 +305,12 @@ fn draw_sidebar(
     if let Some(sa) = search_area {
         let search_text = format!("/{}_", state.search_query);
         let search_line = Line::from(vec![
-            Span::styled("/", Style::default().fg(theme::BLUE)),
-            Span::styled(state.search_query.clone(), Style::default().fg(theme::TEXT)),
-            Span::styled("_", Style::default().fg(theme::OVERLAY0)),
+            Span::styled("/", Style::default().fg(theme::blue())),
+            Span::styled(
+                state.search_query.clone(),
+                Style::default().fg(theme::text()),
+            ),
+            Span::styled("_", Style::default().fg(theme::overlay0())),
         ]);
         let _ = search_text; // suppress unused
         frame.render_widget(Paragraph::new(search_line), sa);
@@ -401,7 +404,7 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> CanvasBuild {
         return CanvasBuild {
             lines: vec![Line::from(Span::styled(
                 "  No tables found in the current database.",
-                Style::default().fg(theme::OVERLAY0),
+                Style::default().fg(theme::overlay0()),
             ))],
             table_positions: std::collections::HashMap::new(),
         };
@@ -703,14 +706,16 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> CanvasBuild {
 
     let mut canvas = vec![vec![CanvasCell::default(); canvas_w.max(1)]; canvas_h.max(1)];
 
-    // Rotative colour palette for FK connectors (deterministic by table pair hash).
-    const CONNECTOR_COLORS: [ratatui::style::Color; 6] = [
-        theme::TEAL,
-        theme::PINK,
-        theme::PEACH,
-        theme::SAPPHIRE,
-        theme::FLAMINGO,
-        theme::LAVENDER,
+    // Rotative colour palette for FK connectors (deterministic by table pair
+    // hash). Read here rather than declared as a constant, because the theme
+    // is chosen while the app runs.
+    let connector_colors: [ratatui::style::Color; 6] = [
+        theme::teal(),
+        theme::pink(),
+        theme::peach(),
+        theme::sapphire(),
+        theme::flamingo(),
+        theme::lavender(),
     ];
 
     // Draw FK connectors first (underlay), then table boxes on top so
@@ -747,7 +752,7 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> CanvasBuild {
             };
             lo.wrapping_mul(131) ^ hi.wrapping_mul(97)
         };
-        let base_color = CONNECTOR_COLORS[pair_hash % CONNECTOR_COLORS.len()];
+        let base_color = connector_colors[pair_hash % connector_colors.len()];
         let style = if highlighted {
             Style::default().fg(base_color).add_modifier(Modifier::BOLD)
         } else {
@@ -840,7 +845,7 @@ fn build_canvas_lines(state: &DiagramState, _canvas_width: u16) -> CanvasBuild {
             );
 
             // Cardinality labels: N on source side, 1 on target side
-            let label_style = Style::default().fg(theme::OVERLAY1);
+            let label_style = Style::default().fg(theme::overlay1());
             // Place "N" one row above source endpoint
             if edge.sy > 0 {
                 let ny = edge.sy - 1;
@@ -915,25 +920,25 @@ fn render_table_box(
 
     let border_style = if is_selected {
         Style::default()
-            .fg(theme::BLUE)
+            .fg(theme::blue())
             .add_modifier(Modifier::BOLD)
     } else if is_related {
-        Style::default().fg(theme::YELLOW)
+        Style::default().fg(theme::yellow())
     } else {
-        Style::default().fg(theme::OVERLAY0)
+        Style::default().fg(theme::overlay0())
     };
 
     let title_style = if is_selected {
         Style::default()
-            .fg(theme::BLUE)
+            .fg(theme::blue())
             .add_modifier(Modifier::BOLD)
     } else if is_related {
         Style::default()
-            .fg(theme::YELLOW)
+            .fg(theme::yellow())
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default()
-            .fg(theme::TEXT)
+            .fg(theme::text())
             .add_modifier(Modifier::BOLD)
     };
 
@@ -966,7 +971,7 @@ fn render_table_box(
             Span::styled(
                 glyph,
                 Style::default()
-                    .fg(theme::YELLOW)
+                    .fg(theme::yellow())
                     .add_modifier(Modifier::BOLD),
             )
         } else if fk_from_cols.contains(&col.name) {
@@ -974,13 +979,13 @@ fn render_table_box(
                 DiagramGlyphMode::Ascii => "->",
                 DiagramGlyphMode::Unicode => "\u{2192} ", // →
             };
-            Span::styled(glyph, Style::default().fg(theme::GREEN))
+            Span::styled(glyph, Style::default().fg(theme::green()))
         } else if fk_to_cols.contains(&col.name) {
             let glyph = match glyph_mode {
                 DiagramGlyphMode::Ascii => "<-",
                 DiagramGlyphMode::Unicode => "\u{2190} ", // ←
             };
-            Span::styled(glyph, Style::default().fg(theme::MAUVE))
+            Span::styled(glyph, Style::default().fg(theme::mauve()))
         } else {
             Span::raw("  ")
         };
@@ -998,9 +1003,9 @@ fn render_table_box(
         let type_padded = format!("{:<width$}", type_truncated, width = type_w);
 
         let content_style = if is_selected {
-            Style::default().fg(theme::TEXT)
+            Style::default().fg(theme::text())
         } else {
-            Style::default().fg(theme::OVERLAY2)
+            Style::default().fg(theme::overlay2())
         };
 
         let type_color = data_type_color(&col.data_type);
@@ -1085,25 +1090,25 @@ fn draw_help_bar(frame: &mut Frame, full_area: Rect, focus_mode: bool) {
     };
 
     let help = Paragraph::new(Line::from(vec![
-        Span::styled(" hjkl", Style::default().fg(theme::BLUE)),
+        Span::styled(" hjkl", Style::default().fg(theme::blue())),
         Span::raw(": scroll  "),
-        Span::styled("j/k/Tab", Style::default().fg(theme::BLUE)),
+        Span::styled("j/k/Tab", Style::default().fg(theme::blue())),
         Span::raw(": select  "),
-        Span::styled("/", Style::default().fg(theme::BLUE)),
+        Span::styled("/", Style::default().fg(theme::blue())),
         Span::raw(": search  "),
-        Span::styled("PgUp/Dn", Style::default().fg(theme::BLUE)),
+        Span::styled("PgUp/Dn", Style::default().fg(theme::blue())),
         Span::raw(": fast scroll  "),
-        Span::styled("f", Style::default().fg(theme::BLUE)),
+        Span::styled("f", Style::default().fg(theme::blue())),
         Span::raw(format!(
             ": {}  ",
             if focus_mode { "show all" } else { "focus" }
         )),
-        Span::styled("u", Style::default().fg(theme::BLUE)),
+        Span::styled("u", Style::default().fg(theme::blue())),
         Span::raw(": glyph  "),
-        Span::styled("Esc/q", Style::default().fg(theme::BLUE)),
+        Span::styled("Esc/q", Style::default().fg(theme::blue())),
         Span::raw(": close "),
     ]))
-    .style(Style::default().fg(theme::OVERLAY0));
+    .style(Style::default().fg(theme::overlay0()));
 
     frame.render_widget(help, bar_area);
 }
@@ -1417,56 +1422,56 @@ mod tests {
 
     #[test]
     fn test_data_type_color_numeric() {
-        assert_eq!(data_type_color("integer"), theme::PEACH);
-        assert_eq!(data_type_color("bigint"), theme::PEACH);
-        assert_eq!(data_type_color("float8"), theme::PEACH);
-        assert_eq!(data_type_color("serial"), theme::PEACH);
-        assert_eq!(data_type_color("numeric(10,2)"), theme::PEACH);
+        assert_eq!(data_type_color("integer"), theme::peach());
+        assert_eq!(data_type_color("bigint"), theme::peach());
+        assert_eq!(data_type_color("float8"), theme::peach());
+        assert_eq!(data_type_color("serial"), theme::peach());
+        assert_eq!(data_type_color("numeric(10,2)"), theme::peach());
     }
 
     #[test]
     fn test_data_type_color_text() {
-        assert_eq!(data_type_color("varchar"), theme::GREEN);
-        assert_eq!(data_type_color("text"), theme::GREEN);
-        assert_eq!(data_type_color("character varying"), theme::GREEN);
+        assert_eq!(data_type_color("varchar"), theme::green());
+        assert_eq!(data_type_color("text"), theme::green());
+        assert_eq!(data_type_color("character varying"), theme::green());
     }
 
     #[test]
     fn test_data_type_color_boolean() {
-        assert_eq!(data_type_color("boolean"), theme::FLAMINGO);
-        assert_eq!(data_type_color("bool"), theme::FLAMINGO);
+        assert_eq!(data_type_color("boolean"), theme::flamingo());
+        assert_eq!(data_type_color("bool"), theme::flamingo());
     }
 
     #[test]
     fn test_data_type_color_temporal() {
-        assert_eq!(data_type_color("timestamp"), theme::SKY);
-        assert_eq!(data_type_color("date"), theme::SKY);
-        assert_eq!(data_type_color("time"), theme::SKY);
-        assert_eq!(data_type_color("interval"), theme::SKY);
+        assert_eq!(data_type_color("timestamp"), theme::sky());
+        assert_eq!(data_type_color("date"), theme::sky());
+        assert_eq!(data_type_color("time"), theme::sky());
+        assert_eq!(data_type_color("interval"), theme::sky());
     }
 
     #[test]
     fn test_data_type_color_structured() {
-        assert_eq!(data_type_color("jsonb"), theme::MAUVE);
-        assert_eq!(data_type_color("json"), theme::MAUVE);
-        assert_eq!(data_type_color("xml"), theme::MAUVE);
-        assert_eq!(data_type_color("_int4"), theme::MAUVE); // array type
+        assert_eq!(data_type_color("jsonb"), theme::mauve());
+        assert_eq!(data_type_color("json"), theme::mauve());
+        assert_eq!(data_type_color("xml"), theme::mauve());
+        assert_eq!(data_type_color("_int4"), theme::mauve()); // array type
     }
 
     #[test]
     fn test_data_type_color_uuid() {
-        assert_eq!(data_type_color("uuid"), theme::LAVENDER);
+        assert_eq!(data_type_color("uuid"), theme::lavender());
     }
 
     #[test]
     fn test_data_type_color_binary() {
-        assert_eq!(data_type_color("bytea"), theme::MAROON);
+        assert_eq!(data_type_color("bytea"), theme::maroon());
     }
 
     #[test]
     fn test_data_type_color_default() {
-        assert_eq!(data_type_color("oid"), theme::OVERLAY0);
-        assert_eq!(data_type_color("void"), theme::OVERLAY0);
+        assert_eq!(data_type_color("oid"), theme::overlay0());
+        assert_eq!(data_type_color("void"), theme::overlay0());
     }
 
     #[test]

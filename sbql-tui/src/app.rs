@@ -634,6 +634,45 @@ impl MutationState {
     }
 }
 
+/// The theme picker overlay.
+///
+/// Holds what to go back to: moving the cursor applies a theme immediately so
+/// the whole UI is the preview, and Esc has to be able to undo that.
+pub struct ThemePicker {
+    pub visible: bool,
+    pub cursor: ListCursor,
+    /// The theme that was in use when the picker opened.
+    pub previous: usize,
+}
+
+impl Default for ThemePicker {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            cursor: ListCursor::new(),
+            previous: 0,
+        }
+    }
+}
+
+impl ThemePicker {
+    /// Open on the theme in use, so the list starts where the eye is.
+    pub fn open() -> Self {
+        let current = crate::ui::theme::current_index();
+        let mut cursor = ListCursor::new();
+        cursor.select(current, crate::ui::theme::THEMES.len());
+        Self {
+            visible: true,
+            cursor,
+            previous: current,
+        }
+    }
+
+    pub fn selected(&self) -> usize {
+        self.cursor.index()
+    }
+}
+
 pub struct VimState {
     pub nav_mode: NavMode,
     pub pending_leader: bool,
@@ -705,6 +744,8 @@ pub enum Mode {
     Diagram,
     /// The full text of the current notice, over the workspace.
     NoticeDetail,
+    /// The theme picker.
+    ThemePicker,
     /// Single-cell edit popup over the results grid.
     CellEdit,
     /// Filter bar under the results grid.
@@ -750,6 +791,8 @@ pub struct AppState {
     pub notice: Option<Notice>,
     /// Whether the full text of `notice` is open over the workspace.
     pub notice_detail_open: bool,
+    /// The theme picker overlay.
+    pub theme_picker: ThemePicker,
     /// Ticks since startup. Only used to expire notices; see [`Notice`].
     pub tick: u64,
 
@@ -766,6 +809,8 @@ impl AppState {
     pub fn mode(&self) -> Mode {
         if self.diagram.is_some() {
             Mode::Diagram
+        } else if self.theme_picker.visible {
+            Mode::ThemePicker
         } else if self.notice_detail_open {
             Mode::NoticeDetail
         } else if self.mutation.cell_edit.is_some() {
@@ -794,6 +839,7 @@ impl AppState {
         self.conn.form.visible = false;
         self.conn.pending_delete = None;
         self.notice_detail_open = false;
+        self.theme_picker.visible = false;
     }
 
     // -----------------------------------------------------------------------
@@ -860,6 +906,7 @@ impl AppState {
             self.filter.visible,
             self.conn.form.visible,
             self.conn.pending_delete.is_some(),
+            self.theme_picker.visible,
         ]
         .iter()
         .filter(|open| **open)
@@ -945,6 +992,7 @@ impl AppState {
             cached_diagram: None,
             notice: None,
             notice_detail_open: false,
+            theme_picker: ThemePicker::default(),
             tick: 0,
             should_quit: false,
         }

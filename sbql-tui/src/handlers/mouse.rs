@@ -17,7 +17,7 @@ use ratatui::layout::Rect;
 
 use crate::action::{
     Action, CellEditAction, ConnectionsAction, DiagramAction, EditorAction, FilterAction,
-    FormAction, NavAction, ResultsAction, TablesAction,
+    FormAction, NavAction, ResultsAction, TablesAction, ThemeAction,
 };
 use crate::app::{AppState, FocusedPanel, NavMode};
 use crate::ui::hit::{Side, Zone};
@@ -115,6 +115,15 @@ fn click(state: &AppState, col: u16, row: u16) -> Action {
         // A click anywhere in the detail overlay closes it: it is a thing to
         // read, and the only thing to do with it is dismiss it.
         Zone::NoticeDetail => Action::CloseNoticeDetail,
+        // Clicking previews it, like moving the cursor does; a second click
+        // keeps it, matching every other list in the app.
+        Zone::ThemeRow(i) => {
+            let mut actions = vec![Action::Theme(ThemeAction::Select(i))];
+            if double {
+                actions.push(Action::Theme(ThemeAction::Confirm));
+            }
+            Action::Batch(actions)
+        }
 
         // -- Status bar --
         Zone::NoticeDetailHint => Action::ShowNoticeDetail,

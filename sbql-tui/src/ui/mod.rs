@@ -8,6 +8,7 @@ pub mod layout;
 pub mod notice;
 pub mod results;
 pub mod theme;
+pub mod theme_picker;
 
 use ratatui::{
     style::{Modifier, Style},
@@ -152,6 +153,15 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, cache: &mut cache::RenderCa
         state.layout.hits = hits;
     }
 
+    if state.theme_picker.visible {
+        theme_picker::draw(
+            frame,
+            &state.theme_picker,
+            frame.area(),
+            &mut state.layout.hits,
+        );
+    }
+
     // Drawn last so it sits over everything else, including the other overlays.
     if state.notice_detail_open {
         if let Some(ref n) = state.notice {
@@ -190,8 +200,8 @@ fn draw_status_bar(
 ) {
     if let Some((_, ref name)) = state.conn.pending_delete {
         let style = Style::default()
-            .fg(theme::BASE)
-            .bg(theme::YELLOW)
+            .fg(theme::base())
+            .bg(theme::yellow())
             .add_modifier(Modifier::BOLD);
         // Laid out as parts so the two answers can be clicked. Built by walking
         // the widths rather than counting characters by hand, which is how a
@@ -221,18 +231,18 @@ fn draw_status_bar(
             Level::Error => (
                 "✗",
                 Style::default()
-                    .fg(theme::TEXT)
-                    .bg(theme::RED)
+                    .fg(theme::text())
+                    .bg(theme::red())
                     .add_modifier(Modifier::BOLD),
             ),
             Level::Warning => (
                 "!",
                 Style::default()
-                    .fg(theme::BASE)
-                    .bg(theme::YELLOW)
+                    .fg(theme::base())
+                    .bg(theme::yellow())
                     .add_modifier(Modifier::BOLD),
             ),
-            Level::Info => ("✓", Style::default().fg(theme::BASE).bg(theme::GREEN)),
+            Level::Info => ("✓", Style::default().fg(theme::base()).bg(theme::green())),
         };
 
         let more = if notice.has_detail() {
@@ -283,14 +293,14 @@ fn draw_status_bar(
         let line = if state.results.is_loading {
             let frame_char = SPINNER[state.layout.spinner_frame % SPINNER.len()];
             Line::from(vec![
-                Span::styled(help, Style::default().fg(theme::OVERLAY0)),
+                Span::styled(help, Style::default().fg(theme::overlay0())),
                 Span::styled(
                     format!("  {frame_char} "),
-                    Style::default().fg(theme::YELLOW),
+                    Style::default().fg(theme::yellow()),
                 ),
             ])
         } else {
-            Line::from(Span::styled(help, Style::default().fg(theme::OVERLAY0)))
+            Line::from(Span::styled(help, Style::default().fg(theme::overlay0())))
         };
         frame.render_widget(Paragraph::new(line), area);
     }

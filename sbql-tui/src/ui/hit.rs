@@ -71,6 +71,8 @@ pub enum Zone {
     CellEditCancel,
     /// The open notice-detail overlay. Clicking anywhere in it closes it.
     NoticeDetail,
+    /// Row `n` of the theme picker.
+    ThemeRow(usize),
 
     // -- Status bar --
     /// The bar's "(Ctrl+E: details)" affordance.

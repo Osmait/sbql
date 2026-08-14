@@ -52,14 +52,14 @@ pub fn draw(
             .borders(Borders::ALL)
             .border_style(
                 Style::default()
-                    .fg(theme::YELLOW)
+                    .fg(theme::yellow())
                     .add_modifier(Modifier::BOLD),
             ),
     );
     edit.textarea
-        .set_cursor_style(Style::default().bg(theme::YELLOW).fg(theme::BASE));
+        .set_cursor_style(Style::default().bg(theme::yellow()).fg(theme::base()));
     edit.textarea
-        .set_cursor_line_style(Style::default().bg(theme::SURFACE0));
+        .set_cursor_line_style(Style::default().bg(theme::surface0()));
 
     frame.render_widget(&edit.textarea, popup);
 

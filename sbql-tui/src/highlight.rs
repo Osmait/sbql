@@ -47,21 +47,23 @@ fn unstyled(source: &str, style: Style) -> Vec<Vec<(Style, String)>> {
 /// Map a highlight-name index to a Catppuccin Mocha foreground colour.
 fn style_for_highlight(idx: usize) -> Style {
     let fg = match HIGHLIGHT_NAMES.get(idx) {
-        Some(&"keyword") => theme::MAUVE,
-        Some(&"function.call" | &"function") => theme::BLUE,
-        Some(&"string") => theme::GREEN,
-        Some(&"type" | &"type.builtin") => theme::YELLOW,
-        Some(&"number" | &"float") => theme::PEACH,
-        Some(&"boolean") => theme::PEACH,
-        Some(&"comment") => theme::OVERLAY1,
-        Some(&"operator") => theme::RED,
-        Some(&"punctuation" | &"punctuation.bracket" | &"punctuation.delimiter") => theme::SURFACE2,
-        Some(&"variable") => theme::FLAMINGO,
-        Some(&"field" | &"parameter") => theme::SAPPHIRE,
-        Some(&"conditional") => theme::LAVENDER,
-        Some(&"attribute" | &"storageclass") => theme::TEAL,
-        Some(&"constant" | &"constant.builtin") => theme::PEACH,
-        _ => theme::TEXT,
+        Some(&"keyword") => theme::mauve(),
+        Some(&"function.call" | &"function") => theme::blue(),
+        Some(&"string") => theme::green(),
+        Some(&"type" | &"type.builtin") => theme::yellow(),
+        Some(&"number" | &"float") => theme::peach(),
+        Some(&"boolean") => theme::peach(),
+        Some(&"comment") => theme::overlay1(),
+        Some(&"operator") => theme::red(),
+        Some(&"punctuation" | &"punctuation.bracket" | &"punctuation.delimiter") => {
+            theme::surface2()
+        }
+        Some(&"variable") => theme::flamingo(),
+        Some(&"field" | &"parameter") => theme::sapphire(),
+        Some(&"conditional") => theme::lavender(),
+        Some(&"attribute" | &"storageclass") => theme::teal(),
+        Some(&"constant" | &"constant.builtin") => theme::peach(),
+        _ => theme::text(),
     };
     Style::default().fg(fg)
 }
@@ -112,7 +114,7 @@ impl SqlHighlighter {
         let mut lines: Vec<Vec<(Style, String)>> = Vec::with_capacity(num_lines);
         lines.push(Vec::new());
 
-        let default_style = Style::default().fg(theme::TEXT);
+        let default_style = Style::default().fg(theme::text());
 
         // No grammar: the editor still shows the SQL, just without colour.
         let Some(config) = self.config.as_ref() else {

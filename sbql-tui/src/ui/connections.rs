@@ -79,15 +79,15 @@ pub fn draw_connections(
             let indicator = if is_active { "● " } else { "  " };
             let style = if i == conn.selected() && is_focused {
                 Style::default()
-                    .fg(theme::BASE)
-                    .bg(theme::BLUE)
+                    .fg(theme::base())
+                    .bg(theme::blue())
                     .add_modifier(Modifier::BOLD)
             } else if is_active {
-                Style::default().fg(theme::GREEN)
+                Style::default().fg(theme::green())
             } else if entry.is_discovered() {
                 // Dimmed so the list reads at a glance as "yours" and "found
                 // for you" — these vanish when the container stops.
-                Style::default().fg(theme::OVERLAY1)
+                Style::default().fg(theme::overlay1())
             } else {
                 Style::default()
             };
@@ -96,9 +96,9 @@ pub fn draw_connections(
                 Span::styled(
                     indicator,
                     Style::default().fg(if is_active {
-                        theme::GREEN
+                        theme::green()
                     } else {
-                        theme::OVERLAY0
+                        theme::overlay0()
                     }),
                 ),
                 Span::styled(c.name.clone(), style),
@@ -106,7 +106,7 @@ pub fn draw_connections(
             if let ConnectionEntry::Discovered(found) = entry {
                 spans.push(Span::styled(
                     format!("  {}", found.source.label()),
-                    Style::default().fg(theme::OVERLAY0),
+                    Style::default().fg(theme::overlay0()),
                 ));
             }
             ListItem::new(Line::from(spans))
@@ -125,9 +125,9 @@ pub fn draw_connections(
     };
 
     let border_style = if is_focused {
-        Style::default().fg(theme::BLUE)
+        Style::default().fg(theme::blue())
     } else {
-        Style::default().fg(theme::OVERLAY0)
+        Style::default().fg(theme::overlay0())
     };
 
     let conn_list = List::new(conn_items)
@@ -165,9 +165,9 @@ pub fn draw_tables(
     }
 
     let border_style = if is_focused {
-        Style::default().fg(theme::BLUE)
+        Style::default().fg(theme::blue())
     } else {
-        Style::default().fg(theme::OVERLAY0)
+        Style::default().fg(theme::overlay0())
     };
 
     let table_items: Vec<ListItem> = tables
@@ -177,13 +177,13 @@ pub fn draw_tables(
         .map(|(i, t)| {
             let style = if i == tables.selected() && is_focused {
                 Style::default()
-                    .fg(theme::BASE)
-                    .bg(theme::YELLOW)
+                    .fg(theme::base())
+                    .bg(theme::yellow())
                     .add_modifier(Modifier::BOLD)
             } else if i == tables.selected() {
-                Style::default().fg(theme::YELLOW)
+                Style::default().fg(theme::yellow())
             } else {
-                Style::default().fg(theme::OVERLAY2)
+                Style::default().fg(theme::overlay2())
             };
             ListItem::new(Span::styled(t.qualified(), style))
         })
@@ -240,7 +240,7 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect, hits: &
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::BLUE));
+        .border_style(Style::default().fg(theme::blue()));
 
     frame.render_widget(block.clone(), area);
     let inner = block.inner(area);
@@ -259,16 +259,16 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect, hits: &
         let label = form.field_label(i);
         let is_active = form.field_index == i;
         let border_style = if is_active {
-            Style::default().fg(theme::BLUE)
+            Style::default().fg(theme::blue())
         } else {
-            Style::default().fg(theme::OVERLAY0)
+            Style::default().fg(theme::overlay0())
         };
         let title_style = if is_active {
             Style::default()
-                .fg(theme::BLUE)
+                .fg(theme::blue())
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme::OVERLAY2)
+            Style::default().fg(theme::overlay2())
         };
 
         // One match on the row rather than two lookups and an `expect` to
@@ -336,7 +336,7 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect, hits: &
         );
 
         let help = Paragraph::new(format!("{HELP_LEAD}{HELP_SAVE}{HELP_GAP}{HELP_CANCEL}"))
-            .style(Style::default().fg(theme::OVERLAY0));
+            .style(Style::default().fg(theme::overlay0()));
         frame.render_widget(help, help_area);
     }
 
@@ -347,7 +347,7 @@ pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect, hits: &
             ..inner
         };
         frame.render_widget(
-            Paragraph::new(err.as_str()).style(Style::default().fg(theme::RED)),
+            Paragraph::new(err.as_str()).style(Style::default().fg(theme::red())),
             err_area,
         );
     }

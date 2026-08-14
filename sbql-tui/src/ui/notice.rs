@@ -25,15 +25,15 @@ pub fn draw(frame: &mut Frame, notice: &Notice, area: Rect, hits: &mut crate::ui
     let popup = centred(area, WIDTH_PCT, HEIGHT_PCT);
 
     let (title, accent) = match notice.level {
-        Level::Error => (" Error ", theme::RED),
-        Level::Warning => (" Warning ", theme::YELLOW),
-        Level::Info => (" Message ", theme::GREEN),
+        Level::Error => (" Error ", theme::red()),
+        Level::Warning => (" Warning ", theme::yellow()),
+        Level::Info => (" Message ", theme::green()),
     };
 
     let mut lines = vec![Line::from(Span::styled(
         notice.text.clone(),
         Style::default()
-            .fg(theme::TEXT)
+            .fg(theme::text())
             .add_modifier(Modifier::BOLD),
     ))];
 
@@ -41,7 +41,7 @@ pub fn draw(frame: &mut Frame, notice: &Notice, area: Rect, hits: &mut crate::ui
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             detail.clone(),
-            Style::default().fg(theme::SUBTEXT0),
+            Style::default().fg(theme::subtext0()),
         )));
     }
 
@@ -49,7 +49,7 @@ pub fn draw(frame: &mut Frame, notice: &Notice, area: Rect, hits: &mut crate::ui
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             format!("→ {hint}"),
-            Style::default().fg(theme::SAPPHIRE),
+            Style::default().fg(theme::sapphire()),
         )));
     }
 
@@ -60,12 +60,12 @@ pub fn draw(frame: &mut Frame, notice: &Notice, area: Rect, hits: &mut crate::ui
         ))
         .title_bottom(Span::styled(
             " any key to close ",
-            Style::default().fg(theme::OVERLAY0),
+            Style::default().fg(theme::overlay0()),
         ))
         .title_alignment(Alignment::Left)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(accent))
-        .style(Style::default().bg(theme::BASE));
+        .style(Style::default().bg(theme::base()));
 
     // Wrapping is the point: this exists because the status bar cannot.
     let body = Paragraph::new(lines)

@@ -118,9 +118,9 @@ pub fn draw(
     let is_focused = focused == FocusedPanel::Results;
 
     let border_style = if is_focused {
-        Style::default().fg(theme::GREEN)
+        Style::default().fg(theme::green())
     } else {
-        Style::default().fg(theme::OVERLAY0)
+        Style::default().fg(theme::overlay0())
     };
 
     // Build title with page info
@@ -174,25 +174,25 @@ pub fn draw(
         Span::styled(
             page_info,
             Style::default()
-                .fg(theme::GREEN)
+                .fg(theme::green())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(loading_indicator, Style::default().fg(theme::YELLOW)),
+        Span::styled(loading_indicator, Style::default().fg(theme::yellow())),
         Span::styled(
             pending_indicator,
             Style::default()
-                .fg(theme::BASE)
-                .bg(theme::YELLOW)
+                .fg(theme::base())
+                .bg(theme::yellow())
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             filter_hint,
             if active_filter.is_some() {
                 Style::default()
-                    .fg(theme::MAUVE)
+                    .fg(theme::mauve())
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(theme::OVERLAY0)
+                Style::default().fg(theme::overlay0())
             },
         ),
     ]);
@@ -241,12 +241,12 @@ pub fn draw(
             let is_selected_col = i == results.selected_col && is_focused;
             let style = if is_selected_col {
                 Style::default()
-                    .fg(theme::BASE)
-                    .bg(theme::BLUE)
+                    .fg(theme::base())
+                    .bg(theme::blue())
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
-                    .fg(theme::BLUE)
+                    .fg(theme::blue())
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
             };
             Cell::from(format!("{col}{sort_indicator}")).style(style)
@@ -283,28 +283,28 @@ pub fn draw(
                     let style = if is_pending_delete {
                         if is_selected_cell {
                             Style::default()
-                                .fg(theme::TEXT)
-                                .bg(theme::RED)
+                                .fg(theme::text())
+                                .bg(theme::red())
                                 .add_modifier(Modifier::BOLD)
                         } else {
-                            Style::default().fg(theme::TEXT).bg(theme::RED)
+                            Style::default().fg(theme::text()).bg(theme::red())
                         }
                     } else if is_pending_edit {
                         Style::default()
-                            .fg(theme::BASE)
-                            .bg(theme::YELLOW)
+                            .fg(theme::base())
+                            .bg(theme::yellow())
                             .add_modifier(Modifier::BOLD)
                     } else if is_selected_cell {
                         Style::default()
-                            .fg(theme::BASE)
-                            .bg(theme::BLUE)
+                            .fg(theme::base())
+                            .bg(theme::blue())
                             .add_modifier(Modifier::BOLD)
                     } else if is_selected {
-                        Style::default().bg(theme::SURFACE0)
+                        Style::default().bg(theme::surface0())
                     } else if row_idx % 2 == 0 {
                         Style::default()
                     } else {
-                        Style::default().fg(theme::OVERLAY2)
+                        Style::default().fg(theme::overlay2())
                     };
                     Cell::from(display).style(style)
                 })
@@ -348,11 +348,11 @@ pub fn draw(
     let right_width = Span::raw(right_arrow).width();
 
     let title_bottom = if nav_hint.is_empty() {
-        Line::from(Span::styled(help, Style::default().fg(theme::OVERLAY0)))
+        Line::from(Span::styled(help, Style::default().fg(theme::overlay0())))
     } else {
         Line::from(vec![
-            Span::styled(help, Style::default().fg(theme::OVERLAY0)),
-            Span::styled(nav_hint, Style::default().fg(theme::BLUE)),
+            Span::styled(help, Style::default().fg(theme::overlay0())),
+            Span::styled(nav_hint, Style::default().fg(theme::blue())),
         ])
     };
 
@@ -537,11 +537,11 @@ pub fn draw_filter_bar(
         Block::default()
             .title(" Filter (Tab: autocomplete, Enter: apply, Esc: close) ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::MAUVE)),
+            .border_style(Style::default().fg(theme::mauve())),
     );
     filter
         .textarea
-        .set_cursor_style(Style::default().bg(theme::MAUVE).fg(theme::BASE));
+        .set_cursor_style(Style::default().bg(theme::mauve()).fg(theme::base()));
 
     frame.render_widget(&filter.textarea, bar_area);
 
@@ -574,9 +574,9 @@ pub fn draw_filter_bar(
         let mut lines = Vec::new();
         for (i, item) in filter.suggestions.iter().take(max_items).enumerate() {
             let style = if i == filter.suggestion_cursor.index() {
-                Style::default().fg(theme::BASE).bg(theme::BLUE)
+                Style::default().fg(theme::base()).bg(theme::blue())
             } else {
-                Style::default().fg(theme::TEXT)
+                Style::default().fg(theme::text())
             };
             // Registered beside the line it draws — the popup is a list, and a
             // row can never be clickable where its own text is not.
@@ -601,7 +601,7 @@ pub fn draw_filter_bar(
             Block::default()
                 .title(title)
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme::OVERLAY0)),
+                .border_style(Style::default().fg(theme::overlay0())),
         );
         frame.render_widget(sug, sug_area);
     }

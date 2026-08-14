@@ -24,9 +24,9 @@ pub fn draw(
     let is_focused = focused == FocusedPanel::Editor;
 
     let border_style = if is_focused {
-        Style::default().fg(theme::YELLOW)
+        Style::default().fg(theme::yellow())
     } else {
-        Style::default().fg(theme::OVERLAY0)
+        Style::default().fg(theme::overlay0())
     };
 
     let conn_indicator = match conn.active_id {
@@ -47,15 +47,15 @@ pub fn draw(
             EditorMode::Normal => Span::styled(
                 " NORMAL ",
                 Style::default()
-                    .fg(theme::BASE)
-                    .bg(theme::MAUVE)
+                    .fg(theme::base())
+                    .bg(theme::mauve())
                     .add_modifier(Modifier::BOLD),
             ),
             EditorMode::Insert => Span::styled(
                 " INSERT ",
                 Style::default()
-                    .fg(theme::BASE)
-                    .bg(theme::GREEN)
+                    .fg(theme::base())
+                    .bg(theme::green())
                     .add_modifier(Modifier::BOLD),
             ),
         }
@@ -67,22 +67,22 @@ pub fn draw(
         match editor.mode {
             EditorMode::Normal => Span::styled(
                 " hjkl: move  i: insert  M-hjkl: panels  ^S/F5: run ",
-                Style::default().fg(theme::OVERLAY0),
+                Style::default().fg(theme::overlay0()),
             ),
             EditorMode::Insert => Span::styled(
                 " Esc: normal  M-hjkl: panels  ^S/F5: run ",
-                Style::default().fg(theme::OVERLAY0),
+                Style::default().fg(theme::overlay0()),
             ),
         }
     } else {
-        Span::styled(" Tab/click: focus ", Style::default().fg(theme::OVERLAY0))
+        Span::styled(" Tab/click: focus ", Style::default().fg(theme::overlay0()))
     };
 
     let title = Line::from(vec![
         Span::styled(
             conn_indicator,
             Style::default()
-                .fg(theme::YELLOW)
+                .fg(theme::yellow())
                 .add_modifier(Modifier::BOLD),
         ),
         mode_span,
@@ -133,15 +133,15 @@ pub fn draw(
     // --- Cursor style ---
     let cursor_style = if is_focused {
         match editor.mode {
-            EditorMode::Normal => Style::default().bg(theme::MAUVE).fg(theme::BASE),
-            EditorMode::Insert => Style::default().bg(theme::YELLOW).fg(theme::BASE),
+            EditorMode::Normal => Style::default().bg(theme::mauve()).fg(theme::base()),
+            EditorMode::Insert => Style::default().bg(theme::yellow()).fg(theme::base()),
         }
     } else {
         Style::default()
     };
 
     let cursor_line_bg = if is_focused {
-        Some(theme::SURFACE0)
+        Some(theme::surface0())
     } else {
         None
     };
@@ -173,7 +173,7 @@ pub fn draw(
         let total_cols = line_chars.len();
 
         // Build per-char style array from segments
-        let mut char_styles: Vec<Style> = vec![Style::default().fg(theme::TEXT); total_cols];
+        let mut char_styles: Vec<Style> = vec![Style::default().fg(theme::text()); total_cols];
         {
             let mut col = 0;
             for (style, text) in segments {
@@ -299,7 +299,7 @@ fn draw_completion_popup(
     // Build popup content
     let popup_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::OVERLAY0));
+        .border_style(Style::default().fg(theme::overlay0()));
 
     let popup_inner = popup_block.inner(popup_rect);
     frame.render_widget(Clear, popup_rect);
@@ -311,15 +311,15 @@ fn draw_completion_popup(
     for (i, item) in comp.items.iter().enumerate().take(max_visible) {
         let is_selected = i == comp.selected();
         let icon = match item.kind {
-            CompletionKind::Table => Span::styled("T ", Style::default().fg(theme::BLUE)),
-            CompletionKind::Column => Span::styled("C ", Style::default().fg(theme::YELLOW)),
-            CompletionKind::Keyword => Span::styled("K ", Style::default().fg(theme::OVERLAY1)),
+            CompletionKind::Table => Span::styled("T ", Style::default().fg(theme::blue())),
+            CompletionKind::Column => Span::styled("C ", Style::default().fg(theme::yellow())),
+            CompletionKind::Keyword => Span::styled("K ", Style::default().fg(theme::overlay1())),
         };
 
         let text_style = if is_selected {
-            Style::default().fg(theme::TEXT).bg(theme::BLUE)
+            Style::default().fg(theme::text()).bg(theme::blue())
         } else {
-            Style::default().fg(theme::TEXT)
+            Style::default().fg(theme::text())
         };
 
         let detail = if item.detail.is_empty() {
@@ -328,15 +328,15 @@ fn draw_completion_popup(
             Span::styled(
                 format!("  {}", item.detail),
                 if is_selected {
-                    Style::default().fg(theme::SUBTEXT0).bg(theme::BLUE)
+                    Style::default().fg(theme::subtext0()).bg(theme::blue())
                 } else {
-                    Style::default().fg(theme::OVERLAY0)
+                    Style::default().fg(theme::overlay0())
                 },
             )
         };
 
         let icon_styled = if is_selected {
-            Span::styled(icon.content.to_string(), icon.style.bg(theme::BLUE))
+            Span::styled(icon.content.to_string(), icon.style.bg(theme::blue()))
         } else {
             icon
         };

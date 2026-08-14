@@ -7,6 +7,7 @@ pub mod mouse;
 pub mod navigation;
 pub mod results;
 pub mod tables;
+pub mod theme;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -32,6 +33,7 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
         // A reader, not an editor: any key closes it, so it is not another
         // mode the user has to find their way out of.
         Mode::NoticeDetail => return Action::CloseNoticeDetail,
+        Mode::ThemePicker => return theme::handle(state, key),
         Mode::CellEdit => return cell_edit::handle(state, key),
         Mode::Filter => return filter::handle(state, key),
         Mode::ConnectionForm => return connections::handle_form(state, key),
@@ -55,6 +57,12 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
     // with no way to read the end of it.
     if key.code == KeyCode::Char('e') && key.modifiers == KeyModifiers::CONTROL {
         return Action::ShowNoticeDetail;
+    }
+
+    // Ctrl+T — the theme picker. Global rather than behind the leader, so it
+    // is reachable while typing a query like every other Ctrl binding.
+    if key.code == KeyCode::Char('t') && key.modifiers == KeyModifiers::CONTROL {
+        return Action::Theme(crate::action::ThemeAction::Open);
     }
 
     // Ctrl+hjkl moves between panels from anywhere — including mid-word in the
@@ -163,9 +171,13 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
                     Action::Nav(NavAction::SetPendingLeader(false)),
                     Action::Nav(NavAction::ToggleSidebar),
                 ]),
+                (KeyCode::Char('t'), KeyModifiers::NONE) => Action::Batch(vec![
+                    Action::Nav(NavAction::SetPendingLeader(false)),
+                    Action::Theme(crate::action::ThemeAction::Open),
+                ]),
                 _ => Action::Batch(vec![
                     Action::Nav(NavAction::SetPendingLeader(false)),
-                    Action::Inform("Unknown leader combo. Try: Space e".into()),
+                    Action::Inform("Unknown leader combo. Try: Space e, Space t".into()),
                 ]),
             };
         }
@@ -173,7 +185,7 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
         if key.code == KeyCode::Char(' ') && key.modifiers == KeyModifiers::NONE {
             return Action::Batch(vec![
                 Action::Nav(NavAction::SetPendingLeader(true)),
-                Action::Inform("Leader: _  (e: toggle sidebar)".into()),
+                Action::Inform("Leader: _  (e: sidebar, t: theme)".into()),
             ]);
         }
 

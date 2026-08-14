@@ -76,7 +76,7 @@ impl Default for CanvasCell {
     fn default() -> Self {
         Self {
             ch: ' ',
-            style: Style::default().fg(theme::OVERLAY0),
+            style: Style::default().fg(theme::overlay0()),
         }
     }
 }
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn a_uniformly_styled_row_becomes_a_single_span() {
-        let s = Style::default().fg(theme::OVERLAY0);
+        let s = Style::default().fg(theme::overlay0());
         let row = styled_row(&[('a', s), ('b', s), ('c', s), ('d', s)]);
         let lines = canvas_to_lines(vec![row]);
         assert_eq!(
@@ -525,8 +525,8 @@ mod tests {
 
     #[test]
     fn a_row_breaks_into_a_span_per_style_run() {
-        let a = Style::default().fg(theme::GREEN);
-        let b = Style::default().fg(theme::PEACH);
+        let a = Style::default().fg(theme::green());
+        let b = Style::default().fg(theme::peach());
         let row = styled_row(&[('x', a), ('y', a), ('z', b), ('w', a)]);
         let lines = canvas_to_lines(vec![row]);
         let spans: Vec<(&str, Style)> = lines[0]
@@ -582,8 +582,8 @@ mod tests {
     #[test]
     fn cropping_a_multi_span_line_matches_the_per_character_version() {
         let line = Line::from(vec![
-            Span::styled("abc", Style::default().fg(theme::GREEN)),
-            Span::styled("de", Style::default().fg(theme::PEACH)),
+            Span::styled("abc", Style::default().fg(theme::green())),
+            Span::styled("de", Style::default().fg(theme::peach())),
             Span::raw("fghij"),
         ]);
         for x_offset in [0, 1, 3, 4, 9, 10, 25] {
@@ -598,8 +598,8 @@ mod tests {
     #[test]
     fn cropping_is_correct_with_multi_byte_characters() {
         let line = Line::from(vec![
-            Span::styled("┌─┬─┐", Style::default().fg(theme::OVERLAY0)),
-            Span::styled("región", Style::default().fg(theme::GREEN)),
+            Span::styled("┌─┬─┐", Style::default().fg(theme::overlay0())),
+            Span::styled("región", Style::default().fg(theme::green())),
             Span::raw("日本語"),
         ]);
         for x_offset in [0, 1, 2, 5, 7, 11, 13, 40] {
@@ -619,7 +619,7 @@ mod tests {
     fn cropping_preserves_span_coalescing() {
         let line = Line::from(vec![Span::styled(
             "hello world",
-            Style::default().fg(theme::GREEN),
+            Style::default().fg(theme::green()),
         )]);
 
         let sliced = crop_line(line.clone(), 6, 5);
