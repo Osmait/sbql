@@ -131,6 +131,37 @@ For a deeper architecture walkthrough, see `CONTRIBUTING.md`.
 
 ## Installation
 
+### macOS and Linux
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Osmait/sbql/main/install.sh | sh
+```
+
+Downloads the release binary for your machine, checks it against the published
+SHA-256, and puts it in `~/.local/bin`. No toolchain, no root, and nothing
+outside the install directory is touched. Intel and Apple Silicon Macs and
+x86_64/aarch64 Linux are covered; on Linux the credential-store library is
+compiled into the binary, so there is nothing to install alongside it.
+
+Piping a script from the internet into a shell is worth being wary of, so read
+it first if you would rather:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Osmait/sbql/main/install.sh -o install.sh
+less install.sh
+sh install.sh
+```
+
+To choose the location or pin a version:
+
+```bash
+SBQL_INSTALL_DIR=/usr/local/bin SBQL_VERSION=v0.2.0 sh install.sh
+```
+
+### Build from source
+
+Needed for any other platform, and for working on sbql itself.
+
 ### Prerequisites
 
 - Rust toolchain
