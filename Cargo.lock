@@ -4646,7 +4646,7 @@ dependencies = [
 
 [[package]]
 name = "sbql-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -4683,7 +4683,7 @@ dependencies = [
 
 [[package]]
 name = "sbql-ffi"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "sbql-core",
  "tempfile",
@@ -4695,7 +4695,7 @@ dependencies = [
 
 [[package]]
 name = "sbql-tui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "crossterm",
