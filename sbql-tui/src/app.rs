@@ -409,6 +409,17 @@ impl EditorState {
     }
 }
 
+/// Where the cursor goes when a page of results arrives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Landing {
+    /// The first row: a new query, or the next page while reading forward.
+    Top,
+    /// The last row: the previous page, reached by paging back.
+    Bottom,
+    /// Wherever it was: the same page again, so the user has not moved.
+    Keep,
+}
+
 #[derive(Default)]
 pub struct ResultsState {
     pub data: QueryResult,
@@ -1007,6 +1018,9 @@ impl AppState {
             }
             CoreEvent::QueryResult(mut result) => {
                 self.results.is_loading = false;
+                // Which way the page moved decides where the cursor lands, so
+                // it has to be read before `current_page` is overwritten.
+                let previous_page = self.results.current_page;
                 self.results.current_page = result.page;
                 tracing::info!(
                     "QueryResult: page={} rows={} cols={} has_next={}",
@@ -1015,10 +1029,26 @@ impl AppState {
                     result.columns.len(),
                     result.has_next_page,
                 );
-                if result.page == 0 {
-                    self.results.scroll = 0;
+                // Reading forward has to continue where the last page left
+                // off. Keeping the cursor's index across a page boundary put it
+                // at row 99 of the *next* page — eighty rows of content skipped
+                // in one keypress, and the very next press paged again, so
+                // scrolling through a large table saw one row in every hundred.
+                let landing = if result.page == 0 {
+                    Landing::Top
+                } else if result.page > previous_page {
+                    Landing::Top
+                } else if result.page < previous_page {
+                    // Paging back: land on the row adjacent to where you were,
+                    // which going up means the last one.
+                    Landing::Bottom
+                } else {
+                    // The same page again — a refresh after a commit. Moving
+                    // the cursor would lose the row the user was working on.
+                    Landing::Keep
+                };
+                if landing == Landing::Top {
                     self.results.col_scroll = 0;
-                    self.results.selected_row = 0;
                     self.results.selected_col = 0;
                 }
                 // These rows came from the SQL last sent for execution; record
@@ -1045,10 +1075,26 @@ impl AppState {
                 // end — every later row op would then read out of bounds or act
                 // on the wrong row. Clamp it to the new row count.
                 let row_count = self.results.data.rows.len();
-                if row_count == 0 {
-                    self.results.selected_row = 0;
-                } else if self.results.selected_row >= row_count {
-                    self.results.selected_row = row_count - 1;
+                match landing {
+                    Landing::Top => {
+                        self.results.selected_row = 0;
+                        self.results.scroll = 0;
+                    }
+                    Landing::Bottom => {
+                        self.results.selected_row = row_count.saturating_sub(1);
+                        self.results.scroll =
+                            row_count.saturating_sub(self.results.viewport_height.max(1));
+                    }
+                    // A shorter page — typically the last one — can leave the
+                    // kept index past the end, and every later row op would
+                    // then act on the wrong row or read out of bounds.
+                    Landing::Keep => {
+                        if row_count == 0 {
+                            self.results.selected_row = 0;
+                        } else if self.results.selected_row >= row_count {
+                            self.results.selected_row = row_count - 1;
+                        }
+                    }
                 }
                 let col_count = self.results.data.columns.len();
                 if col_count == 0 {
@@ -1462,13 +1508,13 @@ mod tests {
     }
 
     #[test]
-    fn core_event_query_result_page_n_preserves_position() {
+    fn core_event_query_result_forward_page_starts_at_the_top() {
         let mut state = AppState::new(vec![]);
         state.results.selected_row = 5;
         state.results.selected_col = 0;
-        // A page that still holds the selected row keeps the position (unlike
-        // page 0, which resets it); the clamp only kicks in when the row no
-        // longer exists — see core_event_query_result_clamps_selection_on_short_page.
+        // This test used to assert the opposite — that row 5 survived the page
+        // change — which is the bug: row 5 of the next page is different data,
+        // and everything between was skipped.
         let result = QueryResult {
             columns: vec!["id".into()],
             rows: (0..10).map(|i| vec![i.to_string()]).collect(),
@@ -1477,7 +1523,7 @@ mod tests {
             total_count: None,
         };
         state.apply_core_event(CoreEvent::QueryResult(result));
-        assert_eq!(state.results.selected_row, 5);
+        assert_eq!(state.results.selected_row, 0);
         assert_eq!(state.results.current_page, 2);
     }
 
@@ -1637,10 +1683,156 @@ mod tests {
         assert!(state.is_failing());
     }
 
+    /// A page of `n` rows, as the core would deliver it.
+    fn page_of(n: usize, page: usize, has_next: bool) -> QueryResult {
+        QueryResult {
+            columns: vec!["id".into()],
+            rows: (0..n).map(|i| vec![i.to_string()]).collect(),
+            page,
+            has_next_page: has_next,
+            total_count: None,
+        }
+    }
+
+    /// The bug this guards: pressing down at the bottom of a page fetched the
+    /// next one and kept the cursor's index, so the user landed on row 99 of
+    /// the new page — eighty rows skipped, and the next press paged again.
+    #[test]
+    fn crossing_into_the_next_page_lands_on_its_first_row() {
+        let mut state = AppState::new(vec![]);
+        state.results.viewport_height = 20;
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 0, true)));
+
+        // Walk to the bottom of page 0 the way the keyboard does.
+        for _ in 0..99 {
+            assert!(
+                !state.results.move_row_down_with_page_hint(),
+                "no page should be requested before the last row"
+            );
+        }
+        assert_eq!(state.results.selected_row, 99);
+        assert!(
+            state.results.move_row_down_with_page_hint(),
+            "the last row asks for the next page"
+        );
+
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 1, true)));
+
+        assert_eq!(
+            state.results.selected_row, 0,
+            "reading continues at the top"
+        );
+        assert_eq!(state.results.scroll, 0, "and the view follows it");
+    }
+
+    /// Going back should put you next to where you were, which upwards means
+    /// the last row of the previous page.
+    #[test]
+    fn paging_backwards_lands_on_the_last_row() {
+        let mut state = AppState::new(vec![]);
+        state.results.viewport_height = 20;
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 2, true)));
+
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 1, true)));
+
+        assert_eq!(state.results.selected_row, 99);
+        assert_eq!(state.results.scroll, 80, "the last row is in view");
+    }
+
+    /// The same page arriving again is a refresh after a commit, not a move.
+    #[test]
+    fn refetching_the_same_page_keeps_the_cursor() {
+        let mut state = AppState::new(vec![]);
+        state.results.viewport_height = 20;
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 3, true)));
+        state.results.selected_row = 42;
+        state.results.scroll = 30;
+
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 3, true)));
+
+        assert_eq!(state.results.selected_row, 42);
+        assert_eq!(state.results.scroll, 30);
+    }
+
+    /// Scrolling a long table has to move one row per press, with the view
+    /// following only when the cursor would otherwise leave it. A jump of more
+    /// than one row is the thing being ruled out.
+    #[test]
+    fn scrolling_a_long_table_moves_exactly_one_row_at_a_time() {
+        let mut state = AppState::new(vec![]);
+        state.results.viewport_height = 20;
+        state.apply_core_event(CoreEvent::QueryResult(page_of(500, 0, false)));
+
+        for step in 0..499 {
+            let (before_row, before_scroll) = (state.results.selected_row, state.results.scroll);
+            state.results.move_row_down_with_page_hint();
+
+            assert_eq!(
+                state.results.selected_row,
+                before_row + 1,
+                "step {step} moved more than one row"
+            );
+            let scrolled = state.results.scroll - before_scroll;
+            assert!(scrolled <= 1, "step {step} scrolled the view by {scrolled}");
+            // The cursor must stay on screen, or the user is editing a row
+            // they cannot see.
+            assert!(
+                state.results.selected_row >= state.results.scroll
+                    && state.results.selected_row < state.results.scroll + 20,
+                "step {step} left the cursor off screen"
+            );
+        }
+        assert_eq!(state.results.selected_row, 499);
+        assert_eq!(state.results.scroll, 480, "the last screenful is in view");
+    }
+
+    /// Reading a long table end to end must see every row, not one per page.
+    #[test]
+    fn reading_forward_across_pages_visits_every_row() {
+        let mut state = AppState::new(vec![]);
+        state.results.viewport_height = 20;
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 0, true)));
+
+        let mut seen = 0usize;
+        for page in 0..3 {
+            assert_eq!(
+                state.results.selected_row, 0,
+                "page {page} has to start at its first row"
+            );
+            // Every row of this page, top to bottom. Counting keypresses would
+            // not do: with the cursor stuck at the bottom of a page, the presses
+            // still happen while nothing moves.
+            for row in 0..99 {
+                state.results.move_row_down_with_page_hint();
+                assert_eq!(
+                    state.results.selected_row,
+                    row + 1,
+                    "page {page} stopped advancing at row {row}"
+                );
+                seen += 1;
+            }
+            assert_eq!(
+                state.results.selected_row, 99,
+                "page {page} ends at its last row"
+            );
+            assert!(
+                state.results.move_row_down_with_page_hint(),
+                "the last row of page {page} asks for the next"
+            );
+            seen += 1;
+            state.apply_core_event(CoreEvent::QueryResult(page_of(100, page + 1, page < 2)));
+        }
+        assert_eq!(seen, 300, "every row of all three pages was visited");
+    }
+
     /// A shorter later page must not leave the selection past the last row.
     #[test]
     fn core_event_query_result_clamps_selection_on_short_page() {
         let mut state = AppState::new(vec![]);
+        // The same page arriving again, so the cursor is kept rather than
+        // moved — which is the only case where clamping has anything to do.
+        // A shrinking refresh is real: rows can be deleted under you.
+        state.results.current_page = 3;
         state.results.selected_row = 40;
         state.results.selected_col = 5;
         state.apply_core_event(CoreEvent::QueryResult(QueryResult {
