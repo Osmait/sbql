@@ -13,7 +13,8 @@ use tokio::sync::mpsc;
 use tui_textarea::{CursorMove, Input};
 
 use crate::app::{
-    AppState, ConnectionForm, DiagramGlyphMode, EditorMode, FocusedPanel, NavMode, PendingEdit,
+    AppState, ConnectionEntry, ConnectionForm, DiagramGlyphMode, EditorMode, FocusedPanel, NavMode,
+    PendingEdit,
 };
 use crate::completion;
 use crate::list_cursor::Overflow;
@@ -96,6 +97,9 @@ pub enum ResultsAction {
     SetRow(usize),
     SetCol(usize),
     ToggleSort,
+    /// Cycle the sort of a named column — what clicking its header does.
+    /// `ToggleSort` acts on the cursor's column; this one names its target.
+    SortColumn(usize),
     MarkRowForDeletion,
     CommitPending,
     DiscardPendingOrEsc,
@@ -114,6 +118,20 @@ pub enum EditorAction {
     Input(Input),
     CursorMove(CursorMove),
     RunQuery,
+    /// Put the cursor where the user clicked, in text coordinates.
+    ClickAt {
+        row: usize,
+        col: usize,
+    },
+    /// Extend the selection to here — a drag in progress.
+    DragTo {
+        row: usize,
+        col: usize,
+    },
+    /// The button came up: the next drag starts a fresh selection.
+    DragEnd,
+    /// Scroll the view without moving the cursor. Positive scrolls down.
+    Scroll(i16),
 }
 
 #[derive(Debug)]
@@ -131,6 +149,8 @@ pub enum ConnectionsAction {
     DisconnectActive,
     OpenNewForm,
     OpenEditForm,
+    /// Persist the Docker-discovered connection under the cursor.
+    SaveDiscovered,
     InitDelete,
     ConfirmDelete,
     CancelDelete,
@@ -141,6 +161,8 @@ pub enum FormAction {
     Close,
     NextField,
     PrevField,
+    /// Put the form cursor on a field the user clicked.
+    FocusField(usize),
     Input(char),
     Backspace,
     CycleBackend,
@@ -159,6 +181,8 @@ pub enum FilterAction {
     Open,
     Close,
     CloseSuggestions,
+    /// Move the suggestion cursor to a row the user pointed at.
+    SelectSuggestion(usize),
     Input(Input),
     SuggestionUp,
     SuggestionDown,
@@ -170,7 +194,12 @@ pub enum FilterAction {
 pub enum DiagramAction {
     Open,
     Close,
-    Scroll { dx: i16, dy: i16 },
+    Scroll {
+        dx: i16,
+        dy: i16,
+    },
+    /// Select the sidebar row at this index, as drawn.
+    SelectIndex(usize),
     SelectNext,
     SelectPrev,
     SelectFirst,
@@ -812,6 +841,76 @@ mod tests {
             &tx,
         );
         assert_eq!(state.conn.selected(), 1);
+    }
+
+    /// A state with one saved connection and one Docker discovery, cursor on
+    /// the discovery.
+    fn state_on_a_discovered_connection() -> AppState {
+        let mut state = AppState::new(vec![sbql_core::ConnectionConfig::new_postgres(
+            "saved", "h", 5432, "u", "d",
+        )]);
+        state.conn.discovered = vec![sbql_core::DiscoveredConnection {
+            config: sbql_core::ConnectionConfig::new_postgres("from-docker", "h", 5432, "u", "d"),
+            source: sbql_core::DiscoverySource::Container { name: "pg".into() },
+        }];
+        state.conn.cursor.select(1, state.conn.len());
+        state
+    }
+
+    #[test]
+    fn saving_a_discovered_connection_asks_the_core_to_persist_it() {
+        let mut state = state_on_a_discovered_connection();
+        let expected = state.conn.discovered[0].config.id;
+        let (tx, mut rx) = cmd_channel();
+
+        apply(
+            Action::Connections(ConnectionsAction::SaveDiscovered),
+            &mut state,
+            &tx,
+        );
+
+        match rx.try_recv().expect("a SaveDiscovered command") {
+            CoreCommand::SaveDiscovered(id) => assert_eq!(id, expected),
+            other => panic!("expected SaveDiscovered, got {other:?}"),
+        }
+    }
+
+    /// There is nothing on disk behind a discovery, so delete has nothing to
+    /// do — and must say so rather than appearing to work.
+    #[test]
+    fn deleting_a_discovered_connection_is_refused() {
+        let mut state = state_on_a_discovered_connection();
+        let (tx, mut rx) = cmd_channel();
+
+        apply(
+            Action::Connections(ConnectionsAction::InitDelete),
+            &mut state,
+            &tx,
+        );
+
+        assert!(rx.try_recv().is_err(), "nothing to send");
+        assert!(state.conn.pending_delete.is_none());
+        assert!(state.is_failing());
+    }
+
+    /// Connecting is the one thing a discovery is *for*, so the cursor landing
+    /// on one must still produce a Connect.
+    #[test]
+    fn connecting_to_a_discovered_connection_works() {
+        let mut state = state_on_a_discovered_connection();
+        let expected = state.conn.discovered[0].config.id;
+        let (tx, mut rx) = cmd_channel();
+
+        apply(
+            Action::Connections(ConnectionsAction::ConnectSelected),
+            &mut state,
+            &tx,
+        );
+
+        match rx.try_recv().expect("a Connect command") {
+            CoreCommand::Connect(id) => assert_eq!(id, expected),
+            other => panic!("expected Connect, got {other:?}"),
+        }
     }
 
     #[test]

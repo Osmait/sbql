@@ -14,6 +14,15 @@ pub(super) fn apply(
             state.conn.form.visible = false;
         }
 
+        FormAction::FocusField(idx) => {
+            // Clamped rather than ignored: the row list shrinks when the
+            // backend changes, and a click mid-repaint must not wander.
+            let count = state.conn.form.field_count();
+            if count > 0 {
+                state.conn.form.field_index = idx.min(count - 1);
+            }
+        }
+
         FormAction::NextField => {
             let count = state.conn.form.field_count();
             state.conn.form.field_index = (state.conn.form.field_index + 1) % count;

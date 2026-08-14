@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use ratatui::layout::Rect;
 use sbql_core::{
-    ConnectionConfig, ConnectionDraft, CoreEvent, DbBackend, DiagramData, FieldSpec, QueryResult,
-    SortDirection, SslMode, TableEntry,
+    ConnectionConfig, ConnectionDraft, CoreEvent, DbBackend, DiagramData, DiscoveredConnection,
+    FieldSpec, QueryResult, SortDirection, SslMode, TableEntry,
 };
 use tui_textarea::TextArea;
 use uuid::Uuid;
@@ -13,6 +13,7 @@ use crate::completion::CompletionState;
 use crate::highlight::SqlHighlighter;
 use crate::list_cursor::ListCursor;
 use crate::notice::Notice;
+use crate::ui::hit::HitMap;
 
 // ---------------------------------------------------------------------------
 // Focus model
@@ -298,6 +299,9 @@ impl DiagramState {
 
 pub struct ConnectionState {
     pub connections: Vec<ConnectionConfig>,
+    /// Databases found running in Docker this session. Offered below the saved
+    /// ones and never written to disk unless the user asks.
+    pub discovered: Vec<DiscoveredConnection>,
     pub cursor: ListCursor,
     pub active_id: Option<Uuid>,
     pub active_backend: DbBackend,
@@ -305,9 +309,61 @@ pub struct ConnectionState {
     pub pending_delete: Option<(Uuid, String)>,
 }
 
+/// One row of the connections panel.
+///
+/// The panel shows two lists that behave differently — saved connections can be
+/// edited and deleted, discovered ones can only be connected to or saved — but
+/// the cursor moves through them as one. Making that a type means every call
+/// site has to say which kind it is looking at instead of assuming.
+#[derive(Debug, Clone, Copy)]
+pub enum ConnectionEntry<'a> {
+    Saved(&'a ConnectionConfig),
+    Discovered(&'a DiscoveredConnection),
+}
+
+impl<'a> ConnectionEntry<'a> {
+    pub fn config(self) -> &'a ConnectionConfig {
+        match self {
+            ConnectionEntry::Saved(c) => c,
+            ConnectionEntry::Discovered(d) => &d.config,
+        }
+    }
+
+    pub fn is_discovered(self) -> bool {
+        matches!(self, ConnectionEntry::Discovered(_))
+    }
+}
+
 impl ConnectionState {
     pub fn selected(&self) -> usize {
         self.cursor.index()
+    }
+
+    /// Every row the panel draws, saved first.
+    pub fn entries(&self) -> impl Iterator<Item = ConnectionEntry<'_>> {
+        self.connections
+            .iter()
+            .map(ConnectionEntry::Saved)
+            .chain(self.discovered.iter().map(ConnectionEntry::Discovered))
+    }
+
+    /// How many rows the cursor can land on. Not `connections.len()` — that
+    /// would make the discovered ones unreachable.
+    pub fn len(&self) -> usize {
+        self.connections.len() + self.discovered.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn entry(&self, idx: usize) -> Option<ConnectionEntry<'_>> {
+        self.entries().nth(idx)
+    }
+
+    /// The row the cursor is on.
+    pub fn selected_entry(&self) -> Option<ConnectionEntry<'_>> {
+        self.entry(self.selected())
     }
 }
 
@@ -334,6 +390,11 @@ pub struct EditorState {
     pub highlighter: SqlHighlighter,
     // Autocomplete
     pub completion: CompletionState,
+    /// Whether a mouse drag is currently extending a selection.
+    ///
+    /// The selection anchor is dropped on the first drag event rather than on
+    /// mouse-down, so an ordinary click does not leave a live selection behind.
+    pub dragging: bool,
 }
 
 impl EditorState {
@@ -549,12 +610,52 @@ pub struct VimState {
 }
 
 pub struct LayoutCache {
-    pub last_areas: Option<LastAreas>,
+    /// The results grid's rect from the last draw.
+    ///
+    /// The only panel rect still needed outside drawing: the cell-edit popup
+    /// floats over the selected cell, so it has to know where the grid was.
+    /// Everything else that used to be cached here is answered by `hits`.
+    pub results_area: Option<Rect>,
     pub last_col_widths: Vec<u16>,
     pub spinner_frame: usize,
     pub sidebar_hidden: bool,
     /// When false, skip the terminal.draw() call to avoid redundant repaints.
     pub needs_redraw: bool,
+    /// What the last frame painted where, so a click can find it.
+    pub hits: HitMap,
+    /// The editor's text region from the last frame.
+    ///
+    /// Held apart from the hit map because a drag has to keep addressing the
+    /// editor after the pointer has left it — the selection should follow the
+    /// mouse past the edge, as it does everywhere else.
+    pub editor_text_rect: Option<Rect>,
+    /// The pointer's position during a drag, for panning by delta.
+    pub last_drag: Option<(u16, u16)>,
+    /// Where and when the last left-click landed: `(col, row, tick)`.
+    ///
+    /// Double-click is measured in ticks rather than wall-clock so the mouse
+    /// handler stays a pure function of state — the same reason notices expire
+    /// on ticks instead of reading a clock.
+    pub last_click: Option<(u16, u16, u64)>,
+}
+
+/// Ticks within which a second click at the same spot is a double-click.
+///
+/// The loop ticks every 100ms, so this is 400ms — the usual system default.
+const DOUBLE_CLICK_TICKS: u64 = 4;
+
+impl LayoutCache {
+    /// Whether a click at this point continues the previous one.
+    ///
+    /// Same cell, close enough in time. Requiring the exact cell rather than a
+    /// neighbourhood is deliberate: a terminal cell is already a large target,
+    /// and a drifting double-click that acts on the row *next* to the one the
+    /// user pointed at is worse than no double-click at all.
+    pub fn is_double_click(&self, col: u16, row: u16, tick: u64) -> bool {
+        self.last_click.is_some_and(|(c, r, t)| {
+            c == col && r == row && tick.wrapping_sub(t) <= DOUBLE_CLICK_TICKS
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -623,15 +724,6 @@ pub struct AppState {
 
     // ---- quit ----
     pub should_quit: bool,
-}
-
-/// Snapshot of the rects from the last draw cycle.
-#[derive(Debug, Clone, Copy)]
-pub struct LastAreas {
-    pub conn_list: Rect,
-    pub table_list: Rect,
-    pub editor: Rect,
-    pub results: Rect,
 }
 
 impl AppState {
@@ -752,6 +844,7 @@ impl AppState {
 
             conn: ConnectionState {
                 connections,
+                discovered: Vec::new(),
                 cursor: ListCursor::new(),
                 active_id: None,
                 active_backend: DbBackend::Postgres,
@@ -770,6 +863,7 @@ impl AppState {
                 revision: 0,
                 highlighter: SqlHighlighter::new(),
                 completion: CompletionState::default(),
+                dragging: false,
             },
             results: ResultsState {
                 data: QueryResult::default(),
@@ -801,11 +895,15 @@ impl AppState {
                 pending_g: false,
             },
             layout: LayoutCache {
-                last_areas: None,
+                results_area: None,
                 last_col_widths: Vec::new(),
                 spinner_frame: 0,
                 sidebar_hidden: false,
                 needs_redraw: true,
+                hits: HitMap::default(),
+                editor_text_rect: None,
+                last_drag: None,
+                last_click: None,
             },
 
             filter: FilterBar::default(),
@@ -860,21 +958,38 @@ impl AppState {
             CoreEvent::ConnectionList(conns) => {
                 self.results.is_loading = false;
                 self.conn.connections = conns;
-                self.conn.cursor.clamp(self.conn.connections.len());
+                self.conn.cursor.clamp(self.conn.len());
+            }
+            CoreEvent::DiscoveredConnections(found) => {
+                // Startup discovery, so it must not touch `is_loading`: the
+                // user may already be waiting on a query they asked for.
+                let count = found.len();
+                self.conn.discovered = found;
+                self.conn.cursor.clamp(self.conn.len());
+                // Only worth saying when there is something to say. Silence is
+                // the right answer on a machine with no Docker.
+                if count > 0 && self.notice.is_none() {
+                    self.inform(format!(
+                        "Found {count} database(s) running in Docker — listed below your saved ones."
+                    ));
+                }
             }
             CoreEvent::Connected(id) => {
                 self.results.is_loading = false;
                 self.conn.active_id = Some(id);
-                if let Some(cfg) = self.conn.connections.iter().find(|c| c.id == id) {
-                    self.conn.active_backend = cfg.backend;
-                }
-                let name = self
+                // A discovered connection is connectable too, so both lists are
+                // searched — otherwise the backend and the name would be wrong
+                // for exactly the connections Docker found for us.
+                let found = self
                     .conn
-                    .connections
-                    .iter()
+                    .entries()
+                    .map(|e| e.config())
                     .find(|c| c.id == id)
-                    .map(|c| c.name.clone())
-                    .unwrap_or_else(|| id.to_string());
+                    .map(|c| (c.backend, c.name.clone()));
+                if let Some(backend) = found.as_ref().map(|(b, _)| *b) {
+                    self.conn.active_backend = backend;
+                }
+                let name = found.map_or_else(|| id.to_string(), |(_, name)| name);
                 self.inform(format!("Connected to {name}"));
             }
             CoreEvent::Disconnected(id) => {
@@ -1207,6 +1322,53 @@ mod tests {
         ];
         state.apply_core_event(CoreEvent::ConnectionList(conns));
         assert_eq!(state.conn.connections.len(), 2);
+    }
+
+    /// Build a discovery the way the core would report one.
+    fn discovered(name: &str) -> DiscoveredConnection {
+        DiscoveredConnection {
+            config: ConnectionConfig::new_postgres(name, "127.0.0.1", 5432, "u", "d"),
+            source: sbql_core::DiscoverySource::Container { name: name.into() },
+        }
+    }
+
+    /// Two lists, one cursor. Indexing only the saved ones would leave the
+    /// discovered rows drawn but unreachable.
+    #[test]
+    fn the_cursor_walks_saved_and_discovered_as_one_list() {
+        let mut state = AppState::new(vec![ConnectionConfig::new_postgres(
+            "saved", "h", 5432, "u", "d",
+        )]);
+        state.conn.discovered = vec![discovered("from-docker")];
+
+        assert_eq!(state.conn.len(), 2);
+
+        state.conn.cursor.select(1, state.conn.len());
+        let entry = state.conn.selected_entry().expect("a row under the cursor");
+        assert!(entry.is_discovered());
+        assert_eq!(entry.config().name, "from-docker");
+
+        state.conn.cursor.select(0, state.conn.len());
+        assert!(!state.conn.selected_entry().expect("a row").is_discovered());
+    }
+
+    /// A discovery arriving must not disturb a query the user is waiting on,
+    /// and must not be mistaken for the saved list.
+    #[test]
+    fn core_event_discovered_connections_leaves_saved_ones_alone() {
+        let mut state = AppState::new(vec![ConnectionConfig::new_postgres(
+            "saved", "h", 5432, "u", "d",
+        )]);
+        state.results.is_loading = true;
+
+        state.apply_core_event(CoreEvent::DiscoveredConnections(vec![discovered("pg")]));
+
+        assert_eq!(state.conn.connections.len(), 1, "saved list untouched");
+        assert_eq!(state.conn.discovered.len(), 1);
+        assert!(
+            state.results.is_loading,
+            "a startup scan must not clear a spinner the user is waiting on"
+        );
     }
 
     #[test]

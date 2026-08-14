@@ -1,7 +1,7 @@
 //! Center-bottom panel — paginated results table with sort indicators.
 
 use ratatui::{
-    layout::{Constraint, Rect},
+    layout::{Constraint, Flex, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, TableState},
@@ -9,6 +9,7 @@ use ratatui::{
 };
 
 use crate::app::{FilterBar, FocusedPanel, MutationState, ResultsState};
+use crate::ui::hit::{HitMap, Side, Zone};
 use crate::ui::theme;
 use sbql_core::SortDirection;
 
@@ -98,7 +99,13 @@ pub fn measure(results: &ResultsState, area: Rect) -> ResultsLayout {
 ///
 /// Takes the geometry rather than computing it, so drawing has no results the
 /// caller has to read back out of it.
-pub fn draw(frame: &mut Frame, view: &ResultsView, layout: &ResultsLayout, area: Rect) {
+pub fn draw(
+    frame: &mut Frame,
+    view: &ResultsView,
+    layout: &ResultsLayout,
+    area: Rect,
+    hits: &mut HitMap,
+) {
     let ResultsView {
         results,
         mutation,
@@ -332,6 +339,14 @@ pub fn draw(frame: &mut Frame, view: &ResultsView, layout: &ResultsLayout, area:
         String::new()
     };
 
+    // Where the markers sit inside the bottom title, measured the way the
+    // renderer measures rather than by counting characters, so the regions
+    // registered for them cannot disagree with where it puts the glyphs.
+    let help_width = Span::raw(help).width();
+    let nav_width = Span::raw(nav_hint.as_str()).width();
+    let left_width = Span::raw(left_arrow).width();
+    let right_width = Span::raw(right_arrow).width();
+
     let title_bottom = if nav_hint.is_empty() {
         Line::from(Span::styled(help, Style::default().fg(theme::OVERLAY0)))
     } else {
@@ -341,15 +356,104 @@ pub fn draw(frame: &mut Frame, view: &ResultsView, layout: &ResultsLayout, area:
         ])
     };
 
+    let block = Block::default()
+        .title(title)
+        .title_bottom(title_bottom)
+        .borders(Borders::ALL)
+        .border_style(border_style);
+    // Every region below hangs off the area the table will really draw into —
+    // asked of the block rather than assumed, since the block owns the border.
+    let inner = block.inner(area);
+
+    // -- Hit regions --
+    //
+    // Taken from the rects the table itself lays out, with the same
+    // constraints, spacing and flex. Adding the widths up again here is how a
+    // region drifts a column away from the text it belongs to, which is the
+    // failure this map exists to make impossible.
+    let col_rects = Layout::horizontal(constraints.iter().copied())
+        .flex(Flex::Start)
+        .spacing(COL_SPACING)
+        .split(Rect::new(0, 0, inner.width, 1));
+
+    // The table's own vertical split: the header takes the first row inside the
+    // border, the rest is the scrollable body.
+    let header_area = Rect {
+        height: inner.height.min(1),
+        ..inner
+    };
+    let rows_area = Rect {
+        y: inner.y.saturating_add(1),
+        height: inner.height.saturating_sub(1),
+        ..inner
+    };
+
+    for (i, col) in col_rects.iter().enumerate() {
+        hits.register(
+            Rect::new(
+                inner.x.saturating_add(col.x),
+                header_area.y,
+                col.width,
+                header_area.height,
+            ),
+            Zone::ResultsHeader(col_scroll + i),
+        );
+    }
+
+    // Zipping against the body's rows stops at whichever runs out first, so a
+    // pane taller than the data registers nothing below the last row.
+    let first_row = first_painted_row(results, is_focused, usize::from(rows_area.height));
+    for (line, (row_idx, row)) in rows_area
+        .rows()
+        .zip(results.data.rows.iter().enumerate().skip(first_row))
+    {
+        for (i, col) in col_rects.iter().enumerate() {
+            let col_idx = col_scroll + i;
+            // A row shorter than the header paints no cell here.
+            if col_idx >= row.len() {
+                break;
+            }
+            hits.register(
+                Rect::new(inner.x.saturating_add(col.x), line.y, col.width, 1),
+                Zone::ResultsCell {
+                    row: row_idx,
+                    col: col_idx,
+                },
+            );
+        }
+    }
+
+    // The markers are part of the bottom title, which lands on the last row
+    // inside the left border. In a pane under two rows high that is the top
+    // title's row as well, and there is no saying which of them is on it.
+    if area.height >= 2 {
+        let bar = Rect {
+            x: area.x.saturating_add(1),
+            y: area.bottom().saturating_sub(1),
+            width: area.width.saturating_sub(2),
+            height: 1,
+        };
+        if !left_arrow.is_empty() {
+            hits.register(
+                title_slice(bar, help_width, left_width),
+                Zone::ResultsColScroll(Side::Left),
+            );
+        }
+        if !right_arrow.is_empty() {
+            hits.register(
+                title_slice(
+                    bar,
+                    (help_width + nav_width).saturating_sub(right_width),
+                    right_width,
+                ),
+                Zone::ResultsColScroll(Side::Right),
+            );
+        }
+    }
+
     let table = Table::new(visible_rows, constraints)
         .header(header)
-        .block(
-            Block::default()
-                .title(title)
-                .title_bottom(title_bottom)
-                .borders(Borders::ALL)
-                .border_style(border_style),
-        )
+        .block(block)
         .row_highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .column_spacing(COL_SPACING);
 
@@ -363,11 +467,59 @@ pub fn draw(frame: &mut Frame, view: &ResultsView, layout: &ResultsLayout, area:
     frame.render_stateful_widget(table, area, &mut tbl_state);
 }
 
+/// The first data row the grid actually paints.
+///
+/// Usually `results.scroll` — but the table is handed the selected row and
+/// scrolls itself to keep it on screen, while `scroll` is only re-clamped when
+/// the cursor moves. Shrink the pane and the two disagree until the next
+/// keypress: the grid paints from further down than `scroll` says, and cells
+/// registered from `scroll` would answer with a row several above the text
+/// under the pointer for as long as that lasts.
+fn first_painted_row(results: &ResultsState, is_focused: bool, height: usize) -> usize {
+    let available = results.data.rows.len().saturating_sub(results.scroll);
+    // Only a selection can push the table past its offset, and it is only given
+    // one while the panel is focused.
+    if !is_focused || height == 0 || available == 0 {
+        return results.scroll;
+    }
+    let selected = results
+        .selected_row
+        .saturating_sub(results.scroll)
+        .min(available - 1);
+    if selected < available.min(height) {
+        return results.scroll;
+    }
+    // What `Table::get_row_bounds` settles on with every row one line high:
+    // scroll down until the selected row is the last one that fits.
+    results.scroll + (selected + 1).saturating_sub(height)
+}
+
+/// The `width`-wide slice of the bottom title bar starting `offset` cells in.
+///
+/// Clipped to `bar`, because a title that does not fit is truncated at the
+/// border: past the edge the marker was never painted, and the empty rect that
+/// comes back is one [`HitMap::register`] drops.
+fn title_slice(bar: Rect, offset: usize, width: usize) -> Rect {
+    let x = bar
+        .x
+        .saturating_add(u16::try_from(offset).unwrap_or(u16::MAX));
+    if x >= bar.right() {
+        return Rect::ZERO;
+    }
+    let width = u16::try_from(width).unwrap_or(u16::MAX);
+    Rect::new(x, bar.y, width.min(bar.right() - x), 1)
+}
+
 // ---------------------------------------------------------------------------
 // Filter bar overlay (drawn over the bottom edge of the results panel)
 // ---------------------------------------------------------------------------
 
-pub fn draw_filter_bar(frame: &mut Frame, filter: &mut FilterBar, results_area: Rect) {
+pub fn draw_filter_bar(
+    frame: &mut Frame,
+    filter: &mut FilterBar,
+    results_area: Rect,
+    hits: &mut HitMap,
+) {
     let bar_height = 3u16;
     if results_area.height < bar_height + 2 {
         return;
@@ -393,6 +545,19 @@ pub fn draw_filter_bar(frame: &mut Frame, filter: &mut FilterBar, results_area: 
 
     frame.render_widget(&filter.textarea, bar_area);
 
+    // The typed line, inside the bar's own border. Registered so a click on the
+    // filter lands on the filter rather than falling through to the grid it is
+    // covering, which would move the cell cursor under an open filter bar.
+    hits.register(
+        Rect {
+            x: bar_area.x + 1,
+            y: bar_area.y + 1,
+            width: bar_area.width.saturating_sub(2),
+            height: 1,
+        },
+        Zone::FilterInput,
+    );
+
     if filter.show_suggestions {
         let max_items = 6usize;
         let count = filter.suggestions.len().min(max_items);
@@ -413,6 +578,17 @@ pub fn draw_filter_bar(frame: &mut Frame, filter: &mut FilterBar, results_area: 
             } else {
                 Style::default().fg(theme::TEXT)
             };
+            // Registered beside the line it draws — the popup is a list, and a
+            // row can never be clickable where its own text is not.
+            hits.register(
+                Rect {
+                    x: sug_area.x + 1,
+                    y: sug_area.y + 1 + u16::try_from(i).unwrap_or(u16::MAX),
+                    width: sug_area.width.saturating_sub(2),
+                    height: 1,
+                },
+                Zone::FilterSuggestion(i),
+            );
             lines.push(Line::from(Span::styled(item.clone(), style)));
         }
 
@@ -480,7 +656,10 @@ fn truncate(s: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::MutationState;
+    use ratatui::{backend::TestBackend, buffer::Buffer, Terminal};
     use sbql_core::QueryResult;
+    use std::collections::HashMap;
 
     fn state_with(columns: &[&str], rows: usize) -> ResultsState {
         let mut s = ResultsState {
@@ -599,5 +778,312 @@ mod tests {
         for col in &s.data.columns {
             assert_eq!(sort_indicator(s.sort.as_ref(), col), "", "column {col}");
         }
+    }
+
+    // -- Hit regions --
+    //
+    // Every test here draws into a real buffer and then hit-tests a point
+    // against the text painted at it. Asserting the arithmetic on its own would
+    // only prove the regions agree with a second copy of the same assumptions;
+    // what has to hold is that they agree with the screen.
+
+    fn mutation() -> MutationState {
+        MutationState {
+            cell_edit: None,
+            pending_cell_edit: None,
+            pending_edits: HashMap::new(),
+            pending_deletes: HashMap::new(),
+            pending_delete_row: None,
+            pending_d: false,
+        }
+    }
+
+    /// Draw the grid for real, returning the screen and the regions it recorded.
+    fn render(results: &ResultsState, w: u16, h: u16) -> (Buffer, HitMap) {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        let mutation = mutation();
+        let mut hits = HitMap::default();
+        let rect = area(w, h);
+        let view = ResultsView {
+            results,
+            mutation: &mutation,
+            focused: FocusedPanel::Results,
+            active_filter: None,
+            filter_visible: false,
+            spinner_frame: 0,
+            has_active_connection: true,
+        };
+        let layout = measure(results, rect);
+        terminal
+            .draw(|f| draw(f, &view, &layout, rect, &mut hits))
+            .unwrap();
+        (terminal.backend().buffer().clone(), hits)
+    }
+
+    /// Draw the filter bar over a results pane of the given size.
+    fn render_filter(filter: &mut FilterBar, w: u16, h: u16) -> (Buffer, HitMap) {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        let mut hits = HitMap::default();
+        terminal
+            .draw(|f| draw_filter_bar(f, filter, area(w, h), &mut hits))
+            .unwrap();
+        (terminal.backend().buffer().clone(), hits)
+    }
+
+    /// The text painted across `rect`'s first row.
+    fn text_at(buf: &Buffer, rect: Rect) -> String {
+        (rect.x..rect.right())
+            .filter_map(|x| buf.cell((x, rect.y)))
+            .map(|c| c.symbol())
+            .collect()
+    }
+
+    /// Where `needle` is painted, as the (x, y) of its first cell.
+    fn find_text(buf: &Buffer, needle: &str) -> Option<(u16, u16)> {
+        (0..buf.area.height).find_map(|y| {
+            let row = text_at(buf, Rect::new(0, y, buf.area.width, 1));
+            // Every symbol on screen here is one cell wide, so counting the
+            // characters before the match gives its column.
+            let at = row.find(needle)?;
+            u16::try_from(row[..at].chars().count())
+                .ok()
+                .map(|x| (x, y))
+        })
+    }
+
+    /// The whole screen, point by point: wherever the map answers with a cell,
+    /// the text painted in that region has to be the value at those data
+    /// coordinates. Returns how many points resolved, so a test can tell an
+    /// agreeing map from an empty one.
+    fn cells_agreeing_with_the_screen(s: &ResultsState, buf: &Buffer, hits: &HitMap) -> usize {
+        let mut hit_points = 0;
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                let Some((rect, Zone::ResultsCell { row, col })) = hits.hit(x, y) else {
+                    continue;
+                };
+                let painted = text_at(buf, rect);
+                assert_eq!(
+                    Some(painted.trim_end()),
+                    s.data.rows.get(row).and_then(|r| r.get(col)).map(|v| &**v),
+                    "({x},{y}) resolves to cell {row},{col}"
+                );
+                hit_points += 1;
+            }
+        }
+        hit_points
+    }
+
+    /// The point of the whole exercise: a click in the grid lands on the cell
+    /// whose text is under the pointer, in data coordinates.
+    #[test]
+    fn a_cell_answers_with_the_coordinates_of_the_value_drawn_in_it() {
+        let s = state_with(&["id", "name", "email"], 20);
+        let (buf, hits) = render(&s, 80, 12);
+
+        assert!(cells_agreeing_with_the_screen(&s, &buf, &hits) > 0);
+
+        let (x, y) = find_text(&buf, "name3").expect("row 3's name is on screen");
+        assert_eq!(
+            hits.hit(x, y).map(|(_, z)| z),
+            Some(Zone::ResultsCell { row: 3, col: 1 })
+        );
+    }
+
+    /// Scrolling moves the data under the grid rather than the grid itself, so
+    /// the regions have to follow it — in both directions at once.
+    #[test]
+    fn a_scrolled_cell_answers_with_its_data_coordinates_not_its_screen_ones() {
+        let mut s = state_with(&["id", "name", "email"], 40);
+        s.scroll = 7;
+        s.col_scroll = 1;
+        let (buf, hits) = render(&s, 40, 12);
+
+        assert!(cells_agreeing_with_the_screen(&s, &buf, &hits) > 0);
+
+        let (x, y) = find_text(&buf, "name7").expect("the first visible row");
+        assert_eq!(
+            hits.hit(x, y).map(|(_, z)| z),
+            Some(Zone::ResultsCell { row: 7, col: 1 })
+        );
+        // The scrolled-off column is not drawn, so it is not clickable either.
+        assert!(find_text(&buf, "id7").is_none());
+    }
+
+    /// The table scrolls itself to keep the selection on screen, and `scroll`
+    /// is only re-clamped when the cursor moves — so a pane that shrank paints
+    /// from further down than `scroll` says. The regions follow the pixels.
+    #[test]
+    fn cells_follow_the_grid_when_the_table_scrolls_itself() {
+        let mut s = state_with(&["id", "name"], 40);
+        s.selected_row = 20; // below a viewport this short, with scroll still 0
+        let (buf, hits) = render(&s, 40, 8);
+
+        assert!(cells_agreeing_with_the_screen(&s, &buf, &hits) > 0);
+
+        let (x, y) = find_text(&buf, "id16").expect("the first row the table shows");
+        assert_eq!(
+            hits.hit(x, y).map(|(_, z)| z),
+            Some(Zone::ResultsCell { row: 16, col: 0 })
+        );
+    }
+
+    /// A header sorts the column under the pointer, so every header region has
+    /// to sit on that column's own name.
+    #[test]
+    fn a_header_answers_with_the_column_whose_name_is_drawn_in_it() {
+        let mut s = state_with(&["id", "name", "email"], 5);
+        s.col_scroll = 1;
+        let (buf, hits) = render(&s, 40, 10);
+
+        let header_y = 1; // the first row inside the border
+        let mut columns = Vec::new();
+        for x in 0..buf.area.width {
+            let Some((rect, Zone::ResultsHeader(c))) = hits.hit(x, header_y) else {
+                continue;
+            };
+            let painted = text_at(&buf, rect);
+            assert!(
+                painted.trim_end().starts_with(&s.data.columns[c]),
+                "header {c} region holds {painted:?}"
+            );
+            if !columns.contains(&c) {
+                columns.push(c);
+            }
+        }
+        assert_eq!(
+            columns,
+            vec![1, 2],
+            "only the scrolled-to columns are drawn"
+        );
+    }
+
+    /// The rows run out before the pane does. A click in the empty space below
+    /// them must not resolve to a row that is not there.
+    #[test]
+    fn a_click_below_the_last_row_is_not_a_cell() {
+        let s = state_with(&["id", "name"], 3);
+        let (buf, hits) = render(&s, 40, 14);
+
+        // Rows 0-2 are drawn at y=2..4; below that the grid is blank.
+        let below = 6;
+        assert_eq!(text_at(&buf, Rect::new(1, below, 38, 1)).trim(), "");
+        for x in 0..buf.area.width {
+            assert!(
+                !matches!(hits.hit(x, below), Some((_, Zone::ResultsCell { .. }))),
+                "({x},{below}) is below the last row"
+            );
+        }
+    }
+
+    /// The `◀`/`▶` markers are drawn inside the bottom title. Clickable exactly
+    /// where the glyphs are, and only while they are there.
+    #[test]
+    fn the_column_markers_are_clickable_on_their_glyphs() {
+        let columns: Vec<String> = (0..20).map(|i| format!("col{i:02}")).collect();
+        let names: Vec<&str> = columns.iter().map(String::as_str).collect();
+        let mut s = state_with(&names, 4);
+        s.col_scroll = 1;
+        let (buf, hits) = render(&s, 110, 10);
+
+        let (x, y) = find_text(&buf, "◀").expect("a left marker");
+        assert_eq!(y, 9, "the markers belong on the bottom border");
+        let (rect, zone) = hits.hit(x, y).expect("a zone on the left marker");
+        assert_eq!(zone, Zone::ResultsColScroll(Side::Left));
+        // The region is the marker and the space either side of it, nothing
+        // borrowed from the help text it follows.
+        assert_eq!(text_at(&buf, rect), " ◀ ");
+
+        let (x, y) = find_text(&buf, "▶").expect("a right marker");
+        let (rect, zone) = hits.hit(x, y).expect("a zone on the right marker");
+        assert_eq!(zone, Zone::ResultsColScroll(Side::Right));
+        assert_eq!(text_at(&buf, rect), " ▶ ");
+    }
+
+    /// No overflow, no markers — and nothing left clickable on the row they
+    /// would have been drawn on.
+    #[test]
+    fn no_markers_are_registered_when_every_column_fits() {
+        let s = state_with(&["id", "name"], 4);
+        let (buf, hits) = render(&s, 80, 10);
+
+        assert!(find_text(&buf, "◀").is_none());
+        for x in 0..buf.area.width {
+            assert!(
+                !matches!(hits.hit(x, 9), Some((_, Zone::ResultsColScroll(_)))),
+                "({x},9) is on the bottom border"
+            );
+        }
+    }
+
+    /// `viewport_height` is floored at one row so the paging arithmetic never
+    /// divides by zero. A pane with no room to draw a row must not inherit that
+    /// fiction and register one.
+    #[test]
+    fn a_pane_too_short_for_a_row_registers_none() {
+        let s = state_with(&["id", "name"], 5);
+        for height in 1..=3 {
+            let (buf, hits) = render(&s, 20, height);
+            for y in 0..buf.area.height {
+                for x in 0..buf.area.width {
+                    assert!(
+                        !matches!(hits.hit(x, y), Some((_, Zone::ResultsCell { .. }))),
+                        "({x},{y}) in a pane {height} rows high"
+                    );
+                }
+            }
+        }
+    }
+
+    /// An empty grid draws a message, not a table. Nothing there is clickable,
+    /// so the panel underneath keeps the click.
+    #[test]
+    fn an_empty_result_registers_nothing() {
+        let s = ResultsState::default();
+        let (buf, hits) = render(&s, 40, 10);
+
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                assert_eq!(hits.hit(x, y), None, "({x},{y})");
+            }
+        }
+    }
+
+    fn filter_with(suggestions: &[&str]) -> FilterBar {
+        FilterBar {
+            visible: true,
+            suggestions: suggestions.iter().map(|s| (*s).to_owned()).collect(),
+            show_suggestions: !suggestions.is_empty(),
+            ..FilterBar::default()
+        }
+    }
+
+    /// A suggestion answers with its own index: the row under the pointer is
+    /// the one that gets selected, and on a double click, applied.
+    #[test]
+    fn a_suggestion_row_answers_with_the_index_of_the_line_drawn_in_it() {
+        let items = ["users", "orders", "payments"];
+        let mut filter = filter_with(&items);
+        let (buf, hits) = render_filter(&mut filter, 40, 20);
+
+        for (i, item) in items.iter().enumerate() {
+            let (x, y) = find_text(&buf, item).unwrap_or_else(|| panic!("{item} is on screen"));
+            assert_eq!(
+                hits.hit(x, y).map(|(_, z)| z),
+                Some(Zone::FilterSuggestion(i)),
+                "{item}"
+            );
+        }
+    }
+
+    /// The bar covers the grid, so the click has to stop at the bar.
+    #[test]
+    fn the_filter_line_takes_the_click_from_the_grid_it_covers() {
+        let mut filter = filter_with(&[]);
+        filter.textarea.insert_str("status = 'open'");
+        let (buf, hits) = render_filter(&mut filter, 40, 20);
+
+        let (x, y) = find_text(&buf, "status").expect("the typed filter");
+        assert_eq!(hits.hit(x, y).map(|(_, z)| z), Some(Zone::FilterInput));
     }
 }

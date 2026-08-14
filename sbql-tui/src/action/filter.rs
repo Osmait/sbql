@@ -49,6 +49,13 @@ pub(super) fn apply(
                 .prev(state.filter.suggestions.len(), Overflow::Clamp);
         }
 
+        FilterAction::SelectSuggestion(idx) => {
+            state
+                .filter
+                .suggestion_cursor
+                .select(idx, state.filter.suggestions.len());
+        }
+
         FilterAction::SuggestionDown => {
             state
                 .filter

@@ -13,6 +13,7 @@
 pub mod config;
 pub mod connection;
 pub mod connection_spec;
+pub mod discovery;
 pub mod error;
 mod handlers;
 pub mod import;
@@ -31,6 +32,7 @@ pub use config::{
 pub use connection_spec::{
     BackendSpec, ConnectionDraft, ConnectionField, FieldSpec, ValidationError,
 };
+pub use discovery::{DiscoveredConnection, DiscoverySource};
 pub use error::{CoreError, ErrorKind, Result, SbqlError, Severity};
 pub use import::ImportFormat;
 pub use pool::{DbBackend, DbPool};
@@ -59,6 +61,15 @@ pub enum CoreCommand {
     },
     /// Remove a connection config from disk and keyring.
     DeleteConnection(Uuid),
+    /// Ask Docker which databases are running and offer them as connections.
+    ///
+    /// `dir` is the directory the client was opened in; the compose project
+    /// rooted there is listed first. Discovered connections are session-only —
+    /// nothing is written to disk or the keyring until the user asks for it
+    /// with [`CoreCommand::SaveDiscovered`].
+    DiscoverConnections { dir: std::path::PathBuf },
+    /// Promote a discovered connection to a saved one, password included.
+    SaveDiscovered(Uuid),
     /// Open a connection pool for the given connection id.
     Connect(Uuid),
     /// Close the pool for a connection.
@@ -133,10 +144,14 @@ impl CoreCommand {
             | CoreCommand::Disconnect(_)
             | CoreCommand::LoadDiagram
             | CoreCommand::SuggestFilterValues { .. }
-            | CoreCommand::FetchTotalCount => false,
+            | CoreCommand::FetchTotalCount
+            // Runs at startup before the user has asked for anything; a
+            // spinner here would look like the app is stuck on launch.
+            | CoreCommand::DiscoverConnections { .. } => false,
 
             // Work the user asked for and is waiting on.
             CoreCommand::SaveConnection { .. }
+            | CoreCommand::SaveDiscovered(_)
             | CoreCommand::DeleteConnection(_)
             | CoreCommand::Connect(_)
             | CoreCommand::ListTables
@@ -157,6 +172,12 @@ impl CoreCommand {
 pub enum CoreEvent {
     /// The full list of saved connections (sent on startup and after mutations).
     ConnectionList(Vec<ConnectionConfig>),
+    /// Databases found running in Docker, most relevant first.
+    ///
+    /// Carries no passwords: this event is debug-logged on its way to the UI,
+    /// and the credentials scraped out of a container have no business in a
+    /// log file. Core keeps them in its session cache instead.
+    DiscoveredConnections(Vec<DiscoveredConnection>),
     /// A connection pool was opened successfully.
     Connected(Uuid),
     /// A connection pool was closed.
@@ -239,6 +260,13 @@ pub struct Core {
     pub sort_state: Option<(String, SortDirection)>,
     /// Active filter string (raw, as the user typed it).
     pub active_filter: Option<String>,
+    /// Databases found running in Docker this session.
+    ///
+    /// Deliberately not part of `connections`: that list is what gets written
+    /// to `connections.toml`, and scraping a container's password is not
+    /// consent to persist it. These live for the session only, until the user
+    /// promotes one with [`CoreCommand::SaveDiscovered`].
+    pub discovered: Vec<DiscoveredConnection>,
     /// In-memory password cache so reconnects work even if keyring lookup fails.
     pub(crate) password_cache: HashMap<Uuid, String>,
     /// Why the saved connections could not be read, if they could not.
@@ -336,6 +364,12 @@ impl Core {
                 handlers::connection::save(self, config, password).await
             }
             CoreCommand::DeleteConnection(id) => handlers::connection::delete(self, id).await,
+            CoreCommand::DiscoverConnections { dir } => {
+                handlers::connection::discover(self, dir).await
+            }
+            CoreCommand::SaveDiscovered(id) => {
+                handlers::connection::save_discovered(self, id).await
+            }
             CoreCommand::Connect(id) => handlers::connection::connect(self, id).await,
             CoreCommand::Disconnect(id) => handlers::connection::disconnect(self, id).await,
             CoreCommand::ListTables => handlers::schema::list_tables(self).await,
@@ -416,14 +450,26 @@ impl Core {
         self.manager.get(id).await
     }
 
+    /// The config for a connection id, saved or discovered.
+    ///
+    /// The single place that answers "which connection is this?". A connection
+    /// the user can open lives in one of two lists, and every lookup has to
+    /// know that: searching only `connections` made a Docker-discovered
+    /// connection openable and queryable but unsortable and unfilterable,
+    /// because those are the paths that need its backend.
+    pub(crate) fn config_for(&self, id: Uuid) -> Option<&ConnectionConfig> {
+        self.connections
+            .iter()
+            .chain(self.discovered.iter().map(|d| &d.config))
+            .find(|c| c.id == id)
+    }
+
     pub(crate) fn active_backend(&self) -> Result<DbBackend> {
         let id = self
             .active_connection
             .ok_or(SbqlError::NoActiveConnection)?;
         let cfg = self
-            .connections
-            .iter()
-            .find(|c| c.id == id)
+            .config_for(id)
             .ok_or_else(|| SbqlError::ConnectionNotFound(id.to_string()))?;
         Ok(cfg.backend)
     }

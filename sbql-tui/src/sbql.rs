@@ -93,6 +93,7 @@ impl Sbql {
     /// Takes any [`Renderer`], so the loop can be driven with no terminal — and
     /// so this layer never names a UI framework.
     pub async fn run<R: Renderer>(&mut self, renderer: &mut R) -> Result<()> {
+        self.ask_docker_what_is_running();
         self.draw(renderer)?;
 
         while let Some(event) = self.events.recv().await {
@@ -103,8 +104,13 @@ impl Sbql {
                     self.dispatch(action);
                 }
                 AppEvent::Mouse(mouse) => {
+                    // The handler is pure, so the bookkeeping a click leaves
+                    // behind is done here — and *after* the action is computed,
+                    // so double-click detection compares against the previous
+                    // click rather than this one.
                     let action = handlers::mouse::handle(&self.state, mouse);
                     self.dispatch(action);
+                    self.remember_pointer(mouse);
                 }
                 AppEvent::Resize => self.state.layout.needs_redraw = true,
                 // Nothing to paint this on: without a reader there are no more
@@ -196,6 +202,40 @@ impl Sbql {
             let _ = self.cmd_tx.send(CoreCommand::Connect(cfg.id));
             self.auto_connected = true;
         }
+    }
+
+    /// Record where the pointer was, for double-click and drag-by-delta.
+    fn remember_pointer(&mut self, mouse: crossterm::event::MouseEvent) {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        let layout = &mut self.state.layout;
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                layout.last_click = Some((mouse.column, mouse.row, self.state.tick));
+                layout.last_drag = Some((mouse.column, mouse.row));
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                layout.last_drag = Some((mouse.column, mouse.row));
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                layout.last_drag = None;
+            }
+            _ => {}
+        }
+    }
+
+    /// Offer the databases already running in Docker.
+    ///
+    /// Sent from the directory sbql was launched in, because that is what makes
+    /// the answer useful: the compose stack rooted there is listed first. Fired
+    /// once at startup and never awaited — the core answers with an event, and
+    /// a machine with no Docker simply never gets one.
+    fn ask_docker_what_is_running(&mut self) {
+        let Ok(dir) = std::env::current_dir() else {
+            // No working directory (it was deleted out from under us). Nothing
+            // to scan relative to, and nothing worth telling the user about.
+            return;
+        };
+        let _ = self.cmd_tx.send(CoreCommand::DiscoverConnections { dir });
     }
 }
 
