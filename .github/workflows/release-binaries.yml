@@ -1,0 +1,101 @@
+name: Release binaries
+
+# Attaches prebuilt `sbql` binaries to a release, which is what `install.sh`
+# downloads. release-plz creates the tag and the release; this fills it in.
+#
+# `workflow_dispatch` takes a tag so a release that was cut before this
+# workflow existed can be backfilled without re-tagging.
+on:
+  push:
+    tags: ["sbql-tui-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing sbql-tui-v* tag to build and upload"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # One broken target must not withhold the three that built.
+      fail-fast: false
+      matrix:
+        include:
+          # Built on the oldest runner still supported rather than the newest:
+          # a glibc-linked binary runs on that version and above, so building
+          # on 24.04 would refuse to start on anything older.
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          # A native ARM runner instead of cross-compiling: the keyring build
+          # needs libdbus for the target architecture, and cross-compiling a C
+          # dependency is where this sort of workflow usually goes wrong.
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+          - target: x86_64-apple-darwin
+            runner: macos-13
+          - target: aarch64-apple-darwin
+            runner: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # The keyring links against libdbus on Linux. A released binary cannot
+      # assume the user has the library — a headless box often does not — so
+      # it is compiled in rather than linked against. macOS uses the Keychain
+      # and needs none of this.
+      - name: Build (Linux, libdbus compiled in)
+        if: runner.os == 'Linux'
+        run: cargo build --release --locked -p sbql-tui --target ${{ matrix.target }} --features sbql-core/vendored-dbus
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: cargo build --release --locked -p sbql-tui --target ${{ matrix.target }}
+
+      # Named without a version so install.sh can build the URL from the tag
+      # alone. The checksum rides alongside; install.sh refuses to install
+      # without it.
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="sbql-${{ matrix.target }}.tar.gz"
+          tar -czf "$archive" -C "target/${{ matrix.target }}/release" sbql
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$archive" > "$archive.sha256"
+          else
+            shasum -a 256 "$archive" > "$archive.sha256"
+          fi
+          # A checksum file naming a path would not verify after download.
+          test "$(cut -d' ' -f3- < "$archive.sha256")" = "$archive"
+
+      - name: Smoke test the binary
+        # Only where the runner can run what it just built. A binary that
+        # cannot start is worse than a missing one: the installer would report
+        # success.
+        if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-apple-darwin'
+        run: ./target/${{ matrix.target }}/release/sbql --version
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: gh release upload "$TAG" "sbql-${{ matrix.target }}.tar.gz" "sbql-${{ matrix.target }}.tar.gz.sha256" --clobber --repo "$GITHUB_REPOSITORY"
