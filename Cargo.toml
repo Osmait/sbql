@@ -7,7 +7,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 authors = ["sbql contributors"]
 license = "MIT"
@@ -33,7 +33,7 @@ panic = "warn"
 # `default-features = false` has to live here: Cargo ignores a member's
 # `default-features = false` when the dependency is inherited from the
 # workspace, so members opt back in via their own `keyring` feature.
-sbql-core = { path = "sbql-core", version = "0.3.0", default-features = false }
+sbql-core = { path = "sbql-core", version = "0.3.1", default-features = false }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
