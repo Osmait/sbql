@@ -67,7 +67,12 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
     // Ctrl+j never arrive as themselves — they arrive as Backspace and Enter,
     // which keep working normally, so this costs those terminals nothing and
     // simply does not fire. Ctrl+k and Ctrl+l work everywhere.
-    if key.modifiers.contains(KeyModifiers::CONTROL)
+    // Alt is accepted as well as Ctrl, and means exactly the same thing. Two
+    // chords rather than one because whichever a user's compositor, terminal
+    // or multiplexer has already claimed, the other is still theirs — and
+    // until now Alt+hjkl was advertised as panel navigation while being dead
+    // in the editor, which is where it is most wanted.
+    if (key.modifiers.contains(KeyModifiers::CONTROL) || key.modifiers.contains(KeyModifiers::ALT))
         && matches!(key.code, KeyCode::Char('h' | 'j' | 'k' | 'l'))
     {
         // Landing in a panel means working in it, so this enters panel mode
@@ -352,6 +357,26 @@ mod tests {
         assert!(matches!(act, Action::Noop), "{act:?}");
     }
 
+    /// Alt is the way out when something upstream has taken Ctrl. It has to
+    /// reach as far as Ctrl does, including mid-word in the editor, or it is
+    /// not an alternative at all.
+    #[test]
+    fn alt_hjkl_works_where_ctrl_does() {
+        let mut state = make_state_with_results();
+        state.focused = FocusedPanel::Editor;
+        state.editor.mode = EditorMode::Insert;
+        state.vim.nav_mode = NavMode::Panel;
+
+        let act = handle_key(&state, key_mod(KeyCode::Char('j'), KeyModifiers::ALT));
+
+        assert!(
+            matches!(&act, Action::Batch(a) if a.iter().any(|x| matches!(
+                x, Action::Nav(NavAction::FocusPanel(FocusedPanel::Results))
+            ))),
+            "{act:?}"
+        );
+    }
+
     /// The diagram is a full-screen overlay with no panels, and it uses
     /// Ctrl+h/l for fast horizontal scrolling. It has to keep them.
     #[test]
@@ -590,10 +615,14 @@ mod tests {
         state.vim.nav_mode = NavMode::Panel;
         state.focused = FocusedPanel::Connections;
         let act = handle_key(&state, key_mod(KeyCode::Char('l'), KeyModifiers::ALT));
-        assert!(matches!(
-            act,
-            Action::Nav(NavAction::FocusPanel(FocusedPanel::Editor))
-        ));
+        // A batch now: arriving in a panel also enters panel mode, so the
+        // panel is usable without a further keypress.
+        assert!(
+            matches!(&act, Action::Batch(a) if a.iter().any(|x| matches!(
+                x, Action::Nav(NavAction::FocusPanel(FocusedPanel::Editor))
+            ))),
+            "{act:?}"
+        );
     }
 
     // -- Panel mode: i enters insert in editor --

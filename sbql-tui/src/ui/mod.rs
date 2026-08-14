@@ -278,7 +278,7 @@ fn draw_status_bar(
         // Panel navigation leads, because it is what a new user reaches for
         // first and what three separate bindings already did invisibly.
         let help = format!(
-            " sbql [{mode}]  ^hjkl: panels  ^1-4: jump  Tab: cycle  i: insert/edit  ^S/F5: run  Esc: global  q/^C: quit{leader}"
+            " sbql [{mode}]  ^/Alt+hjkl: panels  ^1-4: jump  Tab: cycle  i: insert/edit  ^S/F5: run  Esc: global  q/^C: quit{leader}"
         );
         let line = if state.results.is_loading {
             let frame_char = SPINNER[state.layout.spinner_frame % SPINNER.len()];
