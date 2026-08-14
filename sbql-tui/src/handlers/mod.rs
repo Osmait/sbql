@@ -57,6 +57,32 @@ pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
         return Action::ShowNoticeDetail;
     }
 
+    // Ctrl+hjkl moves between panels from anywhere — including mid-word in the
+    // editor, which is the point: reaching the results used to be Esc, then a
+    // direction, then Enter, and the first of those threw away the mode you
+    // were in.
+    //
+    // Placed above the insert-mode passthrough below, or typing would swallow
+    // it. On a terminal without the enhanced keyboard protocol, Ctrl+h and
+    // Ctrl+j never arrive as themselves — they arrive as Backspace and Enter,
+    // which keep working normally, so this costs those terminals nothing and
+    // simply does not fire. Ctrl+k and Ctrl+l work everywhere.
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('h' | 'j' | 'k' | 'l'))
+    {
+        // Landing in a panel means working in it, so this enters panel mode
+        // too — otherwise every arrival needed an Enter to be useful.
+        return match navigation::try_navigate_panels(state, key) {
+            Some(focus) => Action::Batch(vec![
+                focus,
+                Action::Nav(NavAction::SetNavMode(NavMode::Panel)),
+            ]),
+            // No neighbour that way. Swallowed rather than passed on, so a
+            // panel key is never mistaken for a movement that did not happen.
+            None => Action::Noop,
+        };
+    }
+
     // In Editor Insert mode, keep typing local to editor.
     if state.editor.mode == EditorMode::Insert && state.focused == FocusedPanel::Editor {
         if key.code == KeyCode::Esc {
@@ -273,6 +299,75 @@ mod tests {
         state.diagram = Some(DiagramState::new(DiagramData::default()));
         let act = handle_key(&state, key(KeyCode::Char('q')));
         assert!(matches!(act, Action::Diagram(DiagramAction::Close)));
+    }
+
+    /// The whole point of the binding: one chord out of the editor, without
+    /// first leaving insert mode. This used to take Esc, a direction and
+    /// Enter, and the Esc threw away the mode you were in.
+    #[test]
+    fn ctrl_hjkl_leaves_the_editor_mid_typing() {
+        let mut state = make_state_with_results();
+        state.focused = FocusedPanel::Editor;
+        state.editor.mode = EditorMode::Insert;
+        state.vim.nav_mode = NavMode::Panel;
+
+        let act = handle_key(&state, key_mod(KeyCode::Char('j'), KeyModifiers::CONTROL));
+
+        assert!(
+            matches!(&act, Action::Batch(a) if a.iter().any(|x| matches!(
+                x, Action::Nav(NavAction::FocusPanel(FocusedPanel::Results))
+            ))),
+            "{act:?}"
+        );
+    }
+
+    /// Arriving in a panel should leave you able to work in it, or the chord
+    /// has only replaced one of the three keys it was meant to replace.
+    #[test]
+    fn ctrl_hjkl_arrives_in_panel_mode() {
+        let mut state = make_state_with_results();
+        state.focused = FocusedPanel::Editor;
+        state.vim.nav_mode = NavMode::Global;
+
+        let act = handle_key(&state, key_mod(KeyCode::Char('j'), KeyModifiers::CONTROL));
+
+        assert!(
+            matches!(&act, Action::Batch(a) if a.iter().any(|x| matches!(
+                x, Action::Nav(NavAction::SetNavMode(NavMode::Panel))
+            ))),
+            "{act:?}"
+        );
+    }
+
+    /// Moving where there is no panel must do nothing at all, rather than
+    /// falling through to whatever the focused panel does with that key.
+    #[test]
+    fn ctrl_hjkl_into_nothing_is_swallowed() {
+        let mut state = make_state_with_results();
+        state.focused = FocusedPanel::Results;
+
+        // Nothing is to the right of the results.
+        let act = handle_key(&state, key_mod(KeyCode::Char('l'), KeyModifiers::CONTROL));
+
+        assert!(matches!(act, Action::Noop), "{act:?}");
+    }
+
+    /// The diagram is a full-screen overlay with no panels, and it uses
+    /// Ctrl+h/l for fast horizontal scrolling. It has to keep them.
+    #[test]
+    fn the_diagram_keeps_its_own_ctrl_h() {
+        let mut state = make_state_with_results();
+        state.diagram = Some(crate::app::DiagramState::new(Default::default()));
+
+        let act = handle_key(&state, key_mod(KeyCode::Char('h'), KeyModifiers::CONTROL));
+
+        assert!(
+            matches!(
+                act,
+                Action::Diagram(crate::action::DiagramAction::Scroll { .. })
+            ),
+            "{act:?}"
+        );
     }
 
     // -- Priority: cell edit --

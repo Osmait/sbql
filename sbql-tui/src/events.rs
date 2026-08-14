@@ -88,10 +88,16 @@ pub fn is_run_query(k: &KeyEvent) -> bool {
 }
 
 /// Returns true for `Ctrl+W` — commit staged changes to the DB.
+/// Whether this key commits the staged edits and deletes.
+///
+/// Ctrl+Enter is the primary gesture; Ctrl+W stays because Ctrl+Enter is only
+/// distinguishable from a bare Enter on terminals that speak the enhanced
+/// keyboard protocol, and losing the ability to commit on the others would be
+/// a poor trade for a nicer chord.
 pub fn is_commit(k: &KeyEvent) -> bool {
     matches!(
         (k.code, k.modifiers),
-        (KeyCode::Char('w'), KeyModifiers::CONTROL)
+        (KeyCode::Char('w'), KeyModifiers::CONTROL) | (KeyCode::Enter, KeyModifiers::CONTROL)
     )
 }
 
