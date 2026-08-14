@@ -22,7 +22,9 @@ pub(super) fn apply(
         }
 
         ResultsAction::RowUp => {
-            state.results.move_row_up();
+            if state.results.move_row_up_with_page_hint() {
+                request_previous_page(state, cmd_tx);
+            }
         }
 
         ResultsAction::ColRight => {
@@ -53,7 +55,9 @@ pub(super) fn apply(
         }
 
         ResultsAction::HalfPageUp => {
-            state.results.move_row_half_page_up();
+            if state.results.move_row_half_page_up() {
+                request_previous_page(state, cmd_tx);
+            }
         }
 
         ResultsAction::ColFirst => {
@@ -136,6 +140,18 @@ pub(super) fn apply(
             }
         }
     }
+}
+
+/// Ask for the page before this one, under the same rule that guards paging
+/// forward: an arriving page discards staged work, so it has to be refused
+/// rather than taken.
+fn request_previous_page(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCommand>) {
+    if has_staged_changes(state) {
+        warn_staged_changes_block_paging(state);
+        return;
+    }
+    let previous = state.results.current_page.saturating_sub(1);
+    let _ = cmd_tx.send(CoreCommand::FetchPage { page: previous });
 }
 
 pub(super) fn has_staged_changes(state: &AppState) -> bool {

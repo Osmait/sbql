@@ -427,6 +427,12 @@ pub struct ResultsState {
     /// resolve their target table from. The editor text is *not* usable for
     /// that: the user may have typed a new query without running it.
     pub source_sql: Option<String>,
+    /// Set when a new query is sent, cleared when its result arrives.
+    ///
+    /// Page numbers alone cannot tell a fresh query from paging back to the
+    /// first page — both deliver page 0 — and the two want opposite ends of
+    /// it, so the client records which one it asked for.
+    pub awaiting_new_query: bool,
     /// The SQL most recently sent for execution; promoted to `source_sql`
     /// when its result actually arrives.
     pub sent_sql: Option<String>,
@@ -470,10 +476,18 @@ impl ResultsState {
         }
     }
 
-    pub fn move_row_up(&mut self) {
+    /// Move up one row, or ask for the previous page.
+    ///
+    /// Returns whether the caller should fetch it. Without this, landing on
+    /// the first row of a page was a dead end: the rows above were only
+    /// reachable by leaving the table and opening it again.
+    pub fn move_row_up_with_page_hint(&mut self) -> bool {
         if self.selected_row > 0 {
             self.selected_row -= 1;
             self.clamp_scroll();
+            false
+        } else {
+            self.current_page > 0
         }
     }
 
@@ -541,10 +555,16 @@ impl ResultsState {
     }
 
     /// Move up by half the viewport height (vim `Ctrl+u`).
-    pub fn move_row_half_page_up(&mut self) {
+    /// Move up half a screen, or ask for the previous page when already at
+    /// the top. Mirrors [`Self::move_row_half_page_down`].
+    pub fn move_row_half_page_up(&mut self) -> bool {
+        if self.selected_row == 0 {
+            return self.current_page > 0;
+        }
         let half = (self.viewport_height / 2).max(1);
         self.selected_row = self.selected_row.saturating_sub(half);
         self.clamp_scroll();
+        false
     }
 
     /// Jump to the first column (vim `0` / `^`).
@@ -880,6 +900,7 @@ impl AppState {
                 data: QueryResult::default(),
                 source_sql: None,
                 sent_sql: None,
+                awaiting_new_query: false,
                 scroll: 0,
                 col_scroll: 0,
                 selected_row: 0,
@@ -1034,7 +1055,8 @@ impl AppState {
                 // at row 99 of the *next* page — eighty rows of content skipped
                 // in one keypress, and the very next press paged again, so
                 // scrolling through a large table saw one row in every hundred.
-                let landing = if result.page == 0 || result.page > previous_page {
+                let fresh = std::mem::take(&mut self.results.awaiting_new_query);
+                let landing = if fresh || result.page > previous_page {
                     // A fresh query and the next page while reading forward
                     // both start at the first row.
                     Landing::Top
@@ -1262,7 +1284,7 @@ mod tests {
         assert_eq!(state.results.selected_row, 1);
 
         // Move up
-        state.results.move_row_up();
+        state.results.move_row_up_with_page_hint();
         assert_eq!(state.results.selected_row, 0);
 
         // Move col right
@@ -1490,6 +1512,10 @@ mod tests {
     #[test]
     fn core_event_query_result_page_0_resets() {
         let mut state = AppState::new(vec![]);
+        // Page 0 on its own is ambiguous — it is also what a refresh after a
+        // commit returns — so what makes this a reset is that a query was
+        // sent, which is the flag the editor sets.
+        state.results.awaiting_new_query = true;
         state.results.selected_row = 5;
         state.results.selected_col = 3;
         state.results.scroll = 10;
@@ -1823,6 +1849,97 @@ mod tests {
             state.apply_core_event(CoreEvent::QueryResult(page_of(100, page + 1, page < 2)));
         }
         assert_eq!(seen, 300, "every row of all three pages was visited");
+    }
+
+    /// The other half of reading a large table: having crossed into a page,
+    /// the rows above have to remain reachable. Landing on the first row was a
+    /// dead end — up did nothing, and the only way back was to close the table
+    /// and open it again.
+    #[test]
+    fn the_first_row_of_a_page_asks_for_the_previous_one() {
+        let mut state = AppState::new(vec![]);
+        state.results.viewport_height = 20;
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 1, true)));
+
+        assert_eq!(
+            state.results.selected_row, 0,
+            "forward paging lands at the top"
+        );
+        assert!(
+            state.results.move_row_up_with_page_hint(),
+            "up from the first row has to ask for the page before it"
+        );
+    }
+
+    /// On the very first page there is nothing above, so up is simply the end
+    /// of the road rather than a request that can never be answered.
+    #[test]
+    fn the_first_row_of_the_first_page_asks_for_nothing() {
+        let mut state = AppState::new(vec![]);
+        state.results.viewport_height = 20;
+        state.results.awaiting_new_query = true;
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 0, true)));
+
+        assert!(!state.results.move_row_up_with_page_hint());
+        assert_eq!(state.results.selected_row, 0);
+    }
+
+    /// Paging back has to put the cursor on the last row, or the rows just
+    /// above the boundary are skipped on the way up exactly as they were on
+    /// the way down.
+    #[test]
+    fn reading_backwards_across_pages_visits_every_row() {
+        let mut state = AppState::new(vec![]);
+        state.results.viewport_height = 20;
+        // Start where forward reading would have left us: the top of page 2.
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 2, false)));
+
+        for page in (0..2).rev() {
+            assert!(
+                state.results.move_row_up_with_page_hint(),
+                "the top of a page asks for the one before it"
+            );
+            state.apply_core_event(CoreEvent::QueryResult(page_of(100, page, true)));
+            assert_eq!(
+                state.results.selected_row, 99,
+                "page {page} is entered at its last row"
+            );
+
+            // And every row of it is walked, one at a time.
+            for row in (0..99).rev() {
+                state.results.move_row_up_with_page_hint();
+                assert_eq!(
+                    state.results.selected_row, row,
+                    "page {page} stopped moving at row {row}"
+                );
+            }
+        }
+        assert_eq!(state.results.current_page, 0);
+    }
+
+    /// Down then straight back up returns to the row you left, rather than to
+    /// some other page's row with the same index.
+    #[test]
+    fn crossing_a_boundary_and_turning_back_returns_where_you_were() {
+        let mut state = AppState::new(vec![]);
+        state.results.viewport_height = 20;
+        state.results.awaiting_new_query = true;
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 0, true)));
+        for _ in 0..99 {
+            state.results.move_row_down_with_page_hint();
+        }
+
+        // Over the edge into page 1...
+        assert!(state.results.move_row_down_with_page_hint());
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 1, true)));
+        assert_eq!(state.results.selected_row, 0);
+
+        // ...and straight back.
+        assert!(state.results.move_row_up_with_page_hint());
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 0, true)));
+
+        assert_eq!(state.results.current_page, 0);
+        assert_eq!(state.results.selected_row, 99, "back on the row we left");
     }
 
     /// A shorter later page must not leave the selection past the last row.
@@ -2209,7 +2326,7 @@ mod tests {
     fn results_move_row_up_at_zero() {
         let mut state = AppState::new(vec![]);
         state.results.selected_row = 0;
-        state.results.move_row_up();
+        state.results.move_row_up_with_page_hint();
         assert_eq!(state.results.selected_row, 0);
     }
 
