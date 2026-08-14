@@ -5,8 +5,15 @@ git_only = true
 git_tag_name = "{{ package }}-v{{ version }}"
 git_release_name = "{{ package }}-v{{ version }}"
 
-# Run `release` only when the merged commit comes from a release-plz PR.
-release_always = false
+# Release whenever main carries a version that has no tag yet, rather than only
+# when the commit came from a release-plz PR.
+#
+# The stricter setting deadlocked: `release-pr` is what produces those commits,
+# and it could not run at all, so nothing was ever released and the baseline it
+# compares against stayed stuck on a tree that fails to package. With this,
+# a version bump on main is enough. It is a no-op on every other push, since a
+# version that already has a tag is already released.
+release_always = true
 
 # Keep default branch naming explicit for auto-merge workflow lookup.
 pr_branch_prefix = "release-plz-"
