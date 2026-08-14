@@ -99,6 +99,144 @@ async fn test_import_csv_large_batch() {
     assert_eq!(row_count, 250);
 }
 
+/// The import streams rows into `BATCH_SIZE`-sized INSERTs instead of reading
+/// the file into memory first, so a file spanning several batches is the case
+/// that proves rows are not dropped or duplicated at a flush boundary.
+#[tokio::test]
+async fn test_import_csv_spans_multiple_batches() {
+    const ROWS: usize = 1200; // BATCH_SIZE is 500: two full batches plus a remainder.
+
+    let (sq, pool) = setup_sqlite_with_table().await;
+
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    writeln!(file, "name,age,email").unwrap();
+    for i in 0..ROWS {
+        writeln!(file, "user_{i},{i},user_{i}@test.com").unwrap();
+    }
+    file.flush().unwrap();
+
+    let path = file.path().to_str().unwrap();
+    let count = import_file(&pool, path, ImportFormat::Csv, "main", "users")
+        .await
+        .unwrap();
+
+    assert_eq!(count, ROWS as u64);
+
+    let rows: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT name, age, email FROM users ORDER BY CAST(age AS INTEGER)")
+            .fetch_all(&sq)
+            .await
+            .unwrap();
+
+    assert_eq!(rows.len(), ROWS);
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(
+            row,
+            &(
+                format!("user_{i}"),
+                i.to_string(),
+                format!("user_{i}@test.com")
+            ),
+            "row {i} did not survive batching intact"
+        );
+    }
+}
+
+/// Same boundary check for JSON, whose rows are converted batch by batch out of
+/// the parsed document rather than all at once.
+#[tokio::test]
+async fn test_import_json_spans_multiple_batches() {
+    const ROWS: usize = 1200;
+
+    let (sq, pool) = setup_sqlite_with_table().await;
+
+    let items: Vec<String> = (0..ROWS)
+        .map(|i| format!(r#"{{"name":"user_{i}","age":"{i}","email":"user_{i}@test.com"}}"#))
+        .collect();
+
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    write!(file, "[{}]", items.join(",")).unwrap();
+    file.flush().unwrap();
+
+    let path = file.path().to_str().unwrap();
+    let count = import_file(&pool, path, ImportFormat::Json, "main", "users")
+        .await
+        .unwrap();
+
+    assert_eq!(count, ROWS as u64);
+
+    let rows: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT name, age, email FROM users ORDER BY CAST(age AS INTEGER)")
+            .fetch_all(&sq)
+            .await
+            .unwrap();
+
+    assert_eq!(rows.len(), ROWS);
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(
+            row,
+            &(
+                format!("user_{i}"),
+                i.to_string(),
+                format!("user_{i}@test.com")
+            ),
+            "row {i} did not survive batching intact"
+        );
+    }
+}
+
+/// Values that would break a naive escaper have to survive the round trip: the
+/// escaping happens per batch, so it is the part most easily lost when the
+/// batching changes.
+#[tokio::test]
+async fn test_import_csv_escaping_roundtrip() {
+    let (sq, pool) = setup_sqlite_with_table().await;
+
+    // Raw string: backslashes below are literal CSV bytes. CSV quoting rules
+    // apply — a field is wrapped in `"` when it contains a comma, a newline or
+    // a quote, and an embedded `"` is written as `""`.
+    let csv = r#"name,age,email
+"He said ""hi"", then left\",1,a@example.com
+"O'Brien
+line two\",2,b@example.com
+C:\path\,3,c@example.com
+"x\', (SELECT 1), ('",4,d@example.com
+"#;
+
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(csv.as_bytes()).unwrap();
+    file.flush().unwrap();
+
+    let path = file.path().to_str().unwrap();
+    let count = import_file(&pool, path, ImportFormat::Csv, "main", "users")
+        .await
+        .unwrap();
+
+    assert_eq!(count, 4);
+
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT name, age FROM users ORDER BY CAST(age AS INTEGER)")
+            .fetch_all(&sq)
+            .await
+            .unwrap();
+
+    let expected = [
+        // quotes + embedded comma + trailing backslash
+        "He said \"hi\", then left\\",
+        // single quote + embedded newline + trailing backslash
+        "O'Brien\nline two\\",
+        // Windows-style path: backslashes only
+        "C:\\path\\",
+        // shaped like an attempt to break out of the string literal
+        "x\\', (SELECT 1), ('",
+    ];
+
+    assert_eq!(rows.len(), expected.len());
+    for (i, (name, _age)) in rows.iter().enumerate() {
+        assert_eq!(name, expected[i], "value {i} did not round-trip");
+    }
+}
+
 #[tokio::test]
 async fn test_import_csv_special_chars() {
     let (sq, pool) = setup_sqlite_with_table().await;

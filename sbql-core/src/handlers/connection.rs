@@ -57,6 +57,7 @@ pub(crate) async fn save(
     // (and any SSH tunnel) has to go, and the client has to hear it is now
     // disconnected.
     let mut dropped_stale_pool = false;
+    let mut sort_dropped = None;
     if let Some(pos) = core.connections.iter().position(|c| c.id == config.id) {
         let target_changed = !core.connections[pos].same_target(&config);
         core.connections[pos] = config.clone();
@@ -64,7 +65,7 @@ pub(crate) async fn save(
             core.manager.disconnect(config.id).await;
             if core.active_connection == Some(config.id) {
                 core.active_connection = None;
-                core.reset_query_state();
+                sort_dropped = core.reset_query_state();
             }
             dropped_stale_pool = true;
         }
@@ -82,6 +83,10 @@ pub(crate) async fn save(
     if dropped_stale_pool {
         events.push(CoreEvent::Disconnected(config.id));
     }
+    // The query state went with the stale pool, sort included. Without this
+    // the client keeps showing a sort indicator for an ORDER BY that no longer
+    // exists in any query.
+    events.extend(sort_dropped);
     if let Some(warning) = warning {
         events.push(CoreEvent::Error(warning));
     }
@@ -158,15 +163,17 @@ pub(crate) async fn connect(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
 
 pub(crate) async fn disconnect(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
     core.manager.disconnect(id).await;
+    let mut events = vec![CoreEvent::Disconnected(id)];
     if core.active_connection == Some(id) {
         core.active_connection = None;
         // Query state belongs to the connection that just closed. Left behind,
         // the next connection's first ApplyOrder/ApplyFilter/FetchPage would
         // build on the previous session's base_sql, columns and sort — running
-        // the old query against the new database.
-        core.reset_query_state();
+        // the old query against the new database. The same goes for the
+        // client's copy of the sort, which is why the reset hands one back.
+        events.extend(core.reset_query_state());
     }
-    vec![CoreEvent::Disconnected(id)]
+    events
 }
 
 #[cfg(test)]
@@ -393,6 +400,7 @@ mod tests {
         core.password_cache.insert(id, String::new());
         core.handle(CoreCommand::Connect(id)).await;
         assert_eq!(core.active_connection, Some(id));
+        core.sort_state = Some(("name".into(), crate::SortDirection::Ascending));
 
         let mut edited = config.clone();
         edited.file_path = Some("/somewhere/else.db".into());
@@ -413,6 +421,15 @@ mod tests {
         assert!(
             core.manager.get(id).await.is_err(),
             "stale pool must be gone"
+        );
+        // The session's sort went with the pool, so the client's copy has to go
+        // too — otherwise the header keeps an arrow for a query that is gone.
+        assert!(core.sort_state.is_none());
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, CoreEvent::SortChanged(None))),
+            "{events:?}"
         );
     }
 

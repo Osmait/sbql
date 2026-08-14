@@ -240,44 +240,107 @@ pub(super) fn is_vertical(ch: char) -> bool {
     )
 }
 
+/// Turn the finished grid into ratatui lines, one span per run of cells that
+/// share a style.
+///
+/// A span per cell means a heap `String` per character: a 200x60 canvas cost
+/// 12 000 tiny allocations, and the cached lines are cloned again on the way
+/// to the screen. Runs of one style are the norm here (borders, padding, a
+/// whole column name), so coalescing collapses a row to a handful of spans.
 pub(super) fn canvas_to_lines(canvas: Vec<Vec<CanvasCell>>) -> Vec<Line<'static>> {
     canvas
         .into_iter()
         .map(|row| {
-            let spans: Vec<Span<'static>> = row
-                .into_iter()
-                .map(|cell| Span::styled(cell.ch.to_string(), cell.style))
-                .collect();
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            let mut run = String::new();
+            let mut run_style: Option<Style> = None;
+
+            for cell in row {
+                match run_style {
+                    // `Style` is `Copy + PartialEq`, so equal styles merge.
+                    Some(style) if style == cell.style => run.push(cell.ch),
+                    Some(style) => {
+                        spans.push(Span::styled(std::mem::take(&mut run), style));
+                        run.push(cell.ch);
+                        run_style = Some(cell.style);
+                    }
+                    None => {
+                        run.push(cell.ch);
+                        run_style = Some(cell.style);
+                    }
+                }
+            }
+            if let Some(style) = run_style {
+                spans.push(Span::styled(run, style));
+            }
             Line::from(spans)
         })
         .collect()
 }
 
+/// Take the `width` cells starting at `x_offset`, padding on the right.
+///
+/// This runs on every visible row of every frame, so it walks the existing
+/// spans and slices them rather than exploding the line into one span per
+/// character. A span that falls wholly inside the window is moved across
+/// untouched, so a horizontally unscrolled row allocates nothing at all.
 pub(super) fn crop_line(line: Line<'static>, x_offset: usize, width: usize) -> Line<'static> {
     if width == 0 {
         return Line::from(Vec::<Span<'static>>::new());
     }
 
-    let mut chars: Vec<Span<'static>> = Vec::new();
+    let mut out: Vec<Span<'static>> = Vec::new();
+    // Char index of the current span's first cell within the whole line.
+    let mut pos = 0usize;
+    let mut taken = 0usize;
+
     for sp in line.spans {
-        for ch in sp.content.chars() {
-            chars.push(Span::styled(ch.to_string(), sp.style));
+        if taken == width {
+            break;
         }
+        let len = sp.content.chars().count();
+        if len == 0 {
+            continue;
+        }
+        let end = pos + len;
+        if end <= x_offset {
+            pos = end;
+            continue;
+        }
+        let start_char = x_offset.saturating_sub(pos);
+        let take_n = (len - start_char).min(width - taken);
+        if start_char == 0 && take_n == len {
+            out.push(sp);
+        } else {
+            let style = sp.style;
+            let content = slice_chars(&sp.content, start_char, take_n).to_owned();
+            out.push(Span::styled(content, style));
+        }
+        taken += take_n;
+        pos = end;
     }
 
-    if x_offset >= chars.len() {
-        return Line::from(" ".repeat(width));
+    // One trailing span covers both "window runs past the end" and "line was
+    // entirely to the left of the window", which is what the old per-character
+    // version produced for each case too.
+    if taken < width {
+        out.push(Span::raw(" ".repeat(width - taken)));
     }
+    Line::from(out)
+}
 
-    let slice: Vec<Span<'static>> = chars.into_iter().skip(x_offset).take(width).collect();
-
-    if slice.len() < width {
-        let mut padded = slice;
-        padded.push(Span::raw(" ".repeat(width - padded.len())));
-        Line::from(padded)
-    } else {
-        Line::from(slice)
-    }
+/// Sub-slice `s` to `count` characters starting at character `start`.
+///
+/// Byte offsets come from `char_indices`, so the cuts always land on char
+/// boundaries — the canvas is full of multi-byte box-drawing glyphs.
+fn slice_chars(s: &str, start: usize, count: usize) -> &str {
+    let start_byte = s.char_indices().nth(start).map_or(s.len(), |(i, _)| i);
+    let rest = &s[start_byte..];
+    let end_byte = rest
+        .char_indices()
+        .nth(count)
+        .map_or(s.len(), |(i, _)| start_byte + i);
+    &s[start_byte..end_byte]
 }
 
 pub(super) fn line_width(line: &Line<'_>) -> usize {
@@ -418,5 +481,153 @@ mod tests {
             "past the end is blank"
         );
         assert_eq!(line_width(&crop_line(line, 0, 0)), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Span coalescing
+    // -----------------------------------------------------------------------
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .flat_map(|sp| sp.content.chars())
+            .collect()
+    }
+
+    /// What actually reaches the terminal: a style per visible character,
+    /// independent of how the characters are grouped into spans.
+    fn cells(line: &Line<'_>) -> Vec<(char, Style)> {
+        line.spans
+            .iter()
+            .flat_map(|sp| sp.content.chars().map(move |ch| (ch, sp.style)))
+            .collect()
+    }
+
+    fn styled_row(cells: &[(char, Style)]) -> Vec<CanvasCell> {
+        cells
+            .iter()
+            .map(|&(ch, style)| CanvasCell { ch, style })
+            .collect()
+    }
+
+    #[test]
+    fn a_uniformly_styled_row_becomes_a_single_span() {
+        let s = Style::default().fg(theme::OVERLAY0);
+        let row = styled_row(&[('a', s), ('b', s), ('c', s), ('d', s)]);
+        let lines = canvas_to_lines(vec![row]);
+        assert_eq!(
+            lines[0].spans.len(),
+            1,
+            "one span per style run, not per cell"
+        );
+        assert_eq!(line_text(&lines[0]), "abcd");
+    }
+
+    #[test]
+    fn a_row_breaks_into_a_span_per_style_run() {
+        let a = Style::default().fg(theme::GREEN);
+        let b = Style::default().fg(theme::PEACH);
+        let row = styled_row(&[('x', a), ('y', a), ('z', b), ('w', a)]);
+        let lines = canvas_to_lines(vec![row]);
+        let spans: Vec<(&str, Style)> = lines[0]
+            .spans
+            .iter()
+            .map(|sp| (sp.content.as_ref(), sp.style))
+            .collect();
+        assert_eq!(spans, vec![("xy", a), ("z", b), ("w", a)]);
+    }
+
+    #[test]
+    fn an_empty_row_produces_an_empty_line() {
+        let lines = canvas_to_lines(vec![Vec::new()]);
+        assert_eq!(line_width(&lines[0]), 0);
+    }
+
+    /// The pre-optimisation `crop_line`: one span per character. Kept as an
+    /// oracle so the coalescing version can be proved to render identically.
+    fn crop_line_per_char(line: Line<'static>, x_offset: usize, width: usize) -> Line<'static> {
+        if width == 0 {
+            return Line::from(Vec::<Span<'static>>::new());
+        }
+        let mut chars: Vec<Span<'static>> = Vec::new();
+        for sp in line.spans {
+            for ch in sp.content.chars() {
+                chars.push(Span::styled(ch.to_string(), sp.style));
+            }
+        }
+        if x_offset >= chars.len() {
+            return Line::from(" ".repeat(width));
+        }
+        let slice: Vec<Span<'static>> = chars.into_iter().skip(x_offset).take(width).collect();
+        if slice.len() < width {
+            let mut padded = slice;
+            padded.push(Span::raw(" ".repeat(width - padded.len())));
+            Line::from(padded)
+        } else {
+            Line::from(slice)
+        }
+    }
+
+    fn assert_crops_like_the_old_version(line: &Line<'static>, x_offset: usize, width: usize) {
+        let new = crop_line(line.clone(), x_offset, width);
+        let old = crop_line_per_char(line.clone(), x_offset, width);
+        assert_eq!(
+            cells(&new),
+            cells(&old),
+            "crop_line({x_offset}, {width}) changed the visible characters or their styles"
+        );
+        assert_eq!(line_width(&new), line_width(&old));
+    }
+
+    #[test]
+    fn cropping_a_multi_span_line_matches_the_per_character_version() {
+        let line = Line::from(vec![
+            Span::styled("abc", Style::default().fg(theme::GREEN)),
+            Span::styled("de", Style::default().fg(theme::PEACH)),
+            Span::raw("fghij"),
+        ]);
+        for x_offset in [0, 1, 3, 4, 9, 10, 25] {
+            for width in [0, 1, 2, 5, 10, 30] {
+                assert_crops_like_the_old_version(&line, x_offset, width);
+            }
+        }
+    }
+
+    /// The canvas is mostly box-drawing glyphs, which are three bytes each:
+    /// cropping by byte offset would slice one in half.
+    #[test]
+    fn cropping_is_correct_with_multi_byte_characters() {
+        let line = Line::from(vec![
+            Span::styled("┌─┬─┐", Style::default().fg(theme::OVERLAY0)),
+            Span::styled("región", Style::default().fg(theme::GREEN)),
+            Span::raw("日本語"),
+        ]);
+        for x_offset in [0, 1, 2, 5, 7, 11, 13, 40] {
+            for width in [0, 1, 3, 8, 20] {
+                assert_crops_like_the_old_version(&line, x_offset, width);
+            }
+        }
+
+        let cropped = crop_line(line, 4, 4);
+        assert_eq!(line_text(&cropped), "┐reg");
+    }
+
+    /// Cropping keeps runs together instead of re-exploding them: a slice of
+    /// one styled run is one span, and a run that fits entirely in the window
+    /// is carried across whole.
+    #[test]
+    fn cropping_preserves_span_coalescing() {
+        let line = Line::from(vec![Span::styled(
+            "hello world",
+            Style::default().fg(theme::GREEN),
+        )]);
+
+        let sliced = crop_line(line.clone(), 6, 5);
+        assert_eq!(sliced.spans.len(), 1);
+        assert_eq!(line_text(&sliced), "world");
+
+        let whole = crop_line(line, 0, 11);
+        assert_eq!(whole.spans.len(), 1);
+        assert_eq!(line_text(&whole), "hello world");
     }
 }

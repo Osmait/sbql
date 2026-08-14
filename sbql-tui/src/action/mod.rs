@@ -259,9 +259,14 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
     }
 }
 
+/// The filter bar's `"col:value"` split, in the shape the tests assert on.
+///
+/// The parser itself lives in `sbql_core::query_builder` so the suggestion
+/// trigger and the WHERE-builder cannot disagree about what a column filter is.
 #[cfg(test)]
 pub(crate) fn parse_filter_input_test(input: &str) -> Option<(String, &str)> {
-    filter::parse_filter_input(input)
+    let (col, value) = sbql_core::query_builder::parse_filter_query(input);
+    col.map(|c| (c, value))
 }
 
 /// Apply live filter if the debounce deadline has passed. Called from tick.
@@ -283,9 +288,10 @@ pub fn apply_live_filter_if_due(
 
     let query = state.filter.textarea.lines().join("");
     let trimmed = query.trim().to_owned();
-    let is_candidate = filter::parse_filter_input(&trimmed)
-        .map(|(_, value)| !value.trim().is_empty())
-        .unwrap_or(false);
+    // Only a column filter with a value is worth firing early: anything the
+    // core would fall back to a whole-text match on waits for Enter.
+    let (col, value) = sbql_core::query_builder::parse_filter_query(&trimmed);
+    let is_candidate = col.is_some() && !value.trim().is_empty();
 
     if !is_candidate {
         if state.filter.last_applied_query.is_some() {
@@ -1422,6 +1428,16 @@ mod tests {
     #[test]
     fn parse_filter_no_colon() {
         let result = parse_filter_input_test("plain text");
+        assert!(result.is_none());
+    }
+
+    /// The TUI used to accept a column name with a space in it and offer value
+    /// suggestions for it, while the core's WHERE-builder rejected it and ran a
+    /// whole-text match instead. Both now answer with the core's rule, so the
+    /// suggestions describe the query that actually runs.
+    #[test]
+    fn parse_filter_column_with_a_space_is_not_a_column_filter() {
+        let result = parse_filter_input_test("invalid col:val");
         assert!(result.is_none());
     }
 

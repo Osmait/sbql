@@ -34,5 +34,11 @@ tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 
+[dev-dependencies]
+# Tests build a real `SbqlEngine`, which persists connections. Without a temp
+# config dir to point them at, they write the developer's real
+# `~/.config/sbql/connections.toml`.
+tempfile = "3"
+
 [lints]
 workspace = true

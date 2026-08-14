@@ -76,8 +76,8 @@ async fn test_redis_keys_command() {
 
     // KEYS *
     let result = execute_page(&pool, "KEYS *", 0).await.unwrap();
-    // Should return an array with index/value columns
-    assert!(result.columns.contains(&"value".to_string()));
+    // A flat, positional listing of key names.
+    assert_eq!(result.columns, vec!["index", "value"]);
     assert_eq!(result.rows.len(), 3);
 }
 
@@ -121,6 +121,10 @@ async fn test_redis_list_commands() {
     execute_page(&pool, "LPUSH mylist c", 0).await.unwrap();
 
     // LRANGE list 0 -1
+    // A list reply is a flat, positional listing of members, whatever its
+    // length. The display used to be chosen from the reply's parity, so an
+    // even-length LRANGE came back as two-column field/value rows — pairing
+    // list entries that have nothing to do with each other.
     let result = execute_page(&pool, "LRANGE mylist 0 -1", 0).await.unwrap();
     assert_eq!(result.columns, vec!["index", "value"]);
     assert_eq!(result.rows.len(), 3);
@@ -128,6 +132,37 @@ async fn test_redis_list_commands() {
     assert_eq!(result.rows[0][1], "c");
     assert_eq!(result.rows[1][1], "b");
     assert_eq!(result.rows[2][1], "a");
+
+    // The same list with an even number of members stays just as flat.
+    execute_page(&pool, "LPUSH mylist d", 0).await.unwrap();
+    let result = execute_page(&pool, "LRANGE mylist 0 -1", 0).await.unwrap();
+    assert_eq!(result.columns, vec!["index", "value"]);
+    assert_eq!(result.rows.len(), 4);
+}
+
+/// ZRANGE returns members only, or member/score pairs when asked. The shape
+/// comes from the WITHSCORES modifier, not from how many elements came back.
+#[tokio::test]
+async fn test_redis_zrange_withscores_pairs() {
+    let (pool, _container) = setup_redis().await;
+
+    execute_page(&pool, "ZADD scores 100 alice", 0)
+        .await
+        .unwrap();
+    execute_page(&pool, "ZADD scores 200 bob", 0).await.unwrap();
+
+    // Two members — an even-length reply that must not be read as pairs.
+    let plain = execute_page(&pool, "ZRANGE scores 0 -1", 0).await.unwrap();
+    assert_eq!(plain.columns, vec!["index", "value"]);
+    assert_eq!(plain.rows.len(), 2);
+    assert_eq!(plain.rows[0][1], "alice");
+    assert_eq!(plain.rows[1][1], "bob");
+
+    let scored = execute_page(&pool, "ZRANGE scores 0 -1 WITHSCORES", 0)
+        .await
+        .unwrap();
+    assert_eq!(scored.columns, vec!["field", "value"]);
+    assert_eq!(scored.rows, vec![vec!["alice", "100"], vec!["bob", "200"]]);
 }
 
 #[tokio::test]

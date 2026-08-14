@@ -320,8 +320,19 @@ fn parse_single_select(sql: &str, backend: DbBackend) -> Result<Box<Query>> {
     }
 }
 
-/// Parse `"col:value"` or `"plain text"`.
-fn parse_filter_query(q: &str) -> (Option<String>, &str) {
+/// Parse a filter bar entry into `Some(column)` plus a value, or `None` plus
+/// the whole text.
+///
+/// `"col:value"` is a column filter; `"plain text"`, `":value"` and
+/// `"two words:value"` are not, and fall back to matching the text against
+/// every column. A column name is not quoted or escaped here, so anything with
+/// a space in it cannot be one.
+///
+/// Public because the TUI must ask this exact question: it decides from the
+/// answer whether to offer value suggestions for a column, and offering them
+/// for a "column" that [`apply_filter`] will never filter on points the user at
+/// results they will not get. One parser, one answer.
+pub fn parse_filter_query(q: &str) -> (Option<String>, &str) {
     if let Some(colon_pos) = q.find(':') {
         let col = q[..colon_pos].trim().to_owned();
         let val = q[colon_pos + 1..].trim();

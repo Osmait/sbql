@@ -24,7 +24,8 @@ pub(super) fn apply(
         EditorAction::RunQuery => {
             let sql = state.editor.sql();
             if !sql.trim().is_empty() {
-                state.results.sort_state.clear();
+                // The sort is not cleared here: core drops it for the new
+                // query and reports that back as `SortChanged`.
                 state.active_filter = None;
                 state.editor.completion.dismiss();
                 // Promoted to `source_sql` when its result arrives, so

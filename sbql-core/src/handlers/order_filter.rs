@@ -22,9 +22,14 @@ pub(crate) async fn apply_order(
     match query_builder::apply_order(&without_order, &column, direction, backend) {
         Ok(new_sql) => {
             core.effective_sql = Some(new_sql);
-            core.sort_state.clear();
-            core.sort_state.insert(column, direction);
-            core.execute_current_page(0).await
+            // Sort first, rows second: a client that draws between the two
+            // shows the new indicator over the old rows, never the reverse.
+            let mut events: Vec<CoreEvent> = core
+                .set_sort(Some((column, direction)))
+                .into_iter()
+                .collect();
+            events.extend(core.execute_current_page(0).await);
+            events
         }
         Err(e) => vec![CoreEvent::error(&e)],
     }
@@ -42,8 +47,9 @@ pub(crate) async fn clear_order(core: &mut Core) -> Vec<CoreEvent> {
     match query_builder::clear_order(&effective, backend) {
         Ok(new_sql) => {
             core.effective_sql = Some(new_sql);
-            core.sort_state.clear();
-            core.execute_current_page(0).await
+            let mut events: Vec<CoreEvent> = core.set_sort(None).into_iter().collect();
+            events.extend(core.execute_current_page(0).await);
+            events
         }
         Err(e) => vec![CoreEvent::error(&e)],
     }
@@ -70,8 +76,9 @@ pub(crate) async fn apply_filter(core: &mut Core, filter: String) -> Vec<CoreEve
     };
     match query_builder::apply_filter(&base, &filter, cols, backend) {
         Ok(filtered_sql) => {
-            let final_sql = if let Some((col, &dir)) = core.sort_state.iter().next() {
-                query_builder::apply_order(&filtered_sql, col, dir, backend).unwrap_or(filtered_sql)
+            let final_sql = if let Some((col, dir)) = &core.sort_state {
+                query_builder::apply_order(&filtered_sql, col, *dir, backend)
+                    .unwrap_or(filtered_sql)
             } else {
                 filtered_sql
             };
@@ -93,8 +100,8 @@ pub(crate) async fn clear_filter(core: &mut Core) -> Vec<CoreEvent> {
         Ok(b) => b,
         Err(e) => return vec![CoreEvent::error(&e)],
     };
-    let final_sql = if let Some((col, &dir)) = core.sort_state.iter().next() {
-        query_builder::apply_order(&base, col, dir, backend).unwrap_or(base)
+    let final_sql = if let Some((col, dir)) = &core.sort_state {
+        query_builder::apply_order(&base, col, *dir, backend).unwrap_or(base)
     } else {
         base
     };
@@ -210,9 +217,15 @@ mod tests {
             .any(|e| matches!(e, CoreEvent::QueryResult(_))));
         // sort_state should be updated
         assert_eq!(
-            core.sort_state.get("name"),
-            Some(&SortDirection::Descending)
+            core.sort_state,
+            Some(("name".to_string(), SortDirection::Descending))
         );
+        // ...and reported, because core is the only place the applied sort
+        // lives now.
+        assert!(events.iter().any(|e| matches!(
+            e,
+            CoreEvent::SortChanged(Some((c, SortDirection::Descending))) if c == "name"
+        )));
     }
 
     #[tokio::test]
@@ -225,14 +238,44 @@ mod tests {
             direction: SortDirection::Ascending,
         })
         .await;
-        assert!(!core.sort_state.is_empty());
+        assert!(core.sort_state.is_some());
 
         // Clear order
         let events = core.handle(CoreCommand::ClearOrder).await;
         assert!(events
             .iter()
             .any(|e| matches!(e, CoreEvent::QueryResult(_))));
-        assert!(core.sort_state.is_empty());
+        assert!(core.sort_state.is_none());
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, CoreEvent::SortChanged(None))));
+    }
+
+    /// Running a new query drops the sort, and has to say so. The TUI caches
+    /// what core last reported; if this event went missing the header would
+    /// keep an arrow over a result set that is no longer sorted.
+    #[tokio::test]
+    async fn a_new_query_clears_and_reports_the_sort() {
+        let mut core = setup_sqlite_with_query().await;
+
+        core.handle(CoreCommand::ApplyOrder {
+            column: "name".into(),
+            direction: SortDirection::Ascending,
+        })
+        .await;
+        assert!(core.sort_state.is_some());
+
+        let events = core
+            .handle(CoreCommand::ExecuteQuery {
+                sql: "SELECT * FROM users".into(),
+            })
+            .await;
+
+        assert!(core.sort_state.is_none());
+        assert!(
+            matches!(&events[0], CoreEvent::SortChanged(None)),
+            "the cleared sort must land before the rows: {events:?}"
+        );
     }
 
     #[tokio::test]
@@ -269,7 +312,10 @@ mod tests {
         // Clear filter - sort should be preserved
         core.handle(CoreCommand::ClearFilter).await;
         assert!(core.active_filter.is_none());
-        assert_eq!(core.sort_state.get("name"), Some(&SortDirection::Ascending));
+        assert_eq!(
+            core.sort_state,
+            Some(("name".to_string(), SortDirection::Ascending))
+        );
     }
 
     #[tokio::test]
