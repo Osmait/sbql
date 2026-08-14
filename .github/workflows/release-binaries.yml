@@ -98,4 +98,26 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag || github.ref_name }}
         shell: bash
-        run: gh release upload "$TAG" "sbql-${{ matrix.target }}.tar.gz" "sbql-${{ matrix.target }}.tar.gz.sha256" --clobber --repo "$GITHUB_REPOSITORY"
+        run: |
+          set -euo pipefail
+          # This job is started by the tag push, and release-plz creates the
+          # GitHub release a moment later — so the release it uploads to may
+          # not exist yet. Wait for it, and create it if it never appears
+          # (a tag pushed by hand has no release behind it at all).
+          for attempt in 1 2 3 4 5 6; do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              break
+            fi
+            echo "release $TAG not there yet (attempt $attempt), waiting"
+            sleep 10
+          done
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" \
+              --notes "Prebuilt \`sbql\` binaries. Install with the one-liner in the README." \
+              --verify-tag
+          gh release upload "$TAG" \
+            "sbql-${{ matrix.target }}.tar.gz" \
+            "sbql-${{ matrix.target }}.tar.gz.sha256" \
+            --clobber --repo "$GITHUB_REPOSITORY"
