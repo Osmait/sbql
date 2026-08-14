@@ -1034,9 +1034,9 @@ impl AppState {
                 // at row 99 of the *next* page — eighty rows of content skipped
                 // in one keypress, and the very next press paged again, so
                 // scrolling through a large table saw one row in every hundred.
-                let landing = if result.page == 0 {
-                    Landing::Top
-                } else if result.page > previous_page {
+                let landing = if result.page == 0 || result.page > previous_page {
+                    // A fresh query and the next page while reading forward
+                    // both start at the first row.
                     Landing::Top
                 } else if result.page < previous_page {
                     // Paging back: land on the row adjacent to where you were,
