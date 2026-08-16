@@ -1,3 +1,16 @@
+//! Running a query and turning whatever comes back into strings.
+//!
+//! Every backend answers in its own types; a client only ever sees a
+//! [`QueryResult`], which is columns and rows of `String`. Formatting happens
+//! here, once, rather than in each frontend — the TUI and the macOS app cannot
+//! disagree about how a `NUMERIC` or a `bytea` renders if neither of them ever
+//! sees one.
+//!
+//! Results are paged ([`PAGE_SIZE`] rows at a time) and the row count is a
+//! separate, opt-in lookup: see [`total_count`] for why it is not folded into
+//! page 0.
+
+use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
@@ -11,13 +24,14 @@ use crate::error::{Result, SbqlError};
 use crate::pool::DbPool;
 use crate::sql_util::{quote_ident, quote_ident_mysql};
 
+/// Rows per page. Every [`QueryResult`] holds at most this many.
 pub const PAGE_SIZE: usize = 100;
 
 /// Maximum time to wait for `COUNT(*)` before giving up and returning `None`.
 const COUNT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Return the backend name for a `DbPool` (used in tracing spans).
-pub fn pool_backend_name(pool: &DbPool) -> &'static str {
+pub(crate) fn pool_backend_name(pool: &DbPool) -> &'static str {
     match pool {
         DbPool::Postgres(_) => "postgres",
         DbPool::Sqlite(_) => "sqlite",
@@ -51,13 +65,24 @@ pub struct QueryResult {
 /// The output format for streaming database export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportFormat {
+    /// Comma-separated, with a header row.
     Csv,
+    /// One JSON array of objects, keyed by column name.
     Json,
+    /// `INSERT INTO ... VALUES (...);` statements, one per row, ready to replay
+    /// against another database.
     SqlInsert,
 }
 
 /// Stream all rows of `sql` directly to a file in the given format,
 /// without buffering the full result set in memory.
+///
+/// # Errors
+///
+/// The file could not be written, the query failed, or the backend has no
+/// export path — only PostgreSQL, MySQL and SQLite stream. A partly written
+/// file is left behind on failure, so a caller offering a retry should not
+/// present the file as usable.
 pub async fn export_all(
     pool: &DbPool,
     sql: &str,
@@ -80,9 +105,18 @@ pub async fn export_all(
 ///
 /// The returned page never carries a `total_count`. It used to: page 0 waited
 /// on `SELECT COUNT(*)` before returning, so the rows the user was actually
-/// looking at were held back by up to [`COUNT_TIMEOUT`] for a number most
+/// looking at were held back by up to `COUNT_TIMEOUT` for a number most
 /// frontends never render. Callers that want the count ask for it separately
 /// via [`total_count`], off the path the user is waiting on.
+///
+/// # Errors
+///
+/// The statement failed, or the connection did. Which one matters, and the
+/// caller should not guess from the message: convert to a
+/// [`CoreError`](crate::CoreError) and branch on its
+/// [`kind`](crate::ErrorKind) — [`Query`](crate::ErrorKind::Query) means put
+/// the cursor back in the editor, [`Connection`](crate::ErrorKind::Connection)
+/// means offer to reconnect.
 #[tracing::instrument(skip_all, fields(backend = pool_backend_name(pool), page))]
 pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<QueryResult> {
     match pool {
@@ -102,7 +136,7 @@ pub async fn execute_page(pool: &DbPool, sql: &str, page: usize) -> Result<Query
 /// them differently: the backend has no cheap `COUNT(*)` (Redis, DynamoDB,
 /// MongoDB), the query is a shape a count would have to re-run wholesale
 /// (GROUP BY / UNION / HAVING), or the count did not come back within
-/// [`COUNT_TIMEOUT`]. In every case the honest answer is "unknown".
+/// `COUNT_TIMEOUT`. In every case the honest answer is "unknown".
 #[tracing::instrument(skip_all, fields(backend = pool_backend_name(pool)))]
 pub async fn total_count(pool: &DbPool, sql: &str) -> Option<u64> {
     match tokio::time::timeout(COUNT_TIMEOUT, fetch_total_count(pool, sql)).await {
@@ -162,6 +196,15 @@ async fn fetch_total_count(pool: &DbPool, sql: &str) -> Result<u64> {
 }
 
 /// Suggest distinct values for a column using prefix search.
+///
+/// Backends without a cheap `DISTINCT` answer with an empty list rather than an
+/// error — "no suggestions" is a normal outcome here.
+///
+/// # Errors
+///
+/// The lookup query failed. This runs while the user is typing a filter, so the
+/// useful response is to drop the suggestions silently: a toast for a
+/// completion nobody asked for is worse than no completion.
 #[tracing::instrument(skip_all, fields(backend = pool_backend_name(pool), column))]
 pub async fn suggest_distinct_values(
     pool: &DbPool,
@@ -597,7 +640,7 @@ fn mysql_value_to_string(row: &MySqlRow, idx: usize, type_name: &str) -> String 
             .unwrap_or_default();
     }
 
-    format!("<{}>", type_name)
+    format!("<{type_name}>")
 }
 
 // ---------------------------------------------------------------------------
@@ -766,7 +809,7 @@ async fn execute_page_redis(
 
 /// How the elements of a Redis array reply should be laid out for display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum RedisReplyShape {
+pub(crate) enum RedisReplyShape {
     /// One element per row, in a single `value` column.
     #[default]
     Flat,
@@ -800,7 +843,7 @@ const PAIRING_MODIFIERS: &[&str] = &["WITHSCORES", "WITHVALUES"];
 /// misrepresented every reply that happened to be even: `LRANGE mylist 0 3`
 /// came back as two two-column rows, and so did any `SMEMBERS` of a set with
 /// an even number of members. Anything not on the lists below is flat.
-pub fn redis_reply_shape(tokens: &[String]) -> RedisReplyShape {
+pub(crate) fn redis_reply_shape(tokens: &[String]) -> RedisReplyShape {
     let Some(command) = tokens.first() else {
         return RedisReplyShape::Flat;
     };
@@ -933,17 +976,17 @@ fn paired_result<'a>(items: impl Iterator<Item = &'a redis::Value>) -> QueryResu
 /// Convert a `redis::Value` into a `QueryResult` for display.
 ///
 /// Renders arrays flat, because with no command in hand there is nothing to
-/// decide a pair layout from. Callers that know which command produced the
-/// reply must go through [`redis_value_to_query_result_with_shape`]: inferring
-/// pairs from the data alone is what turned `LRANGE mylist 0 3` into two
-/// two-column rows.
+/// decide a pair layout from — inferring pairs from the data alone is what
+/// turned `LRANGE mylist 0 3` into two two-column rows. Inside the crate,
+/// callers that do know the command go through
+/// `redis_value_to_query_result_with_shape` instead.
 pub fn redis_value_to_query_result(value: &redis::Value) -> QueryResult {
     redis_value_to_query_result_with_shape(value, RedisReplyShape::Flat)
 }
 
 /// Convert a `redis::Value` into a `QueryResult`, laying arrays out as `shape`
 /// says the issuing command replies. Use [`redis_reply_shape`] to derive it.
-pub fn redis_value_to_query_result_with_shape(
+pub(crate) fn redis_value_to_query_result_with_shape(
     value: &redis::Value,
     shape: RedisReplyShape,
 ) -> QueryResult {
@@ -1201,17 +1244,17 @@ fn bson_to_string(val: &mongodb::bson::Bson) -> String {
             let nsecs = ((millis % 1000) * 1_000_000) as u32;
             match chrono::DateTime::from_timestamp(secs, nsecs) {
                 Some(chrono_dt) => chrono_dt.to_rfc3339(),
-                None => format!("{}", millis),
+                None => format!("{millis}"),
             }
         }
         Bson::Array(arr) => {
             let items: Vec<String> = arr.iter().map(bson_to_string).collect();
             format!("[{}]", items.join(", "))
         }
-        Bson::Document(doc) => serde_json::to_string(doc).unwrap_or_else(|_| format!("{:?}", doc)),
+        Bson::Document(doc) => serde_json::to_string(doc).unwrap_or_else(|_| format!("{doc:?}")),
         Bson::Binary(b) => format!("\\x{}", hex_encode(b.bytes.as_slice())),
         Bson::Decimal128(d) => d.to_string(),
-        _ => format!("{}", val),
+        _ => format!("{val}"),
     }
 }
 
@@ -1545,7 +1588,7 @@ fn pg_value_to_string(row: &PgRow, idx: usize, type_name: &str) -> String {
     }
 
     // --- Last resort: show type name so it's debuggable ---
-    format!("<{}>", type_name)
+    format!("<{type_name}>")
 }
 
 // ---------------------------------------------------------------------------
@@ -1824,7 +1867,13 @@ fn json_escape(s: &str) -> String {
             '\t' => out.push_str("\\t"),
             '\u{08}' => out.push_str("\\b"),
             '\u{0c}' => out.push_str("\\f"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            // `write!` into the buffer, not `push_str(&format!(..))`: the
+            // latter allocates a throwaway `String` per control character.
+            // Writing to a `String` cannot fail, so the `fmt::Result` is
+            // discarded rather than unwrapped.
+            c if (c as u32) < 0x20 => {
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
             c => out.push(c),
         }
     }

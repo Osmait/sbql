@@ -4,8 +4,22 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+# The MSRV the dependency graph already imposes; declared in
+# `[workspace.package]` with the reasoning. Inheriting it here is what makes
+# cargo actually check it for this crate.
+rust-version.workspace = true
 description = "Core engine for sbql"
 repository = "https://github.com/Osmait/sbql"
+homepage = "https://github.com/Osmait/sbql"
+# The workspace README, which is the one that describes sbql. Cargo copies it
+# into the package on publish, so crates.io renders it even though the file
+# lives a directory up and is not otherwise part of this crate.
+readme = "../README.md"
+# Five is the crates.io maximum. Backends people search for, not adjectives.
+keywords = ["sql", "database", "postgres", "mysql", "sqlite"]
+# Both are crates.io category slugs; `database` for what it talks to,
+# `asynchronous` because the whole surface is `async`.
+categories = ["database", "asynchronous"]
 
 [dependencies]
 tokio.workspace = true

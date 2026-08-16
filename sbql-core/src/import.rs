@@ -6,7 +6,7 @@
 //! logic works across PG, MySQL, and SQLite without sqlx generic-executor
 //! gymnastics.
 //!
-//! Rows travel as an iterator, not a `Vec`: a row source feeds [`batches`],
+//! Rows travel as an iterator, not a `Vec`: a row source feeds `batches`,
 //! and each batch is flushed to the database before the next one is built, so
 //! peak memory is one batch of `BATCH_SIZE` rows rather than the whole file.
 //! Importing a multi-gigabyte CSV used to exhaust memory before a single row
@@ -24,7 +24,10 @@ use crate::sql_util::{quote_ident, quote_ident_mysql};
 /// The file format to import from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportFormat {
+    /// Header row names the columns; every value arrives as text.
     Csv,
+    /// An array of objects, or an object with one key holding such an array.
+    /// Column names come from the first object.
     Json,
 }
 
@@ -38,6 +41,17 @@ const BATCH_SIZE: usize = 500;
 /// Import a CSV or JSON file into a database table.
 ///
 /// Returns the total number of rows inserted.
+///
+/// # Errors
+///
+/// The file could not be opened or parsed, the table rejected the rows (a
+/// column that is not there, a type that will not convert), or the backend has
+/// no import path at all — only PostgreSQL, MySQL and SQLite do.
+///
+/// **This is not a transaction.** Batches are flushed as they fill, so a
+/// failure part-way leaves the rows before it already committed. A caller that
+/// retries will double-import them; the honest recovery is to tell the user how
+/// many rows landed and let them decide.
 pub async fn import_file(
     pool: &DbPool,
     path: &str,
@@ -256,7 +270,7 @@ fn build_values_clause(batch: &[Vec<String>], escape: fn(&str) -> String) -> Str
         .iter()
         .map(|row| {
             let vals = row.iter().map(|v| escape(v)).collect::<Vec<_>>().join(", ");
-            format!("({})", vals)
+            format!("({vals})")
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -548,15 +562,14 @@ mod tests {
 
     #[test]
     fn test_json_row_value_kinds() {
-        let map = match serde_json::json!({
+        let serde_json::Value::Object(map) = serde_json::json!({
             "s": "text",
             "n": 42,
             "b": true,
             "null": null,
             "nested": {"k": "v"},
-        }) {
-            serde_json::Value::Object(map) => map,
-            _ => unreachable!(),
+        }) else {
+            unreachable!("a json! object literal is an object")
         };
         let columns: Vec<String> = ["s", "n", "b", "null", "nested", "missing"]
             .iter()
@@ -622,7 +635,7 @@ mod tests {
         assert_eq!(rows[0].0, "Alice");
         assert_eq!(rows[0].1, "30");
 
-        let _ = std::fs::remove_file(&csv_path);
+        drop(std::fs::remove_file(&csv_path));
     }
 
     #[tokio::test]
@@ -664,7 +677,7 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].0, "Alice");
 
-        let _ = std::fs::remove_file(&json_path);
+        drop(std::fs::remove_file(&json_path));
     }
 
     #[tokio::test]
@@ -697,6 +710,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(count, 2);
-        let _ = std::fs::remove_file(&json_path);
+        drop(std::fs::remove_file(&json_path));
     }
 }
