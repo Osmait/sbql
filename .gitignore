@@ -1,3 +1,7 @@
 /target
 /build
 sbql-macos/Frameworks/SbqlFFI.xcframework/
+
+# Agent worktrees. The Claude Code harness creates git worktrees here; they are
+# checkouts of this same repository and must never be committed into it.
+/.claude/worktrees/
