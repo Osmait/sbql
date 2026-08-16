@@ -41,10 +41,15 @@ let cwd = std::env::current_dir().expect("a current directory");
 ```
 
 A bare `#[allow(...)]` with no comment is a review comment waiting to happen.
-There are currently **four** `#[allow]`s in the entire workspace — two
-`print_stdout` on `#[ignore]`d tests whose `--nocapture` output *is* their
-product, and two `print_stderr` in `sbql-tui/src/main.rs`. Each carries a
-one-line reason. Keep that number small enough to audit by eye.
+
+There are 14 `#[allow]`s in the workspace. Adopting this whole lint policy
+added exactly **four** of them: two `clippy::print_stdout` on `#[ignore]`d
+discovery tests whose `--nocapture` output *is* their product, and two
+`clippy::print_stderr` in `sbql-tui/src/main.rs` for the prints that run
+outside the alternate screen. Each carries a one-line reason. The other ten
+pre-date this policy — mostly `expect_used` in tests and
+`field_reassign_with_default`. Keep the total small enough to audit by eye;
+`grep -rn '#\[allow' --include='*.rs'` should stay readable in one screen.
 
 A crate-level `#![allow(...)]` needs a much stronger argument than a local one.
 There are none, and adding one should be a conversation.
