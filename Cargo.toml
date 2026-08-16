@@ -65,11 +65,19 @@ unnested_or_patterns = "warn"
 use_self = "warn"
 
 [workspace.lints.rust]
-# There is currently no `unsafe` anywhere in the workspace, so this costs
-# nothing today and only gets more expensive to adopt later. `warn` rather than
-# `forbid` at the workspace level because sbql-ffi cannot honour it: uniffi's
-# proc macros expand to `unsafe` code. That crate opts out at its crate root,
-# with a comment, so the exemption is visible rather than global.
+# There is currently no hand-written `unsafe` anywhere in the workspace, so
+# this costs nothing today and only gets more expensive to adopt later.
+#
+# sbql-ffi needs no exemption, which is not obvious: uniffi 0.29 genuinely does
+# emit `unsafe` (`unsafe impl FfiConverter`, `pub unsafe extern "C" fn`), but
+# rustc suppresses lints in spans originating from an external macro expansion,
+# so none of it reaches this lint. Verified by probe rather than by absence —
+# a hand-written `unsafe {}` added to sbql-ffi does warn. So the lint is live
+# there and covers exactly what we want it to: code we wrote.
+#
+# `warn` rather than `forbid` because `forbid` cannot be locally overridden at
+# all, and a future uniffi that changes span hygiene would then be unfixable
+# without editing this file under time pressure.
 unsafe_code = "warn"
 # `pub` should mean "part of this crate's contract". Anything reachable only
 # from inside is `pub(crate)`, which is what the compiler can then rely on.
