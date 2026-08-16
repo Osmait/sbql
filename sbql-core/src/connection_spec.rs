@@ -23,12 +23,20 @@ use crate::pool::DbBackend;
 /// because that is the field they are stored in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConnectionField {
+    /// What the connection is called in the list. Every backend asks for it.
     Name,
+    /// Server hostname. DynamoDB labels it "Endpoint".
     Host,
+    /// Server port.
     Port,
+    /// Login user. DynamoDB labels it "Access Key".
     User,
+    /// Database name. DynamoDB labels it "Region".
     Database,
+    /// The secret. Never read back out of the credential store, so an edit
+    /// form always shows it blank.
     Password,
+    /// The SQLite file.
     FilePath,
     /// Chosen from a list rather than typed.
     SslMode,
@@ -38,21 +46,24 @@ impl ConnectionField {
     /// Whether the field is typed into. The others are cycled through choices,
     /// so a text cursor never lands on them.
     pub fn is_text(self) -> bool {
-        !matches!(self, ConnectionField::SslMode)
+        !matches!(self, Self::SslMode)
     }
 
     /// Whether the value should be hidden while typing.
     pub fn is_secret(self) -> bool {
-        matches!(self, ConnectionField::Password)
+        matches!(self, Self::Password)
     }
 }
 
 /// One field as a particular backend presents it.
 #[derive(Debug, Clone, Copy)]
 pub struct FieldSpec {
+    /// Which value this is, i.e. where it is stored.
     pub field: ConnectionField,
     /// Backend-specific wording — DynamoDB calls `Host` "Endpoint".
     pub label: &'static str,
+    /// Blank is rejected. The error names this field's `label`, not the
+    /// storage field, so the user reads back the word they were shown.
     pub required: bool,
 }
 
@@ -71,6 +82,8 @@ const fn field(field: ConnectionField, label: &'static str, required: bool) -> F
 /// Everything a client needs to present and validate one backend.
 #[derive(Debug, Clone, Copy)]
 pub struct BackendSpec {
+    /// The backend this describes. Always matches the `DbBackend` it was
+    /// looked up from.
     pub backend: DbBackend,
     /// Name shown in a backend picker.
     pub label: &'static str,
@@ -86,7 +99,7 @@ impl BackendSpec {
         self.fields.iter().find(|f| f.field == field)
     }
 
-    pub fn has(&self, field: ConnectionField) -> bool {
+    pub(crate) fn has(&self, field: ConnectionField) -> bool {
         self.field(field).is_some()
     }
 }
@@ -190,26 +203,26 @@ const SQLSERVER: BackendSpec = BackendSpec {
 
 impl DbBackend {
     /// Every backend, in the order a picker should cycle through them.
-    pub const ALL: [DbBackend; 7] = [
-        DbBackend::Postgres,
-        DbBackend::Mysql,
-        DbBackend::Sqlite,
-        DbBackend::Redis,
-        DbBackend::DynamoDb,
-        DbBackend::MongoDb,
-        DbBackend::SqlServer,
+    pub const ALL: [Self; 7] = [
+        Self::Postgres,
+        Self::Mysql,
+        Self::Sqlite,
+        Self::Redis,
+        Self::DynamoDb,
+        Self::MongoDb,
+        Self::SqlServer,
     ];
 
     /// What this backend needs from the user.
     pub fn spec(self) -> &'static BackendSpec {
         match self {
-            DbBackend::Postgres => &POSTGRES,
-            DbBackend::Mysql => &MYSQL,
-            DbBackend::Sqlite => &SQLITE,
-            DbBackend::Redis => &REDIS,
-            DbBackend::DynamoDb => &DYNAMODB,
-            DbBackend::MongoDb => &MONGODB,
-            DbBackend::SqlServer => &SQLSERVER,
+            Self::Postgres => &POSTGRES,
+            Self::Mysql => &MYSQL,
+            Self::Sqlite => &SQLITE,
+            Self::Redis => &REDIS,
+            Self::DynamoDb => &DYNAMODB,
+            Self::MongoDb => &MONGODB,
+            Self::SqlServer => &SQLSERVER,
         }
     }
 
@@ -219,9 +232,9 @@ impl DbBackend {
     }
 
     /// The next backend in [`DbBackend::ALL`], wrapping around.
-    pub fn next(self) -> DbBackend {
-        let idx = DbBackend::ALL.iter().position(|&b| b == self).unwrap_or(0);
-        DbBackend::ALL[(idx + 1) % DbBackend::ALL.len()]
+    pub fn next(self) -> Self {
+        let idx = Self::ALL.iter().position(|&b| b == self).unwrap_or(0);
+        Self::ALL[(idx + 1) % Self::ALL.len()]
     }
 }
 
@@ -234,6 +247,8 @@ impl DbBackend {
 pub struct ValidationError {
     /// Which field to send the user back to.
     pub field: ConnectionField,
+    /// Ready to show as-is, phrased in the backend's own wording for the
+    /// field ("Region is required", not "Database is required").
     pub message: String,
 }
 
@@ -248,28 +263,82 @@ impl std::error::Error for ValidationError {}
 /// A connection as it is being typed: every value is still text, and any of it
 /// may be wrong. [`ConnectionDraft::build`] is the only way to get a
 /// [`ConnectionConfig`] out, so unvalidated input cannot reach storage.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ConnectionDraft {
+    /// Which backend the draft is for. Decides which fields are shown and
+    /// which are required.
     pub backend: DbBackend,
     /// Set when editing an existing connection; preserved through `build`.
     pub id: Option<uuid::Uuid>,
+    /// What the connection will be called in the list.
     pub name: String,
+    /// Server hostname. Empty for backends that have no host (SQLite).
     pub host: String,
+    /// Port, still as text — `build` is where it has to parse as a `u16`.
     pub port: String,
+    /// Login user. DynamoDB stores its access-key id here.
     pub user: String,
+    /// Database name. DynamoDB stores its region here, MongoDB its database.
     pub database: String,
+    /// Plaintext, for as long as the user is typing it. Never written to disk
+    /// by this type: [`ConnectionDraft::password_for_save`] hands it to the
+    /// save path, which puts it in the OS credential store.
     pub password: String,
+    /// SQLite database file.
     pub file_path: String,
+    /// TLS mode, for the backends that have one.
     pub ssl_mode: SslMode,
     /// SSH tunnel settings. The form does not expose these yet, but a draft
     /// carries them verbatim so editing a connection that *has* an SSH tunnel
     /// no longer silently strips it. `build` copies them straight back out.
     pub ssh_enabled: bool,
+    /// Bastion hostname.
     pub ssh_host: String,
+    /// Bastion port.
     pub ssh_port: u16,
+    /// Bastion login user.
     pub ssh_user: String,
+    /// `"password"` or `"key"`.
     pub ssh_auth_method: String,
+    /// Private key file, when `ssh_auth_method` is `"key"`.
     pub ssh_key_path: Option<String>,
+}
+
+/// Written by hand rather than derived because `password` is plaintext for as
+/// long as the user is typing it. A draft is exactly the kind of value that
+/// ends up in a `tracing::debug!` of a UI event, and a derived `Debug` would
+/// put the database password in the log file.
+impl std::fmt::Debug for ConnectionDraft {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectionDraft")
+            .field("backend", &self.backend)
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("user", &self.user)
+            .field("database", &self.database)
+            .field("password", &Redacted(!self.password.is_empty()))
+            .field("file_path", &self.file_path)
+            .field("ssl_mode", &self.ssl_mode)
+            .field("ssh_enabled", &self.ssh_enabled)
+            .field("ssh_host", &self.ssh_host)
+            .field("ssh_port", &self.ssh_port)
+            .field("ssh_user", &self.ssh_user)
+            .field("ssh_auth_method", &self.ssh_auth_method)
+            .field("ssh_key_path", &self.ssh_key_path)
+            .finish()
+    }
+}
+
+/// Stands in for a secret in a `Debug` output: says whether one is set, never
+/// what it is. Not even the length, which narrows a guess.
+pub(crate) struct Redacted(pub(crate) bool);
+
+impl std::fmt::Debug for Redacted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0 { "<redacted>" } else { "<unset>" })
+    }
 }
 
 impl ConnectionDraft {
@@ -333,6 +402,9 @@ impl ConnectionDraft {
         self.backend = backend;
     }
 
+    /// Read a field by name, so a form can iterate
+    /// [`BackendSpec::fields`] instead of hard-coding which member goes in
+    /// which box. `SslMode` reads back as its wire spelling.
     pub fn value(&self, field: ConnectionField) -> &str {
         match field {
             ConnectionField::Name => &self.name,
@@ -361,11 +433,19 @@ impl ConnectionDraft {
         }
     }
 
+    /// What this draft's backend asks for — the field list to render.
     pub fn spec(&self) -> &'static BackendSpec {
         self.backend.spec()
     }
 
     /// Validate and convert. This is the single gate every client goes through.
+    ///
+    /// # Errors
+    ///
+    /// A required field is blank, or the port is not a number in 1-65535. The
+    /// [`ValidationError`] names the offending [`ConnectionField`], so the
+    /// caller's job is to put the cursor back in that box and show the message
+    /// — not to guess from the text which field went wrong.
     pub fn build(&self) -> std::result::Result<ConnectionConfig, ValidationError> {
         let spec = self.spec();
 
@@ -430,11 +510,11 @@ impl ConnectionDraft {
         // preserving the tunnel and silently deleting it.
         if self.ssh_enabled {
             config.ssh_enabled = true;
-            config.ssh_host = self.ssh_host.clone();
+            config.ssh_host.clone_from(&self.ssh_host);
             config.ssh_port = self.ssh_port;
-            config.ssh_user = self.ssh_user.clone();
-            config.ssh_auth_method = self.ssh_auth_method.clone();
-            config.ssh_key_path = self.ssh_key_path.clone();
+            config.ssh_user.clone_from(&self.ssh_user);
+            config.ssh_auth_method.clone_from(&self.ssh_auth_method);
+            config.ssh_key_path.clone_from(&self.ssh_key_path);
         }
         if let Some(id) = self.id {
             config.id = id;
@@ -463,6 +543,12 @@ impl ConnectionConfig {
     /// client can also hand over a fully-typed config — the macOS app does,
     /// through UniFFI. Both routes end at the same rules, and the save handler
     /// calls this so nothing reaches disk unvalidated.
+    ///
+    /// # Errors
+    ///
+    /// A field this backend requires is empty (or the port is 0). As with
+    /// [`ConnectionDraft::build`], the error names the field — send the user
+    /// back to it.
     pub fn validate(&self) -> std::result::Result<(), ValidationError> {
         let spec = self.backend.spec();
 
@@ -497,6 +583,34 @@ impl ConnectionConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The `Debug` impl is hand-written for exactly this reason, and a derive
+    /// would silently undo it. A draft holds the password in plaintext while
+    /// the user types, and drafts travel inside UI events that get logged.
+    #[test]
+    fn a_drafts_password_never_reaches_its_debug_output() {
+        let mut draft = ConnectionDraft::new(DbBackend::Postgres);
+        draft.name = "prod".into();
+        draft.password = "hunter2-not-a-real-password".into();
+
+        let shown = format!("{draft:?}");
+
+        assert!(
+            !shown.contains("hunter2"),
+            "the password leaked into Debug: {shown}"
+        );
+        assert!(shown.contains("<redacted>"), "{shown}");
+        // The rest of the draft still has to be debuggable.
+        assert!(shown.contains("prod"), "{shown}");
+    }
+
+    /// "Set" and "not set" are worth telling apart when debugging a failed
+    /// save; the value itself never is.
+    #[test]
+    fn a_blank_password_debugs_as_unset_rather_than_redacted() {
+        let draft = ConnectionDraft::new(DbBackend::Postgres);
+        assert!(format!("{draft:?}").contains("<unset>"));
+    }
 
     #[test]
     fn every_backend_has_a_spec_that_matches_its_tag() {

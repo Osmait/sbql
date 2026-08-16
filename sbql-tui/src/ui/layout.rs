@@ -3,7 +3,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Named regions for the 4-panel layout.
-pub struct Areas {
+pub(crate) struct Areas {
     /// Left column, top portion — connection list.
     /// Zero-height when the sidebar is hidden.
     pub connections: Rect,
@@ -33,7 +33,7 @@ pub struct Areas {
 /// │  Status bar (1 row)                                │
 /// └───────────────────────────────────────────────────┘
 /// ```
-pub fn compute(area: Rect, sidebar_hidden: bool) -> Areas {
+pub(crate) fn compute(area: Rect, sidebar_hidden: bool) -> Areas {
     // Carve out the status bar at the bottom (1 row)
     let outer = Layout::default()
         .direction(Direction::Vertical)

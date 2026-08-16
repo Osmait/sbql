@@ -43,7 +43,7 @@ fn data_type_color(data_type: &str) -> ratatui::style::Color {
         || dt.contains("xml")
         || dt.contains("array")
         || dt.contains("hstore")
-        || dt.starts_with("_")
+        || dt.starts_with('_')
     {
         theme::mauve()
     } else if dt.contains("bool") {
@@ -92,7 +92,11 @@ fn panes(full: Rect) -> std::rc::Rc<[Rect]> {
 /// Everything that *changes* the diagram lives here. Rendering used to do this
 /// mid-draw, which meant the scroll offset was only correct once a frame had
 /// been painted — so anything reading it before then saw a stale value.
-pub fn measure(state: &mut DiagramState, cache: &mut crate::ui::cache::RenderCache, full: Rect) {
+pub(crate) fn measure(
+    state: &mut DiagramState,
+    cache: &mut crate::ui::cache::RenderCache,
+    full: Rect,
+) {
     let area = panes(full)[1];
     let inner_h = area.height.saturating_sub(2) as usize;
     let inner_w = area.width.saturating_sub(2) as usize;
@@ -121,7 +125,7 @@ pub fn measure(state: &mut DiagramState, cache: &mut crate::ui::cache::RenderCac
 }
 
 /// Render the diagram. Reads state only — call [`measure`] first.
-pub fn draw(
+pub(crate) fn draw(
     frame: &mut Frame,
     state: &DiagramState,
     cache: &crate::ui::cache::RenderCache,
@@ -303,7 +307,6 @@ fn draw_sidebar(
 
     // Draw search input at bottom
     if let Some(sa) = search_area {
-        let search_text = format!("/{}_", state.search_query);
         let search_line = Line::from(vec![
             Span::styled("/", Style::default().fg(theme::blue())),
             Span::styled(
@@ -312,7 +315,6 @@ fn draw_sidebar(
             ),
             Span::styled("_", Style::default().fg(theme::overlay0())),
         ]);
-        let _ = search_text; // suppress unused
         frame.render_widget(Paragraph::new(search_line), sa);
     }
 }
@@ -999,8 +1001,8 @@ fn render_table_box(
         let name_truncated = truncate_str(&col.name, name_w);
         let type_truncated = truncate_str(&col.data_type, type_w);
 
-        let name_padded = format!("{:<width$}", name_truncated, width = name_w);
-        let type_padded = format!("{:<width$}", type_truncated, width = type_w);
+        let name_padded = format!("{name_truncated:<name_w$}");
+        let type_padded = format!("{type_truncated:<type_w$}");
 
         let content_style = if is_selected {
             Style::default().fg(theme::text())
@@ -1491,7 +1493,7 @@ mod tests {
         }];
         // lane_x=10 is inside the rect (8..44), should shift right
         let result = find_free_lane(10, &rects, 0, 5, 100);
-        assert!(result >= 44, "lane should be outside rect, got {}", result);
+        assert!(result >= 44, "lane should be outside rect, got {result}");
     }
 
     #[test]

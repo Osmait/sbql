@@ -1,14 +1,14 @@
-pub mod cache;
-pub mod cell_edit;
-pub mod connections;
-pub mod diagram;
-pub mod editor;
-pub mod hit;
-pub mod layout;
-pub mod notice;
-pub mod results;
-pub mod theme;
-pub mod theme_picker;
+pub(crate) mod cache;
+pub(crate) mod cell_edit;
+pub(crate) mod connections;
+pub(crate) mod diagram;
+pub(crate) mod editor;
+pub(crate) mod hit;
+pub(crate) mod layout;
+pub(crate) mod notice;
+pub(crate) mod results;
+pub(crate) mod theme;
+pub(crate) mod theme_picker;
 
 use ratatui::{
     style::{Modifier, Style},
@@ -25,7 +25,7 @@ use crate::ui::hit::Zone;
 ///
 /// Also rebuilds the hit map: every panel registers what it painted, in paint
 /// order, so the mouse handler resolves a click the same way the screen does.
-pub fn draw(frame: &mut Frame, state: &mut AppState, cache: &mut cache::RenderCache) {
+pub(crate) fn draw(frame: &mut Frame, state: &mut AppState, cache: &mut cache::RenderCache) {
     // A zone must never outlive the frame that drew it.
     state.layout.hits.clear();
 
@@ -103,8 +103,14 @@ pub fn draw(frame: &mut Frame, state: &mut AppState, cache: &mut cache::RenderCa
     let results_layout = results::measure(&state.results, areas.results);
     state.results.viewport_height = results_layout.viewport_height;
     state.results.viewport_cols = results_layout.viewport_cols;
-    state.layout.last_col_widths = results_layout.col_widths.clone();
-    state.results.cached_col_widths = results_layout.col_widths.clone();
+    state
+        .layout
+        .last_col_widths
+        .clone_from(&results_layout.col_widths);
+    state
+        .results
+        .cached_col_widths
+        .clone_from(&results_layout.col_widths);
     state.results.col_widths_dirty = false;
 
     let results_view = results::ResultsView {

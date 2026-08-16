@@ -16,7 +16,7 @@ async fn setup_redis() -> (DbPool, testcontainers::ContainerAsync<Redis>) {
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(6379).await.unwrap();
 
-    let url = format!("redis://{}:{}", host_ip, host_port);
+    let url = format!("redis://{host_ip}:{host_port}");
     let client = redis::Client::open(url.as_str()).expect("Failed to create Redis client");
     let cm = redis::aio::ConnectionManager::new(client)
         .await
@@ -32,7 +32,7 @@ async fn test_redis_connect_and_ping() {
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(6379).await.unwrap();
 
-    let url = format!("redis://{}:{}", host_ip, host_port);
+    let url = format!("redis://{host_ip}:{host_port}");
     let client = redis::Client::open(url.as_str()).unwrap();
     let mut cm = redis::aio::ConnectionManager::new(client).await.unwrap();
 
@@ -264,7 +264,7 @@ async fn test_redis_large_value() {
 
     // Create a 10KB value
     let large_value: String = "A".repeat(10 * 1024);
-    let cmd = format!("SET bigkey {}", large_value);
+    let cmd = format!("SET bigkey {large_value}");
     execute_page(&pool, &cmd, 0).await.unwrap();
 
     let result = execute_page(&pool, "GET bigkey", 0).await.unwrap();

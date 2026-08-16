@@ -26,7 +26,7 @@ const COL_SPACING: u16 = 1;
 /// Computed without a `Frame`, so the viewport arithmetic the scrolling and
 /// paging logic depends on can be tested without rendering anything.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResultsLayout {
+pub(crate) struct ResultsLayout {
     /// Width of every column, not just the visible ones.
     pub col_widths: Vec<u16>,
     /// Rows that fit below the header.
@@ -41,7 +41,7 @@ pub struct ResultsLayout {
 
 /// Everything the results panel needs to render, gathered in one place so the
 /// draw call does not take nine positional arguments.
-pub struct ResultsView<'a> {
+pub(crate) struct ResultsView<'a> {
     pub results: &'a ResultsState,
     pub mutation: &'a MutationState,
     pub focused: FocusedPanel,
@@ -52,7 +52,7 @@ pub struct ResultsView<'a> {
 }
 
 /// Work out the grid geometry. Pure: no rendering, no state mutation.
-pub fn measure(results: &ResultsState, area: Rect) -> ResultsLayout {
+pub(crate) fn measure(results: &ResultsState, area: Rect) -> ResultsLayout {
     let viewport_height = (area.height.saturating_sub(3) as usize).max(1);
 
     if results.data.columns.is_empty() {
@@ -99,7 +99,7 @@ pub fn measure(results: &ResultsState, area: Rect) -> ResultsLayout {
 ///
 /// Takes the geometry rather than computing it, so drawing has no results the
 /// caller has to read back out of it.
-pub fn draw(
+pub(crate) fn draw(
     frame: &mut Frame,
     view: &ResultsView,
     layout: &ResultsLayout,
@@ -151,10 +151,10 @@ pub fn draw(
         if edits > 0 || deletes > 0 {
             let mut parts = Vec::new();
             if edits > 0 {
-                parts.push(format!("{}~", edits));
+                parts.push(format!("{edits}~"));
             }
             if deletes > 0 {
-                parts.push(format!("{}-", deletes));
+                parts.push(format!("{deletes}-"));
             }
             format!(" [staged: {}] ", parts.join(" "))
         } else {
@@ -165,7 +165,7 @@ pub fn draw(
     let filter_hint = if filter_visible || results.data.columns.is_empty() {
         String::new()
     } else if let Some(f) = active_filter {
-        format!(" [filter: {}] / edit filter", f)
+        format!(" [filter: {f}] / edit filter")
     } else {
         " / filter".to_owned()
     };
@@ -514,7 +514,7 @@ fn title_slice(bar: Rect, offset: usize, width: usize) -> Rect {
 // Filter bar overlay (drawn over the bottom edge of the results panel)
 // ---------------------------------------------------------------------------
 
-pub fn draw_filter_bar(
+pub(crate) fn draw_filter_bar(
     frame: &mut Frame,
     filter: &mut FilterBar,
     results_area: Rect,
@@ -649,7 +649,7 @@ fn truncate(s: &str, max_chars: usize) -> String {
         s.replace('\n', "↵").replace('\r', "")
     } else {
         let truncated: String = chars[..max_chars.saturating_sub(1)].iter().collect();
-        format!("{}…", truncated)
+        format!("{truncated}…")
     }
 }
 

@@ -15,7 +15,7 @@ use sbql_core::{CoreError, ErrorKind, Severity};
 const TICKS_PER_SECOND: u64 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Level {
+pub(crate) enum Level {
     /// It worked. Says so briefly and gets out of the way.
     Info,
     /// It worked, but not completely.
@@ -26,7 +26,7 @@ pub enum Level {
 
 /// One thing to tell the user.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Notice {
+pub(crate) struct Notice {
     pub level: Level,
     /// One line, for the status bar.
     pub text: String,
@@ -41,7 +41,7 @@ pub struct Notice {
 }
 
 impl Notice {
-    pub fn info(text: impl Into<String>, now: u64) -> Self {
+    pub(crate) fn info(text: impl Into<String>, now: u64) -> Self {
         Self {
             level: Level::Info,
             text: text.into(),
@@ -52,7 +52,7 @@ impl Notice {
     }
 
     /// A failure the TUI decided on by itself, with no core error behind it.
-    pub fn error(text: impl Into<String>, now: u64) -> Self {
+    pub(crate) fn error(text: impl Into<String>, now: u64) -> Self {
         Self {
             level: Level::Error,
             ..Self::info(text, now)
@@ -60,11 +60,17 @@ impl Notice {
     }
 
     /// A failure — or a caveat — reported by `sbql-core`.
-    pub fn from_core(err: CoreError, now: u64) -> Self {
+    pub(crate) fn from_core(err: CoreError, now: u64) -> Self {
         Self {
             level: match err.severity {
                 Severity::Warning => Level::Warning,
                 Severity::Error => Level::Error,
+                // `Severity` is `#[non_exhaustive]`, so this arm is required.
+                // It resolves to `Error` rather than `Warning` deliberately: a
+                // severity this build does not recognise is more likely to
+                // matter than not, and a warning toast is dismissable enough
+                // that the user can miss it. Fail loud on the unknown.
+                _ => Level::Error,
             },
             text: err.message,
             detail: err.detail,
@@ -88,7 +94,7 @@ impl Notice {
     }
 
     /// Whether `now` is past this notice's welcome.
-    pub fn is_expired(&self, now: u64) -> bool {
+    pub(crate) fn is_expired(&self, now: u64) -> bool {
         match self.lifetime() {
             Some(ticks) => now.saturating_sub(self.posted_at) >= ticks,
             None => false,
@@ -96,7 +102,7 @@ impl Notice {
     }
 
     /// Whether there is more to read than the bar is showing.
-    pub fn has_detail(&self) -> bool {
+    pub(crate) fn has_detail(&self) -> bool {
         self.detail.is_some() || self.hint().is_some()
     }
 
@@ -105,7 +111,7 @@ impl Notice {
     /// The whole point of [`ErrorKind`] travelling out of the core: the bar
     /// used to be able to print the message and nothing else, so "No active
     /// connection" left the user to work out that connections open with Enter.
-    pub fn hint(&self) -> Option<&'static str> {
+    pub(crate) fn hint(&self) -> Option<&'static str> {
         match self.kind? {
             ErrorKind::NoActiveConnection => {
                 Some("Pick a connection in the Connections panel (F1) and press Enter to open it.")

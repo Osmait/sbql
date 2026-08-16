@@ -31,10 +31,7 @@ async fn setup_pg(
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let url = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let url = format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&url).await.unwrap();
 
     sqlx::query(
@@ -116,7 +113,7 @@ fn bench_postgres(c: &mut Criterion) {
 
         group.bench_function("simple_select", |b| {
             b.to_async(&rt)
-                .iter(|| async { execute_page(&pool, "SELECT * FROM users", 0).await.unwrap() })
+                .iter(|| async { execute_page(&pool, "SELECT * FROM users", 0).await.unwrap() });
         });
 
         group.bench_function("with_types", |b| {
@@ -128,7 +125,7 @@ fn bench_postgres(c: &mut Criterion) {
                 )
                 .await
                 .unwrap()
-            })
+            });
         });
 
         group.bench_function("join", |b| {
@@ -141,7 +138,7 @@ fn bench_postgres(c: &mut Criterion) {
                 )
                 .await
                 .unwrap()
-            })
+            });
         });
 
         group.bench_function("filtered", |b| {
@@ -149,12 +146,12 @@ fn bench_postgres(c: &mut Criterion) {
                 execute_page(&pool, "SELECT * FROM users WHERE active = true", 0)
                     .await
                     .unwrap()
-            })
+            });
         });
 
         group.bench_function("page_1", |b| {
             b.to_async(&rt)
-                .iter(|| async { execute_page(&pool, "SELECT * FROM users", 1).await.unwrap() })
+                .iter(|| async { execute_page(&pool, "SELECT * FROM users", 1).await.unwrap() });
         });
 
         group.finish();
@@ -175,7 +172,7 @@ fn bench_postgres(c: &mut Criterion) {
                 let filtered =
                     apply_filter(&ordered, "user_1", Some(&cols), DbBackend::Postgres).unwrap();
                 execute_page(&pool, &filtered, 0).await.unwrap()
-            })
+            });
         });
 
         group.bench_function("clear_order_execute", |b| {
@@ -189,7 +186,7 @@ fn bench_postgres(c: &mut Criterion) {
                 .unwrap();
                 let cleared = clear_order(&ordered, DbBackend::Postgres).unwrap();
                 execute_page(&pool, &cleared, 0).await.unwrap()
-            })
+            });
         });
 
         group.finish();
@@ -202,17 +199,17 @@ fn bench_postgres(c: &mut Criterion) {
 
         group.bench_function("list_tables", |b| {
             b.to_async(&rt)
-                .iter(|| async { list_tables(&pool).await.unwrap() })
+                .iter(|| async { list_tables(&pool).await.unwrap() });
         });
 
         group.bench_function("load_diagram", |b| {
             b.to_async(&rt)
-                .iter(|| async { load_diagram(&pool).await.unwrap() })
+                .iter(|| async { load_diagram(&pool).await.unwrap() });
         });
 
         group.bench_function("get_primary_keys", |b| {
             b.to_async(&rt)
-                .iter(|| async { get_primary_keys(&pool, "public", "users").await.unwrap() })
+                .iter(|| async { get_primary_keys(&pool, "public", "users").await.unwrap() });
         });
 
         group.finish();
@@ -228,7 +225,7 @@ fn bench_postgres(c: &mut Criterion) {
                 suggest_distinct_values(&pool, "SELECT * FROM users", "name", "user_1", 20)
                     .await
                     .unwrap()
-            })
+            });
         });
 
         group.bench_function("empty_prefix", |b| {
@@ -236,7 +233,7 @@ fn bench_postgres(c: &mut Criterion) {
                 suggest_distinct_values(&pool, "SELECT * FROM users", "city", "", 20)
                     .await
                     .unwrap()
-            })
+            });
         });
 
         group.finish();

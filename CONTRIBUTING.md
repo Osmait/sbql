@@ -485,9 +485,18 @@ Integration tests use [testcontainers](https://github.com/testcontainers/testcon
 
 ### Rust
 
+**See [CODE_STYLE.md](CODE_STYLE.md)** — the full reference for error handling,
+the panic lints and why they exist, public-API rules, documentation and comment
+conventions, test naming, and Cargo hygiene.
+
+The short version:
+
 - Format with `cargo fmt`
 - Lint with `cargo clippy --workspace --all-targets` (zero warnings policy)
-- Follow standard Rust conventions (snake_case, etc.)
+- No `unwrap`, `expect`, or `panic!` outside tests — a panic leaves the user's
+  terminal garbled, not a stack trace
+- No `println!` outside `sbql-tui/src/main.rs` — use `tracing`
+- Comments explain *why*, ideally naming the failure that motivated the code
 
 ### Swift
 

@@ -1,3 +1,17 @@
+//! Where saved connections live, and where their passwords do not.
+//!
+//! A [`ConnectionConfig`] is everything about a connection *except* the
+//! password: the struct is what gets serialised into `connections.toml`, so
+//! anything in it is on disk in plaintext. Passwords go to the OS credential
+//! store instead, keyed by connection id, through the `store` submodule — the
+//! one place in the crate that knows whether a keyring exists at all.
+//!
+//! The split matters for what a client can promise the user. Saving a
+//! connection whose password the keyring refuses still saves the connection,
+//! and [`keyring_enabled`] is how a UI phrases that honestly rather than
+//! reporting a store it was never going to use as a failure.
+
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -30,7 +44,7 @@ pub fn keyring_enabled() -> bool {
 fn opted_out_of_keyring() -> bool {
     matches!(
         std::env::var(NO_KEYRING_ENV).as_deref(),
-        Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes")
+        Ok("1" | "true" | "TRUE" | "yes")
     )
 }
 
@@ -197,22 +211,31 @@ mod store {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SslMode {
+    /// Encrypt if the server offers it, connect anyway if not. The default,
+    /// and what `psql` does.
     #[default]
     Prefer,
+    /// Never encrypt.
     Disable,
+    /// Encrypt, but do not check who is on the other end.
     Require,
+    /// Encrypt and check the certificate chain.
     VerifyCa,
+    /// Encrypt, check the chain, and check the hostname matches. The only
+    /// setting that actually stops a man in the middle.
     VerifyFull,
 }
 
 impl SslMode {
+    /// The spelling PostgreSQL's `sslmode=` parameter expects, which is also
+    /// what a UI should show — `verify-full`, not `VerifyFull`.
     pub fn as_str(&self) -> &'static str {
         match self {
-            SslMode::Disable => "disable",
-            SslMode::Prefer => "prefer",
-            SslMode::Require => "require",
-            SslMode::VerifyCa => "verify-ca",
-            SslMode::VerifyFull => "verify-full",
+            Self::Disable => "disable",
+            Self::Prefer => "prefer",
+            Self::Require => "require",
+            Self::VerifyCa => "verify-ca",
+            Self::VerifyFull => "verify-full",
         }
     }
 }
@@ -221,14 +244,26 @@ impl SslMode {
 /// never inside this struct or on disk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionConfig {
+    /// Stable identity. Also the keyring key, so it must survive an edit —
+    /// discovered connections derive theirs from the container id for exactly
+    /// that reason.
     pub id: Uuid,
+    /// What the user called it.
     pub name: String,
+    /// Which driver to use. Defaults to PostgreSQL when absent, so a config
+    /// written before backends existed still loads.
     #[serde(default)]
     pub backend: DbBackend,
+    /// Server hostname. Empty for SQLite.
     pub host: String,
+    /// Server port. 0 for SQLite.
     pub port: u16,
+    /// Login user. DynamoDB keeps its access-key id here.
     pub user: String,
+    /// Database name. DynamoDB keeps its region here.
     pub database: String,
+    /// TLS mode. Only PostgreSQL and MySQL present it; Redis reads it as
+    /// "use `rediss://`".
     #[serde(default)]
     pub ssl_mode: SslMode,
     /// File path for SQLite databases (only used when `backend == Sqlite`).
@@ -505,6 +540,14 @@ impl ConnectionConfig {
     }
 
     /// Store the password in the OS keyring. No-op for SQLite.
+    ///
+    /// # Errors
+    ///
+    /// The credential store refused or could not be reached. The connection
+    /// itself is unaffected, so the caller's move is to save it anyway and tell
+    /// the user the password specifically did not stick — that is what
+    /// [`Severity::Warning`](crate::Severity::Warning) is for. Check
+    /// [`keyring_enabled`] first if you want to avoid asking at all.
     pub fn save_password(&self, password: &str) -> Result<()> {
         if self.backend == DbBackend::Sqlite
             || (self.backend == DbBackend::Redis && password.is_empty())
@@ -517,6 +560,13 @@ impl ConnectionConfig {
     }
 
     /// Retrieve the password from the OS keyring. Returns empty string for SQLite.
+    ///
+    /// # Errors
+    ///
+    /// [`SbqlError::PasswordNotFound`] means the store works and simply has
+    /// nothing for this connection — prompt the user. Any other error means the
+    /// store itself is unreadable, which is not something re-typing the password
+    /// fixes; say so rather than making them try.
     pub fn load_password(&self) -> Result<String> {
         if self.backend == DbBackend::Sqlite {
             return Ok(String::new());
@@ -525,6 +575,12 @@ impl ConnectionConfig {
     }
 
     /// Delete the password from the OS keyring. No-op for SQLite.
+    ///
+    /// # Errors
+    ///
+    /// The store refused the delete. Nothing the caller can retry usefully, but
+    /// worth reporting: the connection is gone and its password is not, so it
+    /// will sit in the user's keyring until they remove it by hand.
     pub fn delete_password(&self) -> Result<()> {
         if self.backend == DbBackend::Sqlite {
             return Ok(());
@@ -533,6 +589,12 @@ impl ConnectionConfig {
     }
 
     /// Store the SSH password in the OS keyring.
+    ///
+    /// # Errors
+    ///
+    /// As [`ConnectionConfig::save_password`]: the credential store refused.
+    /// The tunnel settings are saved regardless; only the password is missing,
+    /// and the user will be asked for it next time they connect.
     pub fn save_ssh_password(&self, password: &str) -> Result<()> {
         if password.is_empty() {
             return Ok(());
@@ -565,7 +627,7 @@ impl ConnectionConfig {
     /// Compares every field that feeds the pool or the SSH tunnel — everything
     /// except `id` and `name`. A live pool built from a config for which this
     /// returns false is stale and must not be reused.
-    pub fn same_target(&self, other: &ConnectionConfig) -> bool {
+    pub fn same_target(&self, other: &Self) -> bool {
         self.backend == other.backend
             && self.host == other.host
             && self.port == other.port
@@ -592,6 +654,14 @@ struct ConfigFile {
 }
 
 /// Returns `~/.config/sbql/connections.toml`, creating parent dirs if needed.
+///
+/// # Errors
+///
+/// The config directory could not be created — no permission, or the path is
+/// occupied by a file. Nothing will be saved until that is dealt with outside
+/// the app, so this is worth surfacing at startup rather than at first save.
+/// [`CONFIG_DIR_ENV`] relocates the whole directory if the default is
+/// unwritable.
 pub fn config_path() -> Result<PathBuf> {
     let dir = config_dir();
     std::fs::create_dir_all(&dir)?;
@@ -614,19 +684,29 @@ fn config_dir() -> PathBuf {
 }
 
 /// Load all saved connections from disk.
+///
+/// A missing file is not an error — it is a fresh install, and the answer is an
+/// empty list.
+///
+/// # Errors
+///
+/// The file exists but could not be read or parsed. Do **not** treat this as
+/// "no connections saved": that is exactly what [`Core::new`](crate::Core::new)
+/// used to do, and it invites the user to re-add connections that are still
+/// sitting on disk. Report the failure and leave the file alone.
 pub fn load_connections() -> Result<Vec<ConnectionConfig>> {
     let path = config_path()?;
     load_connections_from(&path)
 }
 
 /// Persist the full list of connections to disk (passwords are NOT written).
-pub fn save_connections(connections: &[ConnectionConfig]) -> Result<()> {
+pub(crate) fn save_connections(connections: &[ConnectionConfig]) -> Result<()> {
     let path = config_path()?;
     save_connections_to(&path, connections)
 }
 
 /// Load connections from an arbitrary path (useful for testing).
-pub fn load_connections_from(path: &std::path::Path) -> Result<Vec<ConnectionConfig>> {
+pub(crate) fn load_connections_from(path: &std::path::Path) -> Result<Vec<ConnectionConfig>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -642,7 +722,10 @@ pub fn load_connections_from(path: &std::path::Path) -> Result<Vec<ConnectionCon
 /// over the target. A plain `std::fs::write` truncates first, so an interrupt
 /// (crash, full disk, power loss) mid-write left a truncated or empty
 /// `connections.toml` — every saved connection gone.
-pub fn save_connections_to(path: &std::path::Path, connections: &[ConnectionConfig]) -> Result<()> {
+pub(crate) fn save_connections_to(
+    path: &std::path::Path,
+    connections: &[ConnectionConfig],
+) -> Result<()> {
     let cfg = ConfigFile {
         connections: connections.to_vec(),
     };
@@ -664,7 +747,13 @@ pub fn save_connections_to(path: &std::path::Path, connections: &[ConnectionConf
     match std::fs::rename(&tmp, path) {
         Ok(()) => Ok(()),
         Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
+            // Best-effort cleanup — the rename error below is the one worth
+            // returning. A failure here is still logged: otherwise the only
+            // symptom is `connections.toml.tmp.*` files quietly accumulating
+            // next to the real config with nothing explaining them.
+            if let Err(cleanup) = std::fs::remove_file(&tmp) {
+                tracing::debug!("could not remove temp file {}: {cleanup}", tmp.display());
+            }
             Err(e.into())
         }
     }
@@ -684,7 +773,11 @@ fn urlencoding_simple(s: &str) -> String {
             'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => out.push(ch),
             _ => {
                 for byte in ch.to_string().as_bytes() {
-                    out.push_str(&format!("%{:02X}", byte));
+                    // `write!` into the buffer rather than `push_str(&format!(..))`,
+                    // which allocates a throwaway `String` per byte. Writing to a
+                    // `String` cannot fail, so the `fmt::Result` is discarded
+                    // rather than unwrapped.
+                    let _ = write!(out, "%{byte:02X}");
                 }
             }
         }

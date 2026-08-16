@@ -16,7 +16,7 @@ use clap::Parser;
         SBQL_NO_KEYRING  Set to 1 for the same effect as --no-keyring\n  \
         SBQL_LOG         Log file to write (default: a per-user state directory)"
 )]
-pub struct Cli {
+pub(crate) struct Cli {
     /// Saved connection to open on startup.
     pub connection: Option<String>,
 
@@ -33,7 +33,7 @@ impl Cli {
     ///
     /// `sbql-core` checks `SBQL_NO_KEYRING` on every credential operation, so
     /// the flag has to be visible before anything touches the store.
-    pub fn apply_env(&self) {
+    pub(crate) fn apply_env(&self) {
         if self.no_keyring {
             std::env::set_var(sbql_core::NO_KEYRING_ENV, "1");
         }
@@ -43,7 +43,7 @@ impl Cli {
     ///
     /// Done before the terminal switches to raw mode so the error prints
     /// legibly instead of being swallowed by the alternate screen.
-    pub fn startup_connection(&self) -> Result<Option<String>, StartupError> {
+    pub(crate) fn startup_connection(&self) -> Result<Option<String>, StartupError> {
         let Some(name) = self.connection.as_deref() else {
             return Ok(None);
         };
@@ -74,7 +74,7 @@ impl Cli {
 
 /// A problem worth reporting before the UI starts.
 #[derive(Debug)]
-pub enum StartupError {
+pub(crate) enum StartupError {
     UnknownConnection {
         requested: String,
         available: Vec<String>,
@@ -89,7 +89,7 @@ pub enum StartupError {
 impl std::fmt::Display for StartupError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StartupError::UnknownConnection {
+            Self::UnknownConnection {
                 requested,
                 available,
             } if available.is_empty() => write!(
@@ -97,7 +97,7 @@ impl std::fmt::Display for StartupError {
                 "no saved connections found, so '{requested}' cannot be opened.\n\
                  Start sbql with no arguments and press `n` to add one."
             ),
-            StartupError::UnknownConnection {
+            Self::UnknownConnection {
                 requested,
                 available,
             } => {
@@ -108,7 +108,7 @@ impl std::fmt::Display for StartupError {
                 }
                 Ok(())
             }
-            StartupError::UnreadableConfig { source } => write!(
+            Self::UnreadableConfig { source } => write!(
                 f,
                 "your saved connections could not be read: {source}\n\
                  Nothing has been changed. Fix or move the file and try again."
@@ -120,8 +120,8 @@ impl std::fmt::Display for StartupError {
 impl std::error::Error for StartupError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            StartupError::UnknownConnection { .. } => None,
-            StartupError::UnreadableConfig { source } => Some(source.as_ref()),
+            Self::UnknownConnection { .. } => None,
+            Self::UnreadableConfig { source } => Some(source.as_ref()),
         }
     }
 }

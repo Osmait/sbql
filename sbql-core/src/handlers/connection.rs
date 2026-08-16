@@ -1,6 +1,7 @@
 use uuid::Uuid;
 
-use crate::{save_connections, ConnectionConfig, Core, CoreError, CoreEvent, ErrorKind, SbqlError};
+use crate::config::save_connections;
+use crate::{ConnectionConfig, Core, CoreError, CoreEvent, ErrorKind, SbqlError};
 
 pub(crate) async fn save(
     core: &mut Core,
@@ -96,7 +97,16 @@ pub(crate) async fn save(
 pub(crate) async fn delete(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
     if let Some(pos) = core.connections.iter().position(|c| c.id == id) {
         let cfg = core.connections.remove(pos);
-        let _ = cfg.delete_password();
+        // The connection goes from disk either way — a credential store that
+        // refuses the delete must not block that. But it is not nothing: the
+        // user believes the password is gone and it is still in their keyring,
+        // so say so somewhere rather than dropping the error on the floor.
+        if let Err(e) = cfg.delete_password() {
+            tracing::warn!(
+                "Removed '{}' but its saved password could not be deleted: {e}",
+                cfg.name
+            );
+        }
         core.manager.disconnect(id).await;
     }
     if let Err(e) = save_connections(&core.connections) {

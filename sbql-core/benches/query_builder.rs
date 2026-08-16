@@ -26,7 +26,7 @@ fn bench_apply_order(c: &mut Criterion) {
                 black_box(SortDirection::Ascending),
                 black_box(DbBackend::Postgres),
             )
-        })
+        });
     });
 
     group.bench_function("sqlite_desc", |b| {
@@ -37,7 +37,7 @@ fn bench_apply_order(c: &mut Criterion) {
                 black_box(SortDirection::Descending),
                 black_box(DbBackend::Sqlite),
             )
-        })
+        });
     });
 
     group.finish();
@@ -56,7 +56,7 @@ fn bench_clear_order(c: &mut Criterion) {
                 black_box("SELECT * FROM users ORDER BY name ASC"),
                 black_box(DbBackend::Postgres),
             )
-        })
+        });
     });
 
     group.bench_function("without_order_by", |b| {
@@ -65,7 +65,7 @@ fn bench_clear_order(c: &mut Criterion) {
                 black_box("SELECT * FROM users WHERE active = true"),
                 black_box(DbBackend::Postgres),
             )
-        })
+        });
     });
 
     group.finish();
@@ -93,7 +93,7 @@ fn bench_apply_filter(c: &mut Criterion) {
                 black_box(None),
                 black_box(DbBackend::Postgres),
             )
-        })
+        });
     });
 
     group.bench_function("global_pg", |b| {
@@ -104,7 +104,7 @@ fn bench_apply_filter(c: &mut Criterion) {
                 black_box(Some(cols.as_slice())),
                 black_box(DbBackend::Postgres),
             )
-        })
+        });
     });
 
     group.bench_function("column_specific_sqlite", |b| {
@@ -115,7 +115,7 @@ fn bench_apply_filter(c: &mut Criterion) {
                 black_box(None),
                 black_box(DbBackend::Sqlite),
             )
-        })
+        });
     });
 
     group.finish();
@@ -129,15 +129,15 @@ fn bench_build_paginated_sql(c: &mut Criterion) {
     let mut group = c.benchmark_group("build_paginated_sql");
 
     group.bench_function("page_0", |b| {
-        b.iter(|| build_paginated_sql(black_box("SELECT * FROM users"), black_box(0)))
+        b.iter(|| build_paginated_sql(black_box("SELECT * FROM users"), black_box(0)));
     });
 
     group.bench_function("page_10", |b| {
-        b.iter(|| build_paginated_sql(black_box("SELECT * FROM users"), black_box(10)))
+        b.iter(|| build_paginated_sql(black_box("SELECT * FROM users"), black_box(10)));
     });
 
     group.bench_function("already_limited", |b| {
-        b.iter(|| build_paginated_sql(black_box("SELECT * FROM users LIMIT 50"), black_box(0)))
+        b.iter(|| build_paginated_sql(black_box("SELECT * FROM users LIMIT 50"), black_box(0)));
     });
 
     group.finish();
@@ -151,11 +151,11 @@ fn bench_tokenize_redis_command(c: &mut Criterion) {
     let mut group = c.benchmark_group("tokenize_redis_command");
 
     group.bench_function("simple", |b| {
-        b.iter(|| tokenize_redis_command(black_box("GET mykey")))
+        b.iter(|| tokenize_redis_command(black_box("GET mykey")));
     });
 
     group.bench_function("quoted", |b| {
-        b.iter(|| tokenize_redis_command(black_box(r#"SET mykey "hello world""#)))
+        b.iter(|| tokenize_redis_command(black_box(r#"SET mykey "hello world""#)));
     });
 
     group.bench_function("complex", |b| {
@@ -163,7 +163,7 @@ fn bench_tokenize_redis_command(c: &mut Criterion) {
             tokenize_redis_command(black_box(
                 r#"HSET user:1000 name "John Doe" email "john@example.com" age 30"#,
             ))
-        })
+        });
     });
 
     group.finish();
@@ -178,12 +178,12 @@ fn bench_redis_value_to_query_result(c: &mut Criterion) {
 
     group.bench_function("simple_string", |b| {
         let val = redis::Value::SimpleString("OK".into());
-        b.iter(|| redis_value_to_query_result(black_box(&val)))
+        b.iter(|| redis_value_to_query_result(black_box(&val)));
     });
 
     group.bench_function("int", |b| {
         let val = redis::Value::Int(42);
-        b.iter(|| redis_value_to_query_result(black_box(&val)))
+        b.iter(|| redis_value_to_query_result(black_box(&val)));
     });
 
     group.bench_function("hash_array", |b| {
@@ -193,7 +193,7 @@ fn bench_redis_value_to_query_result(c: &mut Criterion) {
             redis::Value::BulkString(b"field2".to_vec()),
             redis::Value::BulkString(b"value2".to_vec()),
         ]);
-        b.iter(|| redis_value_to_query_result(black_box(&val)))
+        b.iter(|| redis_value_to_query_result(black_box(&val)));
     });
 
     group.bench_function("large_array", |b| {
@@ -202,12 +202,12 @@ fn bench_redis_value_to_query_result(c: &mut Criterion) {
                 .map(|i| redis::Value::BulkString(format!("item-{i}").into_bytes()))
                 .collect(),
         );
-        b.iter(|| redis_value_to_query_result(black_box(&val)))
+        b.iter(|| redis_value_to_query_result(black_box(&val)));
     });
 
     group.bench_function("nil", |b| {
         let val = redis::Value::Nil;
-        b.iter(|| redis_value_to_query_result(black_box(&val)))
+        b.iter(|| redis_value_to_query_result(black_box(&val)));
     });
 
     group.finish();
