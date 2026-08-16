@@ -34,8 +34,8 @@ help:
 	@printf "  make install-macos        Build and install macOS app to /Applications\n"
 	@printf "  make uninstall-macos      Remove macOS app from /Applications\n"
 	@printf "\nSupply chain:\n\n"
-	@printf "  make audit                Audit dependencies (advisories/licenses/bans/sources)\n"
-	@printf "  make audit-install        Install cargo-deny CLI\n"
+	@printf "  make audit                Audit dependencies (advisories/licenses/bans/sources + unused)\n"
+	@printf "  make audit-install        Install cargo-deny and cargo-machete CLIs\n"
 	@printf "\nPerformance:\n\n"
 	@printf "  make bench                Run Criterion benchmarks (no Docker)\n"
 	@printf "  make bench-pg             Run PostgreSQL integration benchmarks (Docker)\n"
@@ -55,9 +55,12 @@ help:
 audit:
 	@command -v cargo-deny >/dev/null || (echo "cargo-deny not found. Run: make audit-install" && exit 1)
 	cargo deny check advisories licenses bans sources
+	@command -v cargo-machete >/dev/null || (echo "cargo-machete not found. Run: make audit-install" && exit 1)
+	cargo machete
 
 audit-install:
 	cargo install cargo-deny --locked
+	cargo install cargo-machete --locked
 
 release-plz-install:
 	cargo install release-plz --locked
