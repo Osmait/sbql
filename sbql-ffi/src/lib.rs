@@ -144,7 +144,7 @@ pub enum SbqlFfiError {
 // Convenience constructors
 impl SbqlFfiError {
     fn core(msg: impl Into<String>) -> Self {
-        SbqlFfiError::Core { msg: msg.into() }
+        Self::Core { msg: msg.into() }
     }
 }
 
@@ -217,7 +217,19 @@ impl SbqlEngine {
         let core_config: sbql_core::ConnectionConfig = config.try_into()?;
         if let Some(ref ssh_pass) = ssh_password {
             if let Err(e) = core_config.save_ssh_password(ssh_pass) {
-                eprintln!("SSH keyring save failed: {e}");
+                // This used to be an `eprintln!`, which meant nobody ever saw
+                // it: this crate is linked into a SwiftUI app, whose stderr
+                // goes to a Console log no user opens. `tracing` is where the
+                // rest of the stack already reports a refused keyring write
+                // (see `handlers::connection::save`), so it is at least
+                // routable — the macOS side still has to install a subscriber.
+                //
+                // Worth knowing when reading this: unlike the database
+                // password, which `Core` keeps in `password_cache` for the
+                // session, a rejected SSH password is simply gone. The next
+                // `connect` reads an empty one back from the keyring and the
+                // tunnel fails as though the user typed it wrong.
+                tracing::warn!("SSH keyring save failed for '{}': {e}", core_config.name);
             }
         }
         let mut core = self.core.lock().await;
@@ -700,7 +712,7 @@ mod tests {
     fn extract_connection_list_with_list() {
         let config =
             sbql_core::ConnectionConfig::new_postgres("test", "localhost", 5432, "user", "db");
-        let events = vec![sbql_core::CoreEvent::ConnectionList(vec![config.clone()])];
+        let events = vec![sbql_core::CoreEvent::ConnectionList(vec![config])];
         let result = extract_connection_list(events).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].name, "test");
@@ -922,8 +934,12 @@ mod tests {
         // Disconnect
         engine.disconnect(id.clone()).await.unwrap();
 
-        // Clean up: delete the connection
-        let _ = engine.delete_connection(id).await;
+        // Clean up: delete the connection. Best-effort on purpose — the
+        // assertions above are what this test is about, and the scratch config
+        // dir goes away with the process either way. `drop` rather than
+        // `let _ =` so the discard is deliberate rather than a `Result` that
+        // slipped through unread.
+        drop(engine.delete_connection(id).await);
         tokio::task::spawn_blocking(move || drop(engine))
             .await
             .unwrap();

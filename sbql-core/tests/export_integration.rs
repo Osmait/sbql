@@ -162,18 +162,15 @@ async fn test_export_sql_insert() {
     for line in &lines {
         assert!(
             line.starts_with("INSERT INTO"),
-            "Each line should be an INSERT statement, got: {}",
-            line
+            "Each line should be an INSERT statement, got: {line}"
         );
         assert!(
             line.ends_with(';'),
-            "Each INSERT should end with semicolon, got: {}",
-            line
+            "Each INSERT should end with semicolon, got: {line}"
         );
         assert!(
             line.contains("\"users\""),
-            "INSERT should reference table 'users', got: {}",
-            line
+            "INSERT should reference table 'users', got: {line}"
         );
     }
 
@@ -239,22 +236,19 @@ async fn test_export_csv_special_chars() {
     // Values with commas should be quoted
     assert!(
         content.contains("\"has,comma\""),
-        "Comma value should be quoted in CSV: {}",
-        content
+        "Comma value should be quoted in CSV: {content}"
     );
 
     // Values with double quotes should be escaped (CSV escapes " as "")
     assert!(
         content.contains("\"has\"\"quote\""),
-        "Quote value should be escaped in CSV: {}",
-        content
+        "Quote value should be escaped in CSV: {content}"
     );
 
     // Values with newlines should be quoted
     assert!(
         content.contains("\"has\nnewline\""),
-        "Newline value should be quoted in CSV: {}",
-        content
+        "Newline value should be quoted in CSV: {content}"
     );
 }
 
@@ -295,8 +289,7 @@ async fn test_export_empty_table() {
         let non_empty_lines: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
         assert!(
             non_empty_lines.is_empty(),
-            "Expected no data lines for empty table CSV, got: {:?}",
-            non_empty_lines
+            "Expected no data lines for empty table CSV, got: {non_empty_lines:?}"
         );
     }
 
@@ -321,8 +314,7 @@ async fn test_export_empty_table() {
         let trimmed = content.trim();
         assert!(
             trimmed.is_empty() || trimmed == "[]" || trimmed == "]",
-            "Expected empty or minimal JSON for empty table, got: '{}'",
-            trimmed
+            "Expected empty or minimal JSON for empty table, got: '{trimmed}'"
         );
     }
 
@@ -344,8 +336,7 @@ async fn test_export_empty_table() {
         let content = fs::read_to_string(path).unwrap();
         assert!(
             content.trim().is_empty(),
-            "Expected no INSERT statements for empty table, got: '{}'",
-            content
+            "Expected no INSERT statements for empty table, got: '{content}'"
         );
     }
 }
@@ -388,8 +379,7 @@ async fn test_export_large_dataset() {
     // Header (1) + data rows (500) = 501
     assert_eq!(
         line_count, 501,
-        "Expected 501 lines (1 header + 500 rows), got: {}",
-        line_count
+        "Expected 501 lines (1 header + 500 rows), got: {line_count}"
     );
 
     // Spot-check first and last data values
