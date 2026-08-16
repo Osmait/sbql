@@ -33,12 +33,13 @@ uniffi = { version = "0.29", features = ["tokio", "cli"] }
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
-# Diagnostics have nowhere else to go. Printing from here is worse than
-# useless: the crate is linked into a SwiftUI app, so stderr lands in a Console
-# log no user opens, and the failure reads as silence. `tracing` at least gives
-# the host something it can subscribe to — which the macOS app does not do yet,
-# so a warning emitted here is still dropped until it installs a subscriber.
-tracing.workspace = true
+
+# No `tracing` here, deliberately. It was added to route the swallowed SSH
+# keyring failure somewhere other than a stderr no SwiftUI user ever sees —
+# and then that write moved into `handlers::connection::save`, where it belongs
+# and where it already becomes a `Severity::Warning`. This crate now emits no
+# diagnostics of its own. Re-add it if that changes; do not re-add it "because
+# a bridge should log".
 
 [dev-dependencies]
 # Tests build a real `SbqlEngine`, which persists connections. Without a temp
