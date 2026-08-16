@@ -80,6 +80,18 @@ jobs:
           # being clean on advisories.
           command: check advisories licenses bans sources
 
+      # Unused dependencies still cost build time, lockfile churn, and audit
+      # surface. Three had accumulated before this ran. cargo-machete works by
+      # looking for the crate name in the source, so a dependency used only
+      # through a macro expansion can false-positive — the fix for that is an
+      # `ignored` entry in the crate's `[package.metadata.cargo-machete]`, not
+      # deleting this step.
+      - name: Install cargo-machete
+        run: cargo install cargo-machete --locked
+
+      - name: cargo machete
+        run: cargo machete
+
   test:
     name: cargo test
     runs-on: ubuntu-latest
