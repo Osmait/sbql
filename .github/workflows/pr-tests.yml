@@ -8,6 +8,31 @@ permissions:
   contents: read
 
 jobs:
+  # Supply-chain audit: RustSec advisories, licence compatibility, banned and
+  # duplicated crates, and where the sources come from. Config and the reason
+  # behind every exception live in `deny.toml`; `make audit` runs the same
+  # thing locally.
+  #
+  # Deliberately none of the setup the `test` job needs: cargo-deny resolves
+  # the graph from Cargo.lock and never invokes rustc, so there is nothing to
+  # link against (no libdbus for keyring) and nothing to cache (no
+  # Swatinem/rust-cache). The action ships a prebuilt binary, so this job
+  # finishes in seconds while `test` is still compiling.
+  cargo-deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          # All four checks, so a new dependency cannot slip past by only
+          # being clean on advisories.
+          command: check advisories licenses bans sources
+
   test:
     name: cargo test
     runs-on: ubuntu-latest
