@@ -11,6 +11,12 @@ version = "0.3.1"
 edition = "2021"
 authors = ["sbql contributors"]
 license = "MIT"
+# Not a preference — this is the floor the dependency graph already imposes.
+# `cargo metadata` reports 1.91.1 as the highest `rust-version` among resolved
+# dependencies (the aws-smithy crates behind aws-sdk-dynamodb). Declaring it
+# means a too-old toolchain fails with "requires rustc 1.91" instead of a wall
+# of errors from inside someone else's crate.
+rust-version = "1.91"
 
 # Keeping panics out of a full-screen terminal app, mechanically.
 #
@@ -23,10 +29,60 @@ license = "MIT"
 # Not enabled: `indexing_slicing`. `x[i]` panics as readily as `unwrap` and
 # reads as though it cannot, but the diagram canvas indexes heavily and would
 # have to be reworked first.
+#
+# The rest of the lint policy, and the lints deliberately *not* adopted, are
+# documented in CODE_STYLE.md.
 [workspace.lints.clippy]
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"
+
+# Printing and the alternate screen.
+#
+# This is a correctness lint here, not a tidiness one. While the TUI holds the
+# alternate screen the terminal is ours; anything written to stdout lands in
+# the middle of the render and stays there until a full redraw. `main.rs` is
+# the one place allowed to print, because it runs before the screen is taken
+# and after it is given back — it opts out locally.
+print_stdout = "warn"
+print_stderr = "warn"
+dbg_macro = "warn"
+
+# Cost. Each of these has a strictly cheaper spelling with identical meaning:
+# `clone_from` reuses the destination's allocation, `write!` skips a throwaway
+# `String` per push, and inline captures skip the argument-order mistake.
+assigning_clones = "warn"
+format_push_string = "warn"
+implicit_clone = "warn"
+redundant_clone = "warn"
+uninlined_format_args = "warn"
+
+# Readability. Same set as jj and ratatui use; none of these change behaviour.
+manual_let_else = "warn"
+semicolon_if_nothing_returned = "warn"
+single_char_pattern = "warn"
+unnested_or_patterns = "warn"
+use_self = "warn"
+
+[workspace.lints.rust]
+# There is currently no `unsafe` anywhere in the workspace, so this costs
+# nothing today and only gets more expensive to adopt later. `warn` rather than
+# `forbid` at the workspace level because sbql-ffi cannot honour it: uniffi's
+# proc macros expand to `unsafe` code. That crate opts out at its crate root,
+# with a comment, so the exemption is visible rather than global.
+unsafe_code = "warn"
+# `pub` should mean "part of this crate's contract". Anything reachable only
+# from inside is `pub(crate)`, which is what the compiler can then rely on.
+unreachable_pub = "warn"
+# `let _ = guard;` drops immediately, which for a lock or a tempdir is almost
+# never what was meant.
+let_underscore_drop = "warn"
+
+[workspace.lints.rustdoc]
+# The docs lean heavily on intra-doc links (`[`CoreEvent::Error`]`). A link
+# that stops resolving after a rename is a silently broken doc, so it fails the
+# build rather than warning.
+broken_intra_doc_links = "deny"
 
 [workspace.dependencies]
 # Local workspace crate.
@@ -105,3 +161,36 @@ async-trait = "0.1"
 # Benchmarking & profiling
 criterion = { version = "0.5", features = ["async_tokio"] }
 dhat = "0.3"
+
+# ---------------------------------------------------------------------------
+# Profiles
+# ---------------------------------------------------------------------------
+
+# `release-binaries.yml` ships this profile to users, and until now it was
+# cargo's bare default. Thin LTO plus a single codegen unit is the conservative
+# pairing (what helix ships); `fat` LTO buys little here and costs minutes of
+# CI on every tag.
+#
+# Not set: `panic = "abort"`. The panic hook in `sbql-tui::tui` that restores
+# the terminal does still run under abort, but unwinding is what lets a panic
+# in one worker task avoid taking the process — and a garbled terminal is
+# exactly the outcome we are trying to avoid.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+# Benchmarks are only comparable against themselves if codegen is stable
+# between runs.
+[profile.bench]
+lto = "thin"
+codegen-units = 1
+
+# `make flamegraph` and `make profile-memory` need symbols, which `release`
+# strips. Inheriting from `release` keeps the optimisation decisions identical,
+# so what is profiled is what ships.
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = "full"
+lto = false
