@@ -41,8 +41,12 @@ UI concept is wrong**, however convenient it looks.
 - **Never print to stdout/stderr in library or TUI code.** Use `tracing`. While
   the alternate screen is held, a `println!` lands in the middle of the render
   and stays there. `sbql-tui/src/main.rs` is the only legitimate exception.
-- **Tests that touch config must set `CONFIG_DIR_ENV` to a temp dir.** Without
-  it they overwrite the developer's real `~/.config/sbql/connections.toml`.
+- **Tests that touch config must set `SBQL_CONFIG_DIR` to a temp dir** (the
+  constant is `sbql_core::CONFIG_DIR_ENV`). Without it they overwrite the
+  developer's real `~/.config/sbql/connections.toml`.
+- **Never put a secret where it can be printed.** Types holding a password get
+  a redacting manual `Debug`, not `#[derive(Debug)]`, and log lines must not
+  include a value whose `Debug` you have not read. See `CODE_STYLE.md` §2.
 - **Container-backed test suites must run serially.** In parallel they are flaky
   in a way that reads as a product bug.
 - **Do not add `--all-targets` to the CI test step.** It runs the benchmarks,
@@ -55,11 +59,17 @@ UI concept is wrong**, however convenient it looks.
 
 ```sh
 cargo fmt --all
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 cargo test --workspace --lib --bins --tests
 cargo check --workspace --all-targets                  # benches and examples
-cargo test -p sbql-core --no-default-features --lib    # the keyring-free path
+make audit                                             # cargo-deny
 ```
+
+The `cargo doc` step is not optional: `rustdoc::broken_intra_doc_links` is
+`deny`, and only rustdoc evaluates it — clippy will not catch a doc link broken
+by a rename.
 
 `make help` lists the release, benchmark, and macOS targets.
 
