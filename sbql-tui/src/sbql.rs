@@ -6,9 +6,9 @@
 //! its own.
 //!
 //! The loop is the controller in the usual TUI split: an event arrives, a pure
-//! handler turns it into an [`Action`], the reducer applies it, and the view
-//! draws the result. Nothing here decides *what* a key means or *how* anything
-//! looks.
+//! handler turns it into an [`Action`](action::Action), the reducer applies it,
+//! and the view draws the result. Nothing here decides *what* a key means or
+//! *how* anything looks.
 
 use sbql_core::{CoreCommand, CoreEvent};
 use tokio::sync::mpsc;
