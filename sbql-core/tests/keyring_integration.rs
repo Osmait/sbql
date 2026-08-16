@@ -64,6 +64,43 @@ fn ssh_password_roundtrips_through_the_os_store() {
         .expect("saving the SSH password failed");
 
     assert_eq!(cfg.load_ssh_password(), FIXTURE_SSH_PASSWORD);
+
+    // Leaving this behind is the bug this test used to demonstrate: before
+    // `delete_ssh_password` existed, every run of this test added an entry to
+    // the developer's real keyring that nothing would ever remove.
+    cfg.delete_ssh_password()
+        .expect("deleting the SSH password failed");
+
+    assert_eq!(
+        cfg.load_ssh_password(),
+        "",
+        "SSH password still readable after delete"
+    );
+}
+
+/// Clearing the field has to reach the real store too, not just the fake one
+/// the unit tests use. This is the end of bug 3: `save_ssh_password("")`
+/// returned `Ok(())` without touching the store, so the old secret stayed and
+/// `load_ssh_password` kept handing it to the next tunnel.
+#[test]
+#[ignore = "requires a real OS credential store"]
+fn clearing_an_ssh_password_removes_it_from_the_os_store() {
+    let mut cfg =
+        ConnectionConfig::new_postgres("keyring-ssh-clear", "localhost", 5432, "tester", "db");
+    cfg.ssh_enabled = true;
+
+    cfg.save_ssh_password(FIXTURE_SSH_PASSWORD)
+        .expect("saving the SSH password failed");
+    assert_eq!(cfg.load_ssh_password(), FIXTURE_SSH_PASSWORD);
+
+    cfg.save_ssh_password("")
+        .expect("clearing the SSH password failed");
+
+    assert_eq!(cfg.load_ssh_password(), "");
+    // And clearing an already-cleared one is not a failure, which is what
+    // every save of a connection with no tunnel does.
+    cfg.save_ssh_password("")
+        .expect("clearing an absent SSH password should be a no-op");
 }
 
 /// With the keyring switched off, saving a password is a silent no-op rather
@@ -86,6 +123,8 @@ fn opting_out_makes_the_keyring_a_no_op() {
     }
 
     cfg.delete_password().expect("delete should be a no-op");
+    cfg.delete_ssh_password()
+        .expect("SSH delete should be a no-op");
     assert_eq!(cfg.load_ssh_password(), "");
 
     std::env::remove_var(sbql_core::NO_KEYRING_ENV);

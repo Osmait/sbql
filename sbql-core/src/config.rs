@@ -63,10 +63,13 @@ mod store {
     /// process-wide flag would leak into whatever else is running.
     #[cfg(test)]
     pub(crate) mod fault {
-        use std::cell::Cell;
+        use std::cell::{Cell, RefCell};
+        use std::collections::HashMap;
 
         thread_local! {
             static FORCED: Cell<bool> = const { Cell::new(false) };
+            static FAKE: RefCell<Option<HashMap<(String, String), String>>> =
+                const { RefCell::new(None) };
         }
 
         /// Make every store operation on this thread fail until dropped.
@@ -87,6 +90,66 @@ mod store {
 
         pub(super) fn active() -> bool {
             FORCED.with(|f| f.get())
+        }
+
+        /// An in-memory stand-in for the OS credential store, so a test can
+        /// assert *what ended up in the store* without writing to the
+        /// developer's real keyring.
+        ///
+        /// [`ForcedFailure`] can only prove that a refused write is reported;
+        /// the three SSH credential bugs were all about a write or a delete
+        /// that succeeded, or failed to happen at all, on a working store.
+        /// Testing those needs a store that works and can be read back.
+        ///
+        /// Thread-local, like `ForcedFailure`, so the suite stays parallel-safe
+        /// — and it deliberately outranks `SBQL_NO_KEYRING`. That variable is
+        /// process-wide and the handler tests set it to keep themselves off the
+        /// machine's store; a test that is *about* what reaches the store needs
+        /// a store to reach.
+        pub(crate) struct FakeStore;
+
+        impl FakeStore {
+            pub(crate) fn new() -> Self {
+                FAKE.with(|f| *f.borrow_mut() = Some(HashMap::new()));
+                Self
+            }
+        }
+
+        impl Drop for FakeStore {
+            fn drop(&mut self) {
+                FAKE.with(|f| *f.borrow_mut() = None);
+            }
+        }
+
+        pub(super) fn installed() -> bool {
+            FAKE.with(|f| f.borrow().is_some())
+        }
+
+        pub(super) fn set(service: &str, user: &str, password: &str) {
+            FAKE.with(|f| {
+                if let Some(map) = f.borrow_mut().as_mut() {
+                    map.insert((service.to_owned(), user.to_owned()), password.to_owned());
+                }
+            });
+        }
+
+        pub(super) fn get(service: &str, user: &str) -> Option<String> {
+            FAKE.with(|f| {
+                f.borrow()
+                    .as_ref()
+                    .and_then(|m| m.get(&(service.to_owned(), user.to_owned())).cloned())
+            })
+        }
+
+        /// True when something was actually removed, so the caller can report
+        /// "nothing stored" exactly as the real backend does.
+        pub(super) fn delete(service: &str, user: &str) -> bool {
+            FAKE.with(|f| {
+                f.borrow_mut()
+                    .as_mut()
+                    .and_then(|m| m.remove(&(service.to_owned(), user.to_owned())))
+                    .is_some()
+            })
         }
     }
 
@@ -151,9 +214,15 @@ mod store {
             })
         }
 
-        pub(super) fn delete(service: &str, user: &str) -> Result<()> {
+        pub(super) fn delete(service: &str, user: &str, label: &str) -> Result<()> {
             let entry = Entry::new(service, user).map_err(map_err)?;
-            entry.delete_credential().map_err(map_err)
+            entry.delete_credential().map_err(|e| match e {
+                // Distinguished from a refused delete the same way `get` does
+                // it: "there was nothing to remove" and "the store would not
+                // remove it" call for opposite reactions from the caller.
+                keyring::Error::NoEntry => SbqlError::PasswordNotFound(label.to_string()),
+                other => map_err(other),
+            })
         }
     }
 
@@ -171,7 +240,7 @@ mod store {
             Err(SbqlError::PasswordNotFound(label.to_string()))
         }
 
-        pub(super) fn delete(_service: &str, _user: &str) -> Result<()> {
+        pub(super) fn delete(_service: &str, _user: &str, _label: &str) -> Result<()> {
             Ok(())
         }
     }
@@ -179,6 +248,12 @@ mod store {
     pub(super) fn set(service: &str, user: &str, password: &str) -> Result<()> {
         if let Some(e) = forced_failure() {
             return Err(e);
+        }
+        // Ahead of the opt-out check on purpose — see `fault::FakeStore`.
+        #[cfg(test)]
+        if fault::installed() {
+            fault::set(service, user, password);
+            return Ok(());
         }
         if opted_out_of_keyring() {
             return Ok(());
@@ -190,20 +265,33 @@ mod store {
         if let Some(e) = forced_failure() {
             return Err(e);
         }
+        #[cfg(test)]
+        if fault::installed() {
+            return fault::get(service, user)
+                .ok_or_else(|| SbqlError::PasswordNotFound(label.to_string()));
+        }
         if opted_out_of_keyring() {
             return Err(SbqlError::PasswordNotFound(label.to_string()));
         }
         backend::get(service, user, label)
     }
 
-    pub(super) fn delete(service: &str, user: &str) -> Result<()> {
+    pub(super) fn delete(service: &str, user: &str, label: &str) -> Result<()> {
         if let Some(e) = forced_failure() {
             return Err(e);
+        }
+        #[cfg(test)]
+        if fault::installed() {
+            return if fault::delete(service, user) {
+                Ok(())
+            } else {
+                Err(SbqlError::PasswordNotFound(label.to_string()))
+            };
         }
         if opted_out_of_keyring() {
             return Ok(());
         }
-        backend::delete(service, user)
+        backend::delete(service, user, label)
     }
 }
 
@@ -581,14 +669,35 @@ impl ConnectionConfig {
     /// The store refused the delete. Nothing the caller can retry usefully, but
     /// worth reporting: the connection is gone and its password is not, so it
     /// will sit in the user's keyring until they remove it by hand.
+    /// [`SbqlError::PasswordNotFound`] means there was nothing stored in the
+    /// first place, which is the end state the caller wanted anyway.
     pub fn delete_password(&self) -> Result<()> {
         if self.backend == DbBackend::Sqlite {
             return Ok(());
         }
-        store::delete(store::SERVICE, &self.keyring_user())
+        store::delete(store::SERVICE, &self.keyring_user(), &self.name)
     }
 
-    /// Store the SSH password in the OS keyring.
+    /// Keyring key for this connection's SSH password. A different service to
+    /// the database password, so the two never collide under one id.
+    fn ssh_keyring_user(&self) -> String {
+        self.id.to_string()
+    }
+
+    /// Store the SSH password in the OS keyring. An empty password **deletes**
+    /// the stored one.
+    ///
+    /// Deleting on empty is deliberate, and it is where this diverges from
+    /// [`ConnectionConfig::save_password`]. That one returns early on an empty
+    /// password for Redis, DynamoDB and MongoDB because those genuinely connect
+    /// without one, so "empty" there means "this backend needs no password" and
+    /// there is nothing to store. SSH has no such case: a blank SSH password
+    /// field can only mean "stop using that password". Returning `Ok(())`
+    /// without touching the store — which is what this used to do — left the
+    /// old secret in the keyring *and* left [`load_ssh_password`] handing it to
+    /// the next tunnel, so clearing the field cleared nothing.
+    ///
+    /// [`load_ssh_password`]: ConnectionConfig::load_ssh_password
     ///
     /// # Errors
     ///
@@ -597,9 +706,26 @@ impl ConnectionConfig {
     /// and the user will be asked for it next time they connect.
     pub fn save_ssh_password(&self, password: &str) -> Result<()> {
         if password.is_empty() {
-            return Ok(());
+            return self.delete_ssh_password();
         }
-        store::set(store::SSH_SERVICE, &self.id.to_string(), password)
+        store::set(store::SSH_SERVICE, &self.ssh_keyring_user(), password)
+    }
+
+    /// Delete the SSH password from the OS keyring.
+    ///
+    /// # Errors
+    ///
+    /// The store refused the delete. As with
+    /// [`delete_password`](ConnectionConfig::delete_password) there is nothing
+    /// useful to retry, but it is worth reporting: the connection is gone and
+    /// its SSH password is not.
+    pub fn delete_ssh_password(&self) -> Result<()> {
+        match store::delete(store::SSH_SERVICE, &self.ssh_keyring_user(), &self.name) {
+            // Nothing stored is the desired end state, not a failure. Callers
+            // clear a field that was already empty all the time.
+            Err(SbqlError::PasswordNotFound(_)) => Ok(()),
+            other => other,
+        }
     }
 
     /// Retrieve the SSH password from the OS keyring.
@@ -609,7 +735,7 @@ impl ConnectionConfig {
     /// auth failure that is really an unreadable keyring is diagnosable
     /// instead of looking like a wrong password.
     pub fn load_ssh_password(&self) -> String {
-        match store::get(store::SSH_SERVICE, &self.id.to_string(), &self.name) {
+        match store::get(store::SSH_SERVICE, &self.ssh_keyring_user(), &self.name) {
             Ok(pw) => pw,
             Err(SbqlError::PasswordNotFound(_)) => String::new(),
             Err(e) => {
@@ -959,6 +1085,63 @@ database = "mydb"
         assert_eq!(conn.load_password().unwrap(), "");
         // delete_password should succeed (no-op)
         assert!(conn.delete_password().is_ok());
+    }
+
+    /// Deliberately spelled so no scanner mistakes it for a real credential.
+    const FIXTURE_SSH_PASSWORD: &str = "fixture-ssh-value-not-a-credential";
+
+    /// Bug 3. `save_ssh_password("")` used to return `Ok(())` without touching
+    /// the store, so blanking the field left the old secret in the keyring and
+    /// `load_ssh_password` kept handing it to the next tunnel. Clearing the
+    /// field has exactly one possible meaning, and this is it.
+    #[test]
+    fn clearing_an_ssh_password_removes_it_from_the_store() {
+        let _store = store_fault::FakeStore::new();
+        let cfg = ConnectionConfig::new_postgres("tunnelled", "localhost", 5432, "u", "db");
+
+        cfg.save_ssh_password(FIXTURE_SSH_PASSWORD).unwrap();
+        assert_eq!(cfg.load_ssh_password(), FIXTURE_SSH_PASSWORD);
+
+        cfg.save_ssh_password("").unwrap();
+
+        assert_eq!(
+            cfg.load_ssh_password(),
+            "",
+            "the cleared password is still readable, so the tunnel would still use it"
+        );
+    }
+
+    /// Clearing a field that was already blank is the overwhelmingly common
+    /// case — every save of a connection with no tunnel. It must not report a
+    /// failure for reaching the state the caller asked for.
+    #[test]
+    fn clearing_an_ssh_password_that_was_never_set_is_not_a_failure() {
+        let _store = store_fault::FakeStore::new();
+        let cfg = ConnectionConfig::new_postgres("no-tunnel", "localhost", 5432, "u", "db");
+
+        assert!(cfg.save_ssh_password("").is_ok());
+        assert!(cfg.delete_ssh_password().is_ok());
+    }
+
+    /// The two secrets share a connection id and are told apart only by their
+    /// keyring *service*. Getting that wrong would make clearing one silently
+    /// destroy the other.
+    #[test]
+    fn deleting_an_ssh_password_leaves_the_database_password_alone() {
+        let _store = store_fault::FakeStore::new();
+        let cfg = ConnectionConfig::new_postgres("both", "localhost", 5432, "u", "db");
+
+        cfg.save_password("fixture-db-value-not-a-credential")
+            .unwrap();
+        cfg.save_ssh_password(FIXTURE_SSH_PASSWORD).unwrap();
+
+        cfg.delete_ssh_password().unwrap();
+
+        assert_eq!(
+            cfg.load_password().unwrap(),
+            "fixture-db-value-not-a-credential"
+        );
+        assert_eq!(cfg.load_ssh_password(), "");
     }
 
     #[test]

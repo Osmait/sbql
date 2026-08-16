@@ -100,8 +100,9 @@ logging *what* was sent, because `CoreCommand::SaveConnection` carries a
 password. "Log the thing you were doing" is a good default that is wrong here.
 
 **[review]** A secret written to the OS credential store must be written on the
-same side of validation as the config it belongs to, and deleted with it. See
-§11 for the outstanding work here.
+same side of validation as the config it belongs to, and deleted with it. Both
+halves were violated by the SSH password until recently; §14.2 records what that
+cost and how it was closed.
 
 ---
 
@@ -380,6 +381,31 @@ flattened away by `to_string()`.``
 Integration tests that need a database live in `sbql-core/tests/` and use
 testcontainers.
 
+### Code whose failure mode is silent acceptance needs a live test
+
+**[review]** Some code cannot be tested by mocking, because the broken version
+and the working version both compile and both pass every other test.
+`SshHandler::check_server_key` is the case that forced this rule: stubbed to
+`Ok(true)` it accepts any host key, passes the entire suite, and hands the SSH
+password and all database traffic to whoever answers on the wire. Only a live
+handshake tells the two apart.
+
+`tunnel.rs` therefore carries an `#[ignore]`d test that spawns a real `sshd`,
+learns a host key, restarts the server under a *different* key, and asserts the
+reconnection is refused. Run it after any `russh` bump — the doc comment has the
+invocation.
+
+**[review]** **A test like that needs a negative control, and you should run
+it.** Deliberately break the thing being protected and confirm the test fails;
+otherwise you have verified that the test passes, not that it detects anything.
+Note that neutering the `KeyChanged` arm makes this particular test *hang*
+rather than fail an assertion — decisive, but slower than it should be. Do not
+mistake a long-running test here for a passing one.
+
+**[review]** A test that needs `HOME` redirected must **assert** that it was,
+not call `set_var`. Learning a host key and then deliberately invalidating it
+must never be able to reach a developer's real `~/.ssh/known_hosts`.
+
 **Two hazards, both learned the hard way:**
 
 - Tests that touch config **must** point `SBQL_CONFIG_DIR` at a temp directory.
@@ -463,19 +489,24 @@ covers exactly the code we wrote, which is what we wanted.
 
 Tracked here rather than in comments scattered across the tree.
 
-1. **`russh` 0.48 is vulnerable.** RUSTSEC-2026-0154 and RUSTSEC-2026-0153:
-   unbounded 32-bit allocation and unchecked `CryptoVec` growth, so a hostile
-   SSH server can OOM the client. Fixed in 0.60.3, which is a semver-major bump
-   that will touch `sbql-core/src/tunnel.rs`. This is the highest-priority item
-   in this file.
-2. **SSH credentials are mismanaged in three related ways.** `save_ssh_password`
-   is called before `config.validate()`, so an invalid config can orphan a
-   secret in the OS keychain under an id that never reaches `connections.toml`;
-   there is no `delete_ssh_password` at all, so the secret outlives its
-   connection permanently; and `save_ssh_password("")` returns `Ok(())` without
-   touching the store, so clearing the field does not clear it. Moving the write
-   into `handlers::connection::save`, beside the database password, addresses
-   the first and the severity gap together.
+1. ~~**`russh` 0.48 is vulnerable.**~~ **Fixed** by the bump to 0.62, which also
+   dropped `russh-keys` (folded into `russh::keys` upstream) and `async-trait`.
+   Two things from that port are worth keeping in mind rather than forgetting:
+   `authenticate_publickey` now takes a `PrivateKeyWithHashAlg`, and passing
+   `None` for the hash means ssh-rsa/SHA-1, which OpenSSH 8.8+ rejects by
+   default — it surfaces to the user as "wrong key". And `check_server_key` is
+   verified by a live `#[ignore]`d test in `tunnel.rs`; see §11.
+2. ~~**SSH credentials are mismanaged in three related ways.**~~ **Fixed.** The
+   write moved into `handlers::connection::save` (carried there by a new
+   `ssh_password` field on `CoreCommand::SaveConnection`), so it lands beside
+   the database password on the far side of `validate()` and gets the same
+   `Severity::Warning` when the store refuses it. `delete_ssh_password` now
+   exists and `handlers::connection::delete` calls it, and
+   `save_ssh_password("")` deletes rather than returning `Ok(())` — see the doc
+   comment there for why SSH does *not* follow `save_password`'s
+   backend-specific empty-string rules. What remains is a product gap, not a
+   correctness one: neither `sbql-tui` nor `ConnectionDraft` has an SSH
+   password field, so only the macOS app can set one.
 3. **The FFI has no channel for warnings.** `first_failure` correctly skips
    them, but nothing else carries them, so `extract_connection_list` drops them.
    The macOS app is therefore silent about keyring failures that `sbql-core`
