@@ -79,7 +79,18 @@ fn apply_form_submit(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCo
         }
     };
 
-    send_command(cmd_tx, CoreCommand::SaveConnection { config, password });
+    // The TUI's connection form has no SSH password field — it can enable a
+    // tunnel and pick a key, but the password itself is only ever *read* back
+    // when opening one. `None` therefore means "leave whatever is stored
+    // alone", which is the only honest answer a form that cannot ask has.
+    send_command(
+        cmd_tx,
+        CoreCommand::SaveConnection {
+            config,
+            password,
+            ssh_password: None,
+        },
+    );
     state.conn.form.visible = false;
     state.conn.form.error = None;
 }

@@ -100,8 +100,9 @@ logging *what* was sent, because `CoreCommand::SaveConnection` carries a
 password. "Log the thing you were doing" is a good default that is wrong here.
 
 **[review]** A secret written to the OS credential store must be written on the
-same side of validation as the config it belongs to, and deleted with it. See
-§11 for the outstanding work here.
+same side of validation as the config it belongs to, and deleted with it. Both
+halves were violated by the SSH password until recently; §14.2 records what that
+cost and how it was closed.
 
 ---
 
@@ -468,14 +469,17 @@ Tracked here rather than in comments scattered across the tree.
    SSH server can OOM the client. Fixed in 0.60.3, which is a semver-major bump
    that will touch `sbql-core/src/tunnel.rs`. This is the highest-priority item
    in this file.
-2. **SSH credentials are mismanaged in three related ways.** `save_ssh_password`
-   is called before `config.validate()`, so an invalid config can orphan a
-   secret in the OS keychain under an id that never reaches `connections.toml`;
-   there is no `delete_ssh_password` at all, so the secret outlives its
-   connection permanently; and `save_ssh_password("")` returns `Ok(())` without
-   touching the store, so clearing the field does not clear it. Moving the write
-   into `handlers::connection::save`, beside the database password, addresses
-   the first and the severity gap together.
+2. ~~**SSH credentials are mismanaged in three related ways.**~~ **Fixed.** The
+   write moved into `handlers::connection::save` (carried there by a new
+   `ssh_password` field on `CoreCommand::SaveConnection`), so it lands beside
+   the database password on the far side of `validate()` and gets the same
+   `Severity::Warning` when the store refuses it. `delete_ssh_password` now
+   exists and `handlers::connection::delete` calls it, and
+   `save_ssh_password("")` deletes rather than returning `Ok(())` — see the doc
+   comment there for why SSH does *not* follow `save_password`'s
+   backend-specific empty-string rules. What remains is a product gap, not a
+   correctness one: neither `sbql-tui` nor `ConnectionDraft` has an SSH
+   password field, so only the macOS app can set one.
 3. **The FFI has no channel for warnings.** `first_failure` correctly skips
    them, but nothing else carries them, so `extract_connection_list` drops them.
    The macOS app is therefore silent about keyring failures that `sbql-core`
