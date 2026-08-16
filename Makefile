@@ -17,7 +17,7 @@ define require-macos
 	}
 endef
 
-.PHONY: help release-plz-install version-auto version-auto-dry release-dry-run release install-local reinstall-local uninstall-local build-release xcframework install-macos uninstall-macos bench bench-pg bench-redis bench-all bench-report profile-memory flamegraph flamegraph-install
+.PHONY: help audit audit-install release-plz-install version-auto version-auto-dry release-dry-run release install-local reinstall-local uninstall-local build-release xcframework install-macos uninstall-macos bench bench-pg bench-redis bench-all bench-report profile-memory flamegraph flamegraph-install
 
 help:
 	@printf "\nSBQL Make targets:\n\n"
@@ -33,6 +33,9 @@ help:
 	@printf "  make xcframework          Build XCFramework + Swift bindings\n"
 	@printf "  make install-macos        Build and install macOS app to /Applications\n"
 	@printf "  make uninstall-macos      Remove macOS app from /Applications\n"
+	@printf "\nSupply chain:\n\n"
+	@printf "  make audit                Audit dependencies (advisories/licenses/bans/sources)\n"
+	@printf "  make audit-install        Install cargo-deny CLI\n"
 	@printf "\nPerformance:\n\n"
 	@printf "  make bench                Run Criterion benchmarks (no Docker)\n"
 	@printf "  make bench-pg             Run PostgreSQL integration benchmarks (Docker)\n"
@@ -42,6 +45,19 @@ help:
 	@printf "  make profile-memory       Run dhat heap profiling workload\n"
 	@printf "  make flamegraph           Generate CPU flamegraph from benchmarks\n"
 	@printf "  make flamegraph-install   Install cargo-flamegraph\n\n"
+
+# ---------------------------------------------------------------------------
+# Supply chain
+# ---------------------------------------------------------------------------
+
+# Same four checks the `cargo-deny` CI job runs, against the same deny.toml,
+# so a licence or advisory failure shows up here rather than on the PR.
+audit:
+	@command -v cargo-deny >/dev/null || (echo "cargo-deny not found. Run: make audit-install" && exit 1)
+	cargo deny check advisories licenses bans sources
+
+audit-install:
+	cargo install cargo-deny --locked
 
 release-plz-install:
 	cargo install release-plz --locked

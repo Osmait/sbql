@@ -1,0 +1,238 @@
+# cargo-deny: supply-chain audit for the sbql dependency graph.
+#
+# sbql links five database drivers (sqlx, redis, mongodb, aws-sdk-dynamodb,
+# tiberius), an SSH stack (russh) and an OS credential store (keyring). That is
+# a large attack surface that nobody was watching by hand. It also ships
+# prebuilt binaries under MIT, so a copyleft crate arriving through a
+# transitive bump is a licensing problem, not a hypothetical one.
+#
+# Run locally with `make audit`; CI runs the same checks on every PR.
+
+[graph]
+# Audit every platform, not just the host. The credential store, the SSH
+# stack and the TLS backends all pull different crates per target — a
+# Linux-only audit would miss whatever the Windows or macOS keyring backend
+# drags in, and we ship binaries for all three.
+targets = []
+
+# Audit the superset of features, not the default set. `keyring` is optional
+# and `dhat-heap` is opt-in; a vulnerability reachable only under a
+# non-default feature is still a vulnerability we ship to someone.
+all-features = true
+
+[output]
+feature-depth = 1
+
+# ---------------------------------------------------------------------------
+# Advisories — RustSec
+# ---------------------------------------------------------------------------
+#
+# Anything not listed below fails the build. Every entry here is a deliberate,
+# time-limited decision with the reason and the exit condition written down.
+# Do not add an ID without both.
+#
+# None of these are fixable from this file: each needs either a `cargo update`
+# (Cargo.lock), a semver-major bump in Cargo.toml, or an upstream release.
+
+[advisories]
+ignore = [
+  # --- Fixable by a lockfile bump; left for a dedicated Cargo.lock change ---
+
+  # crossbeam-epoch <0.9.20: `fmt::Pointer` for `Atomic`/`Shared` dereferences
+  # the pointer, so formatting a null `Atomic` with `{:p}` is a wild read.
+  # Reached through criterion (dev-only) and moka -> hickory-resolver ->
+  # mongodb. sbql never formats a crossbeam pointer, and neither does mongodb
+  # on any path we call. Removable with `cargo update -p crossbeam-epoch`
+  # (0.9.20 is semver-compatible).
+  { id = "RUSTSEC-2026-0204", reason = "crossbeam-epoch: unreachable: no `{:p}` formatting of crossbeam pointers; fix is a lockfile bump to 0.9.20" },
+
+  # rustls-webpki 0.103.9: CRL distribution-point matching treats a
+  # non-matching CRL as authoritative, and the name-constraint /
+  # CRL-parsing-panic bugs below also apply. We do not do CRL-based
+  # revocation checking anywhere — the database TLS clients use default
+  # server-auth verification. Removable with
+  # `cargo update -p rustls-webpki` (0.103.13 is semver-compatible).
+  { id = "RUSTSEC-2026-0049", reason = "rustls-webpki: CRL revocation checking is not enabled by any sbql TLS client; fix is a lockfile bump to 0.103.13" },
+
+  # --- Blocked on an upstream semver-major bump we do not control ---
+
+  # rustls-webpki 0.101.7, dragged in by rustls 0.21 via the AWS SDK's legacy
+  # aws-smithy-http-client. Name constraints wrongly accepted for URI names
+  # (0098) and for wildcard certs (0099), plus a reachable panic in CRL
+  # parsing (0104). Exploiting any of them needs a certificate signed by a
+  # name-constrained CA in the trust store; the DynamoDB client talks to
+  # amazonaws.com over the public WebPKI, where that shape does not occur.
+  # 0104 additionally needs CRL checking, which is off. The three cannot be
+  # patched in the lockfile: 0.101 -> 0.103 is semver-major and the pin comes
+  # from aws-config. Removable when the AWS SDK moves off rustls 0.21.
+  { id = "RUSTSEC-2026-0098", reason = "rustls-webpki: name-constraint bypass needs a constrained CA in the trust store; AWS endpoints use the public WebPKI. Pinned to 0.101 by aws-smithy-http-client's rustls 0.21" },
+  { id = "RUSTSEC-2026-0099", reason = "rustls-webpki: same trust-store precondition as RUSTSEC-2026-0098; pinned to 0.101 by aws-smithy-http-client's rustls 0.21" },
+  { id = "RUSTSEC-2026-0104", reason = "rustls-webpki: panic is in CRL parsing, which no sbql TLS client enables; pinned to 0.101 by aws-smithy-http-client's rustls 0.21" },
+
+  # hickory-proto 0.25.2, via mongodb 3.x for SRV/TXT resolution of
+  # `mongodb+srv://` URIs. 0118 is an unbounded loop in NSEC3
+  # closest-encloser proof validation (DNSSEC validation, which mongodb does
+  # not enable); 0119 is O(n^2) name compression while *encoding* a message.
+  # Both need a hostile DNS server, i.e. an attacker already positioned
+  # between sbql and the user's own resolver. Neither is fixable here: 0.26 is
+  # semver-major and mongodb 3.5 pins 0.25. Removable when mongodb bumps
+  # hickory to 0.26.1+.
+  { id = "RUSTSEC-2026-0118", reason = "hickory-proto: DNSSEC validation is not enabled by mongodb's resolver; needs hickory 0.26, pinned by mongodb 3.5" },
+  { id = "RUSTSEC-2026-0119", reason = "hickory-proto: requires a hostile DNS server on the SRV lookup path; needs hickory 0.26, pinned by mongodb 3.5" },
+
+  # russh 0.48 / russh-cryptovec 0.48: a malicious or compromised SSH server
+  # can drive an unbounded 32-bit allocation (0154) or unchecked CryptoVec
+  # growth (0153) in the client, i.e. crash the TUI by OOM. This is the one
+  # entry here that is a genuine, reachable denial of service — it is capped
+  # at DoS against a user who is already connecting to a server they do not
+  # trust, but it is real. The fix is russh 0.60.3, a semver-major bump of a
+  # workspace dependency, which is a code change and not in scope for this
+  # config. FLAGGED FOR FOLLOW-UP: bump russh/russh-keys to 0.60.3.
+  { id = "RUSTSEC-2026-0153", reason = "russh-cryptovec: DoS reachable from a hostile SSH server; needs a semver-major bump to russh 0.60.3 — tracked as follow-up work" },
+  { id = "RUSTSEC-2026-0154", reason = "russh: DoS reachable from a hostile SSH server; needs a semver-major bump to russh 0.60.3 — tracked as follow-up work" },
+
+  # --- No upstream fix exists ---
+
+  # rsa 0.9.x, the Marvin attack: PKCS#1 v1.5 decryption leaks key material
+  # through timing. Reached via russh/russh-keys/ssh-key (SSH RSA host and
+  # client keys) and sqlx-mysql (the MySQL auth handshake). sbql is always
+  # the client here, and the attack needs an adversary who can request many
+  # decryptions and time them precisely — the inverse of our position. There
+  # is no patched release; the RustSec entry has had "no safe upgrade" since
+  # 2023. Removable when rsa ships a constant-time implementation.
+  { id = "RUSTSEC-2023-0071", reason = "rsa: timing sidechannel requires the attacker to time our decryptions at scale; sbql is the client in every RSA path. No patched release exists upstream" },
+
+  # paste 1.0.15: unmaintained, not vulnerable. A proc-macro pulled by
+  # ratatui 0.29, so it runs at build time and contributes no code to the
+  # shipped binary. Removable when ratatui drops it (already done upstream on
+  # newer releases).
+  { id = "RUSTSEC-2024-0436", reason = "paste: unmaintained-only advisory, no vulnerability; build-time proc-macro from ratatui 0.29 with no runtime footprint" },
+
+  # rustls-pemfile 1.x and 2.x: unmaintained, not vulnerable — the crate was
+  # folded into rustls-pki-types. Transitive through the TLS stacks.
+  # Removable when those dependencies move to rustls-pki-types.
+  { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile: unmaintained-only advisory, no vulnerability; functionality moved into rustls-pki-types and our dependents have not caught up" },
+
+  # tokio-tar 0.3.1 ("Tarmageddon", CVE-2025-62518): PAX header confusion lets
+  # a tar present different content to tokio-tar than to other readers.
+  # Reached *only* through testcontainers as a dev-dependency, so it is never
+  # linked into a released binary and only ever parses layers from images our
+  # own test suite pulls. The crate is archived with no safe upgrade.
+  # Removable when testcontainers switches to astral-tokio-tar.
+  { id = "RUSTSEC-2025-0111", reason = "tokio-tar: dev-dependency only (testcontainers); never shipped, and the tar inputs are images our own tests pull. Crate is archived with no safe upgrade" },
+]
+
+# A yanked crate is a signal, not a breach — `spin 0.9.8` is currently yanked
+# and reachable through sqlx-sqlite's flume. Warn so it shows up in the log
+# without turning every upstream yank into a red PR.
+yanked = "warn"
+
+# ---------------------------------------------------------------------------
+# Licenses
+# ---------------------------------------------------------------------------
+#
+# sbql is MIT and ships prebuilt binaries, so the bar is: permissive, no
+# source-disclosure obligation triggered by static linking. The allow-list
+# below is not aspirational — every entry is a license some crate in the
+# current graph actually needs. Anything more exotic gets a per-crate
+# exception with a reason, so widening the list for one dependency is not an
+# option.
+[licenses]
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "BSD-3-Clause",
+  # ISC: the rustls stack (rustls-webpki, untrusted) is ISC-only, and ring is
+  # Apache-2.0/ISC. Permissive, functionally MIT.
+  "ISC",
+  # Unicode-3.0: the whole ICU family (icu_*, zerovec, yoke, tinystr, ...)
+  # arrives under it via idna -> url. Permissive with a data-file clause we
+  # satisfy by shipping the license text.
+  "Unicode-3.0",
+  # Zlib: foldhash (hashbrown's default hasher) is Zlib-only. Permissive,
+  # attribution-only.
+  "Zlib",
+]
+
+# Deviating from an SPDX expression by more than this fraction is treated as
+# an unknown license rather than guessed at.
+confidence-threshold = 0.8
+
+exceptions = [
+  # MPL-2.0 is weak copyleft: the obligation is per-*file*, and only on files
+  # of the MPL'd work itself. Linking it into an MIT binary is explicitly
+  # permitted (MPL 2.0 §3.3), and we do not modify these crates. Allowed
+  # per-crate rather than globally so that a *new* MPL dependency still trips
+  # the check and gets looked at.
+  #
+  # uniffi: generates the Swift bindings for the macOS app (sbql-ffi).
+  { allow = ["MPL-2.0"], crate = "uniffi" },
+  { allow = ["MPL-2.0"], crate = "uniffi_bindgen" },
+  { allow = ["MPL-2.0"], crate = "uniffi_core" },
+  { allow = ["MPL-2.0"], crate = "uniffi_internal_macros" },
+  { allow = ["MPL-2.0"], crate = "uniffi_macros" },
+  { allow = ["MPL-2.0"], crate = "uniffi_meta" },
+  { allow = ["MPL-2.0"], crate = "uniffi_pipeline" },
+  { allow = ["MPL-2.0"], crate = "uniffi_udl" },
+  # option-ext: three lines of Option helpers, pulled in transitively by
+  # dirs-sys (config-directory lookup). MPL-2.0 with no permissive
+  # alternative offered.
+  { allow = ["MPL-2.0"], crate = "option-ext" },
+
+  # tiny-keccak is CC0-1.0 — a public-domain dedication, not an OSI license.
+  # It grants no express patent licence, which is why it is not in the global
+  # allow-list. Acceptable for a hash function reached transitively (via the
+  # Ethereum-style keccak in the SSH/crypto stack) and used unmodified.
+  { allow = ["CC0-1.0"], crate = "tiny-keccak" },
+
+  # webpki-roots is CDLA-Permissive-2.0 — a *data* licence, correct here
+  # because the crate is the Mozilla root CA store rather than code. It
+  # permits redistribution without conditions on the surrounding work. Scoped
+  # to this crate because CDLA on anything that is not a data set would be a
+  # mistake worth catching.
+  { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+]
+
+[licenses.private]
+# The workspace crates are all MIT and published, so there is nothing to skip.
+ignore = false
+
+# ---------------------------------------------------------------------------
+# Bans
+# ---------------------------------------------------------------------------
+[bans]
+# Warn, never deny. Five database drivers plus an AWS SDK plus an SSH stack
+# guarantees duplicate versions of the common leaf crates: 50 crates currently
+# appear at more than one version, mostly the rustls / hyper / http / rand /
+# windows-sys generations that the AWS SDK and sqlx are on either side of.
+# Denying that is a permanently red CI, which trains people to ignore the
+# whole job. The warnings still print, so the number is visible if it grows.
+multiple-versions = "warn"
+
+# `wildcards = "deny"` would fail on any `version = "*"` dependency. We have
+# none, and a `*` in a lockfile-less dependency is a real supply-chain hazard
+# (whatever gets published next is what you build), so hold the line.
+wildcards = "deny"
+highlight = "all"
+
+workspace-default-features = "allow"
+external-default-features = "allow"
+
+allow = []
+deny = []
+skip = []
+skip-tree = []
+
+# ---------------------------------------------------------------------------
+# Sources
+# ---------------------------------------------------------------------------
+#
+# The whole graph comes from crates.io today, and it should stay that way: a
+# git dependency is an unaudited, unyanked, unversioned code path into a
+# binary we sign and publish. Deny both, so adding one is a conscious edit to
+# this file rather than an unnoticed line in a Cargo.toml.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
