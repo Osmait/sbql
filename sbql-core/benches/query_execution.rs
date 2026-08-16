@@ -89,12 +89,12 @@ fn bench_execute_page(c: &mut Criterion) {
 
     group.bench_function("simple_select_page0", |b| {
         b.to_async(&rt)
-            .iter(|| async { execute_page(&pool, "SELECT * FROM users", 0).await.unwrap() })
+            .iter(|| async { execute_page(&pool, "SELECT * FROM users", 0).await.unwrap() });
     });
 
     group.bench_function("simple_select_page1", |b| {
         b.to_async(&rt)
-            .iter(|| async { execute_page(&pool, "SELECT * FROM users", 1).await.unwrap() })
+            .iter(|| async { execute_page(&pool, "SELECT * FROM users", 1).await.unwrap() });
     });
 
     group.bench_function("filtered", |b| {
@@ -102,7 +102,7 @@ fn bench_execute_page(c: &mut Criterion) {
             execute_page(&pool, "SELECT * FROM users WHERE active = 1", 0)
                 .await
                 .unwrap()
-        })
+        });
     });
 
     group.bench_function("join", |b| {
@@ -114,7 +114,7 @@ fn bench_execute_page(c: &mut Criterion) {
             )
             .await
             .unwrap()
-        })
+        });
     });
 
     group.finish();
@@ -139,7 +139,7 @@ fn bench_full_lifecycle(c: &mut Criterion) {
             let filtered =
                 apply_filter(&ordered, "user_1", Some(&cols), DbBackend::Sqlite).unwrap();
             execute_page(&pool, &filtered, 0).await.unwrap()
-        })
+        });
     });
 
     group.finish();
@@ -157,12 +157,12 @@ fn bench_schema(c: &mut Criterion) {
 
     group.bench_function("list_tables", |b| {
         b.to_async(&rt)
-            .iter(|| async { list_tables(&pool).await.unwrap() })
+            .iter(|| async { list_tables(&pool).await.unwrap() });
     });
 
     group.bench_function("load_diagram", |b| {
         b.to_async(&rt)
-            .iter(|| async { load_diagram(&pool).await.unwrap() })
+            .iter(|| async { load_diagram(&pool).await.unwrap() });
     });
 
     group.finish();
@@ -189,7 +189,7 @@ fn bench_suggest_distinct_values(c: &mut Criterion) {
             )
             .await
             .unwrap()
-        })
+        });
     });
 
     group.bench_function("empty_prefix", |b| {
@@ -197,7 +197,7 @@ fn bench_suggest_distinct_values(c: &mut Criterion) {
             sbql_core::query::suggest_distinct_values(&pool, "SELECT * FROM users", "city", "", 20)
                 .await
                 .unwrap()
-        })
+        });
     });
 
     group.finish();
@@ -221,7 +221,7 @@ fn bench_scaling(c: &mut Criterion) {
             execute_page(&pool_100, "SELECT * FROM users", 0)
                 .await
                 .unwrap()
-        })
+        });
     });
 
     group.bench_function("500_rows", |b| {
@@ -229,7 +229,7 @@ fn bench_scaling(c: &mut Criterion) {
             execute_page(&pool_500, "SELECT * FROM users", 0)
                 .await
                 .unwrap()
-        })
+        });
     });
 
     group.bench_function("1000_rows", |b| {
@@ -237,7 +237,7 @@ fn bench_scaling(c: &mut Criterion) {
             execute_page(&pool_1000, "SELECT * FROM users", 0)
                 .await
                 .unwrap()
-        })
+        });
     });
 
     group.finish();

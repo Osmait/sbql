@@ -77,7 +77,17 @@ async fn setup_db() -> DbPool {
     DbPool::Sqlite(pool)
 }
 
+/// Every result below is thrown away with `drop(..)` on purpose: this is a
+/// workload, not a test, and what is being measured is the allocation each call
+/// makes on the way to its answer.
+///
+/// `drop(x)` rather than the `let _unused = x` the lint also offers, because
+/// the two are not equivalent here. `_unused` lives to the end of `main`, so
+/// every result would still be alive when the next one is allocated and the
+/// heap peak dhat reports would be the sum of the whole workload instead of its
+/// true high-water mark. `drop` frees at the same point the old `let _ =` did.
 #[tokio::main]
+#[allow(clippy::print_stdout)] // An example run from a shell; nothing holds the screen.
 async fn main() {
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
@@ -86,10 +96,10 @@ async fn main() {
 
     // --- Pagination workload ---
     for page in 0..5 {
-        let _ = execute_page(&pool, "SELECT * FROM users", page).await;
+        drop(execute_page(&pool, "SELECT * FROM users", page).await);
     }
     for page in 0..10 {
-        let _ = execute_page(&pool, "SELECT * FROM posts", page).await;
+        drop(execute_page(&pool, "SELECT * FROM posts", page).await);
     }
 
     // --- SQL manipulation workload ---
@@ -97,34 +107,37 @@ async fn main() {
     for col in &["name", "email", "city", "id"] {
         let ordered = apply_order(base_sql, col, SortDirection::Ascending, DbBackend::Sqlite)
             .unwrap_or_default();
-        let _ = clear_order(&ordered, DbBackend::Sqlite);
+        drop(clear_order(&ordered, DbBackend::Sqlite));
     }
 
     let cols: Vec<String> = vec!["name".into(), "email".into(), "city".into()];
     for q in &["alice", "user_1", "Tokyo", "status:active", "name:Bob"] {
-        let _ = apply_filter(base_sql, q, Some(&cols), DbBackend::Sqlite);
+        drop(apply_filter(base_sql, q, Some(&cols), DbBackend::Sqlite));
     }
 
     for page in 0..5 {
-        let _ = build_paginated_sql("SELECT * FROM users", page);
+        drop(build_paginated_sql("SELECT * FROM users", page));
     }
 
     // --- Schema introspection ---
-    let _ = list_tables(&pool).await;
-    let _ = load_diagram(&pool).await;
+    drop(list_tables(&pool).await);
+    drop(load_diagram(&pool).await);
 
     // --- Join queries ---
-    let _ = execute_page(
-        &pool,
-        "SELECT p.id, p.title, u.name FROM posts p JOIN users u ON p.user_id = u.id",
-        0,
-    )
-    .await;
+    drop(
+        execute_page(
+            &pool,
+            "SELECT p.id, p.title, u.name FROM posts p JOIN users u ON p.user_id = u.id",
+            0,
+        )
+        .await,
+    );
 
     // --- Redis tokenizer (pure CPU) ---
     for _ in 0..100 {
-        let _ =
-            tokenize_redis_command("HSET user:1000 name \"John Doe\" email \"john@example.com\"");
+        drop(tokenize_redis_command(
+            "HSET user:1000 name \"John Doe\" email \"john@example.com\"",
+        ));
     }
 
     println!("Profiling workload complete.");

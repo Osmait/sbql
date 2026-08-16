@@ -29,7 +29,7 @@ async fn setup_mongodb() -> (
 
     let host = container.get_host().await.unwrap();
     let port = container.get_host_port_ipv4(27017).await.unwrap();
-    let uri = format!("mongodb://{}:{}", host, port);
+    let uri = format!("mongodb://{host}:{port}");
 
     let client = mongodb::Client::with_uri_str(&uri).await.unwrap();
     let db = client.database("testdb");
@@ -178,9 +178,9 @@ async fn test_mongodb_attribute_types() {
 
     // Array
     let arr_idx = cols.iter().position(|c| c == "array_val").unwrap();
-    assert!(row[arr_idx].contains("1"), "array_val: {}", row[arr_idx]);
-    assert!(row[arr_idx].contains("2"), "array_val: {}", row[arr_idx]);
-    assert!(row[arr_idx].contains("3"), "array_val: {}", row[arr_idx]);
+    assert!(row[arr_idx].contains('1'), "array_val: {}", row[arr_idx]);
+    assert!(row[arr_idx].contains('2'), "array_val: {}", row[arr_idx]);
+    assert!(row[arr_idx].contains('3'), "array_val: {}", row[arr_idx]);
 
     // Nested document
     let nested_idx = cols.iter().position(|c| c == "nested_val").unwrap();
@@ -307,7 +307,7 @@ async fn test_mongodb_special_chars_in_values() {
     assert!(row[q_idx].contains("hello"), "quotes: {}", row[q_idx]);
 
     let b_idx = cols.iter().position(|c| c == "with_backslash").unwrap();
-    assert!(row[b_idx].contains("\\"), "backslash: {}", row[b_idx]);
+    assert!(row[b_idx].contains('\\'), "backslash: {}", row[b_idx]);
 
     let n_idx = cols.iter().position(|c| c == "with_newline").unwrap();
     assert!(row[n_idx].contains("line1"), "newline: {}", row[n_idx]);
