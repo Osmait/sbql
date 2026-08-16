@@ -162,9 +162,24 @@ tokio-util = { version = "0.7", features = ["compat"] }
 csv = "1"
 
 # SSH tunneling
-russh = "0.48"
-russh-keys = "0.48"
-async-trait = "0.1"
+#
+# 0.62, not 0.48: RUSTSEC-2026-0154 and RUSTSEC-2026-0153 let a hostile SSH
+# server drive an unbounded 32-bit allocation and unchecked `CryptoVec` growth
+# in the *client*, i.e. OOM the process that dials a bastion. Fixed from
+# 0.60.3; 0.62 is the current line.
+#
+# No `russh-keys`, and that is not an omission: the crate was folded into
+# `russh` as `russh::keys` in 0.50 and the standalone one is now unmaintained.
+# No `async-trait` either — `client::Handler` returns `impl Future` natively
+# from 0.5x, so the attribute macro is dead weight (russh keeps an
+# `async-trait` *feature* for callers stuck on the old shape; we are not).
+#
+# Default features are taken as-is: `flate2`, `rsa` (RSA host and client keys
+# are still what most bastions hand out), and `aws-lc-rs` as the crypto
+# backend. That last one sounds like a new build-time C toolchain requirement
+# and is not — `aws-lc-rs` is already in the graph via aws-config's rustls, so
+# picking it here adds no dependency the workspace did not already build.
+russh = "0.62"
 
 # Benchmarking & profiling
 criterion = { version = "0.5", features = ["async_tokio"] }

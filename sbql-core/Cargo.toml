@@ -46,8 +46,6 @@ bb8.workspace = true
 bb8-tiberius.workspace = true
 tokio-util.workspace = true
 russh.workspace = true
-russh-keys.workspace = true
-async-trait.workspace = true
 
 # --- Platform credential stores ---------------------------------------------
 # `keyring` picks its backend from the enabled features. If none matches the
