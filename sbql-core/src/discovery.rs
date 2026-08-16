@@ -44,7 +44,10 @@ const DISCOVERY_NAMESPACE: Uuid = Uuid::from_u128(0x5b91_1a0e_7c42_4f9d_9a17_5d3
 pub enum DiscoverySource {
     /// A container started by `docker compose`.
     Compose {
+        /// The compose project name — the stack the container belongs to.
         project: String,
+        /// The service name within that stack, which is also what the
+        /// connection ends up called.
         service: String,
         /// Whether the compose project is rooted at the directory sbql was
         /// opened in. Those are listed first: they are almost always the ones
@@ -52,36 +55,45 @@ pub enum DiscoverySource {
         here: bool,
     },
     /// A container started outside compose.
-    Container { name: String },
+    Container {
+        /// The container name, leading `/` stripped.
+        name: String,
+    },
 }
 
 impl DiscoverySource {
     /// Whether this is the stack of the directory sbql was opened in.
     pub fn is_here(&self) -> bool {
-        matches!(self, DiscoverySource::Compose { here: true, .. })
+        matches!(self, Self::Compose { here: true, .. })
     }
 
     /// A short label for a client to show next to the connection.
     pub fn label(&self) -> String {
         match self {
-            DiscoverySource::Compose { project, here, .. } => {
+            Self::Compose { project, here, .. } => {
                 if *here {
                     "compose (here)".to_owned()
                 } else {
                     format!("compose: {project}")
                 }
             }
-            DiscoverySource::Container { .. } => "docker".to_owned(),
+            Self::Container { .. } => "docker".to_owned(),
         }
     }
 }
 
 /// A database found running in Docker, as a client sees it.
 ///
-/// Carries no password on purpose: see [`DiscoveredCredentials`].
+/// Carries no password on purpose. The scraped password stays inside the
+/// crate, in `Core`'s session cache, so it cannot ride along in a
+/// [`CoreEvent`](crate::CoreEvent) — which the TUI worker debug-logs.
 #[derive(Debug, Clone)]
 pub struct DiscoveredConnection {
+    /// Ready to hand to [`CoreCommand::Connect`](crate::CoreCommand::Connect)
+    /// as-is — host, port and database are the container's real, published
+    /// ones. The id is derived from the container id, so it survives a re-scan.
     pub config: ConnectionConfig,
+    /// Which stack or container it came from, for labelling and ordering.
     pub source: DiscoverySource,
 }
 
@@ -93,10 +105,24 @@ pub struct DiscoveredConnection {
 /// write real database passwords into the log file. The core keeps the
 /// password in its in-memory cache and hands clients only the
 /// [`DiscoveredConnection`].
-#[derive(Debug, Clone)]
-pub struct DiscoveredCredentials {
-    pub connection: DiscoveredConnection,
-    pub password: String,
+#[derive(Clone)]
+pub(crate) struct DiscoveredCredentials {
+    pub(crate) connection: DiscoveredConnection,
+    pub(crate) password: String,
+}
+
+/// The point of this type is that the scraped password does not travel; a
+/// derived `Debug` would undo that the first time one of these was logged.
+impl std::fmt::Debug for DiscoveredCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DiscoveredCredentials")
+            .field("connection", &self.connection)
+            .field(
+                "password",
+                &crate::connection_spec::Redacted(!self.password.is_empty()),
+            )
+            .finish()
+    }
 }
 
 /// Ask Docker what databases are running, most relevant first.
@@ -106,7 +132,7 @@ pub struct DiscoveredCredentials {
 /// an error — when Docker is missing, unreachable, or has nothing to offer:
 /// this is a convenience, and a red banner about a daemon the user never asked
 /// about would be noise.
-pub async fn discover(dir: &Path) -> Vec<DiscoveredCredentials> {
+pub(crate) async fn discover(dir: &Path) -> Vec<DiscoveredCredentials> {
     let ids = match docker(&["ps", "--quiet", "--no-trunc"]).await {
         Some(out) if !out.trim().is_empty() => out,
         Some(_) => return Vec::new(),
@@ -200,7 +226,7 @@ struct PortBinding {
 /// directory's compose project first.
 ///
 /// Split from [`discover`] so the mapping is testable without Docker.
-pub fn parse_inspect(json: &str, dir: &Path) -> Vec<DiscoveredCredentials> {
+pub(crate) fn parse_inspect(json: &str, dir: &Path) -> Vec<DiscoveredCredentials> {
     let containers: Vec<Container> = match serde_json::from_str(json) {
         Ok(c) => c,
         Err(e) => {
@@ -255,7 +281,7 @@ fn to_connection(container: &Container, dir: &Path) -> Option<DiscoveredCredenti
             }
         }
         _ => DiscoverySource::Container {
-            name: container_name.clone(),
+            name: container_name,
         },
     };
 
@@ -426,12 +452,12 @@ fn build_config(
         }
         DbBackend::MongoDb => {
             let mut c = ConnectionConfig::new_mongodb(name, HOST, port, &creds.database);
-            c.user = creds.user.clone();
+            c.user.clone_from(&creds.user);
             c
         }
         DbBackend::Redis => {
             let mut c = ConnectionConfig::new_redis(name, HOST, port);
-            c.database = creds.database.clone();
+            c.database.clone_from(&creds.database);
             c
         }
         DbBackend::SqlServer => {
@@ -439,7 +465,7 @@ fn build_config(
         }
         DbBackend::DynamoDb => {
             let mut c = ConnectionConfig::new_dynamodb(name, HOST, port, &creds.database);
-            c.user = creds.user.clone();
+            c.user.clone_from(&creds.user);
             c
         }
         DbBackend::Sqlite => ConnectionConfig::new_sqlite(name, ""),
@@ -597,6 +623,11 @@ mod tests {
     /// ```text
     /// cargo test -p sbql-core --lib discovery -- --ignored --nocapture
     /// ```
+    // Run under `--nocapture`, where the printed report *is* what this test
+    // produces: it names which discovered database answered. Nothing here runs
+    // while a terminal UI holds the screen, which is what `print_stdout` exists
+    // to protect.
+    #[allow(clippy::print_stdout)]
     #[tokio::test]
     #[ignore = "needs a running Docker daemon with a published database"]
     async fn discovered_credentials_actually_connect() {
@@ -608,7 +639,7 @@ mod tests {
             return;
         }
 
-        let manager = crate::connection::ConnectionManager::new();
+        let manager = crate::connection::ConnectionManager::default();
         for d in &found {
             let name = &d.connection.config.name;
             match manager
@@ -720,6 +751,11 @@ mod tests {
     ///
     /// Deliberately prints no passwords: this is a debugging aid, not a way to
     /// dump the machine's credentials into a terminal or a CI log.
+    // Run under `--nocapture`, where the printed listing *is* the test's whole
+    // product — there is nothing to assert about "whatever happens to be up".
+    // Nothing here runs while a terminal UI holds the screen, which is what
+    // `print_stdout` exists to protect.
+    #[allow(clippy::print_stdout)]
     #[tokio::test]
     #[ignore = "needs a running Docker daemon"]
     async fn against_the_real_docker() {

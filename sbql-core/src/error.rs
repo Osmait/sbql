@@ -17,14 +17,31 @@
 
 use thiserror::Error;
 
+/// Everything that can go wrong inside the crate.
+///
+/// Rich and `#[from]`-friendly: it wraps driver errors whole so the cause chain
+/// survives all the way to [`CoreError::detail`]. Clients get [`CoreError`]
+/// instead — this type is not `Clone` and names types they have no business
+/// knowing about.
+///
+/// `#[non_exhaustive]`: a new backend means a new variant, and that must not be
+/// a breaking change. Match with a `_` arm.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SbqlError {
+    /// Anything `sqlx` reported, for PostgreSQL, MySQL or SQLite. Covers both
+    /// "the server rejected the statement" and "there was no server" — see
+    /// [`ErrorKind::from`] for how those are told apart.
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
 
+    /// The connection file, or something asked of a connection that is not
+    /// set up for it.
     #[error("Configuration error: {0}")]
     Config(String),
 
+    /// The OS credential store could not be reached or refused the operation.
+    /// Re-entering the password does not help; the store itself is the problem.
     #[error("Keyring error: {0}")]
     Keyring(String),
 
@@ -34,52 +51,78 @@ pub enum SbqlError {
     #[error("No saved password for '{0}'")]
     PasswordNotFound(String),
 
+    /// sbql could not parse the SQL well enough to rewrite it, or the
+    /// requested rewrite has no meaning on this backend.
     #[error("SQL parse error: {0}")]
     SqlParse(String),
 
+    /// A pool could not be opened. The message names the connection, because
+    /// this is what the user sees after pressing Enter on one.
     #[error("Connection error: {0}")]
     Connection(String),
 
+    /// No saved or discovered connection has this id — it was deleted, or a
+    /// stale id outlived a re-scan.
     #[error("Connection not found: {0}")]
     ConnectionNotFound(String),
 
+    /// Nothing is connected. The distinct variant exists so a client can
+    /// offer to connect instead of showing a failure.
     #[error("No active connection")]
     NoActiveConnection,
 
+    /// Reading the catalog failed, or an edit was refused before it ran —
+    /// an UPDATE with no primary key to match on, for instance.
     #[error("Schema introspection error: {0}")]
     Schema(String),
 
+    /// Anything the redis client reported.
     #[error("Redis error: {0}")]
     Redis(#[from] redis::RedisError),
 
+    /// Anything the AWS SDK reported, already stringified — its error types
+    /// are generic over the operation and do not fit one variant.
     #[error("DynamoDB error: {0}")]
     DynamoDb(String),
 
+    /// Anything the MongoDB driver reported.
     #[error("MongoDB error: {0}")]
     MongoDb(String),
 
+    /// Anything `tiberius` or its `bb8` pool reported.
     #[error("SQL Server error: {0}")]
     SqlServer(String),
 
+    /// The tunnel could not be opened: the bastion refused, the key would not
+    /// load, or its host key did not match `known_hosts`. The last of those is
+    /// a refusal on purpose — see `tunnel::SshHandler`.
     #[error("SSH tunnel error: {0}")]
     SshTunnel(String),
 
+    /// The file could not be read or did not have the shape the format
+    /// requires. Note that an import is not transactional: this can arrive with
+    /// rows already committed.
     #[error("Import error: {0}")]
     Import(String),
 
+    /// Filesystem trouble — the config file, an import source, an export
+    /// target.
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// TOML could not be produced or parsed. In practice: a hand-edited
+    /// `connections.toml`.
     #[error("Serialization error: {0}")]
     Serialization(String),
 }
 
 impl From<russh::Error> for SbqlError {
     fn from(e: russh::Error) -> Self {
-        SbqlError::SshTunnel(e.to_string())
+        Self::SshTunnel(e.to_string())
     }
 }
 
+/// What every fallible function in this crate returns.
 pub type Result<T> = std::result::Result<T, SbqlError>;
 
 // ---------------------------------------------------------------------------
@@ -117,7 +160,11 @@ pub enum ErrorKind {
 /// keyring refuses still saves the connection. That used to be reported through
 /// the same channel as a hard error and painted red, which told the user their
 /// work had been lost when it had not.
+/// `#[non_exhaustive]` for the same reason as [`ErrorKind`]: a third level
+/// between "did not happen" and "happened partly" is plausible, and adding it
+/// should not break a client's `match`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Severity {
     /// The operation did not happen.
     Error,
@@ -128,7 +175,11 @@ pub enum Severity {
 /// A failure on its way out of the core.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoreError {
+    /// What went wrong, at the granularity a client branches on. This is the
+    /// field to `match` — never the message.
     pub kind: ErrorKind,
+    /// Whether the operation happened anyway. A [`Severity::Warning`] painted
+    /// like a failure tells the user their work was lost when it was not.
     pub severity: Severity,
     /// One line, safe to put in a status bar.
     pub message: String,
@@ -162,6 +213,7 @@ impl CoreError {
         self
     }
 
+    /// Whether the operation went through despite this.
     pub fn is_warning(&self) -> bool {
         self.severity == Severity::Warning
     }
@@ -199,11 +251,11 @@ impl From<SbqlError> for CoreError {
 impl From<&SbqlError> for ErrorKind {
     fn from(e: &SbqlError) -> Self {
         match e {
-            SbqlError::NoActiveConnection => ErrorKind::NoActiveConnection,
+            SbqlError::NoActiveConnection => Self::NoActiveConnection,
 
             SbqlError::Connection(_)
             | SbqlError::ConnectionNotFound(_)
-            | SbqlError::SshTunnel(_) => ErrorKind::Connection,
+            | SbqlError::SshTunnel(_) => Self::Connection,
 
             // sqlx folds two very different situations into one type: the
             // server rejected our SQL, or we never reached a server at all.
@@ -213,8 +265,8 @@ impl From<&SbqlError> for ErrorKind {
                 | sqlx::Error::PoolClosed
                 | sqlx::Error::Io(_)
                 | sqlx::Error::Tls(_)
-                | sqlx::Error::Configuration(_) => ErrorKind::Connection,
-                _ => ErrorKind::Query,
+                | sqlx::Error::Configuration(_) => Self::Connection,
+                _ => Self::Query,
             },
 
             SbqlError::SqlParse(_)
@@ -222,13 +274,13 @@ impl From<&SbqlError> for ErrorKind {
             | SbqlError::Redis(_)
             | SbqlError::DynamoDb(_)
             | SbqlError::MongoDb(_)
-            | SbqlError::SqlServer(_) => ErrorKind::Query,
+            | SbqlError::SqlServer(_) => Self::Query,
 
-            SbqlError::Config(_) | SbqlError::Serialization(_) => ErrorKind::Config,
+            SbqlError::Config(_) | SbqlError::Serialization(_) => Self::Config,
 
-            SbqlError::Keyring(_) | SbqlError::PasswordNotFound(_) => ErrorKind::Credentials,
+            SbqlError::Keyring(_) | SbqlError::PasswordNotFound(_) => Self::Credentials,
 
-            SbqlError::Io(_) | SbqlError::Import(_) => ErrorKind::Io,
+            SbqlError::Io(_) | SbqlError::Import(_) => Self::Io,
         }
     }
 }

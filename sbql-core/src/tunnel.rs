@@ -1,3 +1,10 @@
+//! SSH tunnels, for databases that are only reachable through a bastion.
+//!
+//! A tunnel binds a random loopback port, forwards it over an authenticated
+//! SSH connection to the real host, and the pool is then built against
+//! `127.0.0.1:<that port>` instead. [`ConnectionManager`](crate::connection)
+//! opens and closes them; nothing else needs to know a tunnel is involved.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -9,7 +16,8 @@ use crate::config::ConnectionConfig;
 use crate::error::{Result, SbqlError};
 
 /// Holds active SSH tunnels keyed by connection ID.
-pub struct TunnelManager {
+#[derive(Debug)]
+pub(crate) struct TunnelManager {
     tunnels: Arc<RwLock<HashMap<Uuid, TunnelHandle>>>,
 }
 
@@ -19,13 +27,14 @@ impl Default for TunnelManager {
     }
 }
 
+#[derive(Debug)]
 struct TunnelHandle {
     local_port: u16,
     shutdown: tokio::sync::watch::Sender<bool>,
 }
 
 impl TunnelManager {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             tunnels: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -33,7 +42,7 @@ impl TunnelManager {
 
     /// Open an SSH tunnel for the given connection config.
     /// Returns the local port to connect through.
-    pub async fn open(&self, config: &ConnectionConfig, ssh_password: &str) -> Result<u16> {
+    pub(crate) async fn open(&self, config: &ConnectionConfig, ssh_password: &str) -> Result<u16> {
         if !config.ssh_enabled {
             return Err(SbqlError::SshTunnel("SSH not enabled".into()));
         }
@@ -104,10 +113,17 @@ impl TunnelManager {
                                 Ok(channel) => {
                                     let mut channel_stream = channel.into_stream();
                                     tokio::spawn(async move {
-                                        let _ = tokio::io::copy_bidirectional(
+                                        // A forwarding failure has no caller left
+                                        // to return to, but it must not vanish
+                                        // either: a tunnel that quietly drops
+                                        // connections reads to the user as the
+                                        // database being flaky.
+                                        if let Err(e) = tokio::io::copy_bidirectional(
                                             &mut tcp_stream,
                                             &mut channel_stream,
-                                        ).await;
+                                        ).await {
+                                            tracing::debug!("SSH tunnel forwarding ended: {e}");
+                                        }
                                     });
                                 }
                                 Err(e) => {
@@ -133,7 +149,7 @@ impl TunnelManager {
     }
 
     /// Close an SSH tunnel by connection ID.
-    pub async fn close(&self, id: Uuid) {
+    pub(crate) async fn close(&self, id: Uuid) {
         if let Some(handle) = self.tunnels.write().await.remove(&id) {
             let _ = handle.shutdown.send(true);
         }
@@ -141,7 +157,7 @@ impl TunnelManager {
 
     /// Get the local port for an active tunnel.
     #[allow(dead_code)]
-    pub async fn local_port(&self, id: Uuid) -> Option<u16> {
+    pub(crate) async fn local_port(&self, id: Uuid) -> Option<u16> {
         self.tunnels.read().await.get(&id).map(|h| h.local_port)
     }
 }

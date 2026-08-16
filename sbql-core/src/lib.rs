@@ -10,24 +10,31 @@
 //! that owns a `Core` instance and processes commands sequentially, sending
 //! events back over an `mpsc` channel.
 
+#![warn(missing_docs)]
+#![warn(clippy::missing_errors_doc)]
+
 pub mod config;
-pub mod connection;
 pub mod connection_spec;
 pub mod discovery;
 pub mod error;
-mod handlers;
 pub mod import;
 pub mod pool;
 pub mod query;
 pub mod query_builder;
 pub mod schema;
-pub mod sql_util;
-pub mod tunnel;
+
+// Machinery, not contract. These modules exist to serve `Core`; nothing outside
+// the crate drives a pool, an SSH tunnel or an identifier quoter directly, and
+// `pub` on them would freeze internals that are expected to move.
+mod connection;
+mod handlers;
+mod sql_util;
+mod tunnel;
 
 // Re-export the most commonly used types at the crate root.
 pub use config::{
-    config_path, keyring_enabled, load_connections, load_connections_from, save_connections,
-    save_connections_to, ConnectionConfig, SslMode, CONFIG_DIR_ENV, NO_KEYRING_ENV,
+    config_path, keyring_enabled, load_connections, ConnectionConfig, SslMode, CONFIG_DIR_ENV,
+    NO_KEYRING_ENV,
 };
 pub use connection_spec::{
     BackendSpec, ConnectionDraft, ConnectionField, FieldSpec, ValidationError,
@@ -50,13 +57,20 @@ use connection::ConnectionManager;
 // ---------------------------------------------------------------------------
 
 /// Commands sent from the UI layer → Core.
+///
+/// Deliberately **not** `#[non_exhaustive]`, for the same reason as
+/// [`CoreEvent`]: [`CoreCommand::shows_progress`] matches exhaustively so a new
+/// command cannot compile without saying whether the UI should spin for it.
 #[derive(Debug, Clone)]
 pub enum CoreCommand {
     /// Persist a new or updated connection config (password stored in keyring).
     /// Pass `Some(password)` to set/replace the password, or `None` to keep
     /// the existing password unchanged (useful when editing without re-entering).
     SaveConnection {
+        /// Validated before anything is written; an invalid config is
+        /// rejected rather than saved.
         config: ConnectionConfig,
+        /// `Some` to set or replace, `None` to leave the stored one alone.
         password: Option<String>,
     },
     /// Remove a connection config from disk and keyring.
@@ -67,7 +81,11 @@ pub enum CoreCommand {
     /// rooted there is listed first. Discovered connections are session-only —
     /// nothing is written to disk or the keyring until the user asks for it
     /// with [`CoreCommand::SaveDiscovered`].
-    DiscoverConnections { dir: std::path::PathBuf },
+    DiscoverConnections {
+        /// The directory the client was opened in. The compose project rooted
+        /// here is listed first.
+        dir: std::path::PathBuf,
+    },
     /// Promote a discovered connection to a saved one, password included.
     SaveDiscovered(Uuid),
     /// Open a connection pool for the given connection id.
@@ -77,9 +95,16 @@ pub enum CoreCommand {
     /// List all tables in the currently active connection.
     ListTables,
     /// Execute a raw SQL string, page 0.
-    ExecuteQuery { sql: String },
+    ExecuteQuery {
+        /// Raw SQL, exactly as the user typed it. Becomes the *base* query
+        /// that later sorts and filters are applied on top of.
+        sql: String,
+    },
     /// Fetch a specific page of the last executed query.
-    FetchPage { page: usize },
+    FetchPage {
+        /// Zero-based page index, [`PAGE_SIZE`] rows each.
+        page: usize,
+    },
     /// Count the rows the current query would return, out of band.
     ///
     /// Deliberately its own command: counting used to happen inside page 0,
@@ -88,24 +113,42 @@ pub enum CoreCommand {
     FetchTotalCount,
     /// Re-execute with an ORDER BY injected via AST manipulation.
     ApplyOrder {
+        /// Column to sort by. Quoted for the backend before it reaches SQL, so
+        /// a name with spaces or mixed case is safe here.
         column: String,
+        /// Ascending or descending.
         direction: SortDirection,
     },
     /// Remove the current ORDER BY and re-execute.
     ClearOrder,
     /// Re-execute with a WHERE filter injected via AST manipulation.
-    ApplyFilter { query: String },
+    ApplyFilter {
+        /// `col:value` to filter one column, or bare text to search every
+        /// column of the current result.
+        query: String,
+    },
     /// Remove the current WHERE filter and re-execute.
     ClearFilter,
     /// Suggest distinct values for `column` matching `prefix%`.
     SuggestFilterValues {
+        /// Column to draw distinct values from.
         column: String,
+        /// Match values starting with this.
         prefix: String,
+        /// Cap on how many to return.
         limit: usize,
+        /// Echoed back in [`CoreEvent::FilterSuggestions`]. The user keeps
+        /// typing while this runs, so replies can arrive out of order — a
+        /// client compares the token and drops anything but the newest.
         token: u64,
     },
     /// Fetch primary key columns for a given table.
-    GetPrimaryKeys { schema: String, table: String },
+    GetPrimaryKeys {
+        /// Owning schema.
+        schema: String,
+        /// Table name.
+        table: String,
+    },
     /// Load all table schemas and FK relationships for the diagram view.
     LoadDiagram,
     /// Update a single cell in the database.
@@ -114,16 +157,27 @@ pub enum CoreCommand {
     /// key. Sending only the first component of a composite key once turned
     /// "update this row" into "update every row sharing that component".
     UpdateCell {
+        /// Owning schema.
         schema: String,
+        /// Table name.
         table: String,
+        /// Every `(column, value)` component of the row's primary key. All of
+        /// them, or the UPDATE addresses more than one row.
         pk: Vec<(String, String)>,
+        /// The column being changed.
         target_col: String,
+        /// Its new value, as text; the database coerces it.
         new_val: String,
     },
     /// Delete a single row identified by its full primary key.
     DeleteRow {
+        /// Owning schema.
         schema: String,
+        /// Table name.
         table: String,
+        /// Every `(column, value)` component of the row's primary key. An
+        /// empty `pk` is refused rather than run — a WHERE-less DELETE empties
+        /// the table.
         pk: Vec<(String, String)>,
     },
 }
@@ -140,34 +194,42 @@ impl CoreCommand {
         match self {
             // Background lookups. Fast, and not what the user is waiting on,
             // so they must not blank the UI.
-            CoreCommand::GetPrimaryKeys { .. }
-            | CoreCommand::Disconnect(_)
-            | CoreCommand::LoadDiagram
-            | CoreCommand::SuggestFilterValues { .. }
-            | CoreCommand::FetchTotalCount
+            Self::GetPrimaryKeys { .. }
+            | Self::Disconnect(_)
+            | Self::LoadDiagram
+            | Self::SuggestFilterValues { .. }
+            | Self::FetchTotalCount
             // Runs at startup before the user has asked for anything; a
             // spinner here would look like the app is stuck on launch.
-            | CoreCommand::DiscoverConnections { .. } => false,
+            | Self::DiscoverConnections { .. } => false,
 
             // Work the user asked for and is waiting on.
-            CoreCommand::SaveConnection { .. }
-            | CoreCommand::SaveDiscovered(_)
-            | CoreCommand::DeleteConnection(_)
-            | CoreCommand::Connect(_)
-            | CoreCommand::ListTables
-            | CoreCommand::ExecuteQuery { .. }
-            | CoreCommand::FetchPage { .. }
-            | CoreCommand::ApplyOrder { .. }
-            | CoreCommand::ClearOrder
-            | CoreCommand::ApplyFilter { .. }
-            | CoreCommand::ClearFilter
-            | CoreCommand::UpdateCell { .. }
-            | CoreCommand::DeleteRow { .. } => true,
+            Self::SaveConnection { .. }
+            | Self::SaveDiscovered(_)
+            | Self::DeleteConnection(_)
+            | Self::Connect(_)
+            | Self::ListTables
+            | Self::ExecuteQuery { .. }
+            | Self::FetchPage { .. }
+            | Self::ApplyOrder { .. }
+            | Self::ClearOrder
+            | Self::ApplyFilter { .. }
+            | Self::ClearFilter
+            | Self::UpdateCell { .. }
+            | Self::DeleteRow { .. } => true,
         }
     }
 }
 
 /// Events sent from Core → UI.
+///
+/// Deliberately **not** `#[non_exhaustive]`, unlike [`SbqlError`] and
+/// [`Severity`]. `sbql-tui` and `sbql-ffi` match on this in 111 places, and
+/// their matches being exhaustive is the safety net: adding an event has to
+/// stop every frontend from compiling until it says what it does with the new
+/// one. `#[non_exhaustive]` would force a wildcard arm into each of those
+/// matches and turn "the compiler tells you" into "the event is silently
+/// dropped". Please do not "fix" this.
 #[derive(Debug, Clone)]
 pub enum CoreEvent {
     /// The full list of saved connections (sent on startup and after mutations).
@@ -203,14 +265,25 @@ pub enum CoreEvent {
     RowDeleted,
     /// Primary key columns for a table.
     PrimaryKeys {
+        /// Schema that was asked about.
         schema: String,
+        /// Table that was asked about.
         table: String,
+        /// The key columns. Empty means the table has none, so its rows
+        /// cannot be edited or deleted.
         columns: Vec<String>,
     },
     /// Full diagram data (table schemas + FK relationships).
     DiagramLoaded(DiagramData),
     /// Filter value suggestions response.
-    FilterSuggestions { items: Vec<String>, token: u64 },
+    FilterSuggestions {
+        /// The distinct values found, already capped to the requested limit.
+        items: Vec<String>,
+        /// The token from the [`CoreCommand::SuggestFilterValues`] this
+        /// answers. Ignore any reply whose token is not the latest one sent,
+        /// or a slow lookup overwrites a newer one.
+        token: u64,
+    },
     /// A long-running operation has started (show a spinner).
     Loading,
     /// Something went wrong — or went through with a caveat, see
@@ -224,7 +297,7 @@ impl CoreEvent {
     /// The single place `SbqlError` becomes client-facing, so no handler has to
     /// remember to do more than `to_string()`.
     pub fn error(e: impl Into<CoreError>) -> Self {
-        CoreEvent::Error(e.into())
+        Self::Error(e.into())
     }
 }
 
@@ -241,7 +314,11 @@ pub struct Core {
     /// All saved connection configs (loaded from disk).
     pub connections: Vec<ConnectionConfig>,
     /// Live connection pools.
-    pub manager: ConnectionManager,
+    ///
+    /// Internal: pools are opened and closed through [`CoreCommand::Connect`]
+    /// and [`CoreCommand::Disconnect`], so a client never needs to reach in —
+    /// and one that did could close a pool out from under an in-flight query.
+    pub(crate) manager: ConnectionManager,
     /// The currently active connection id.
     pub active_connection: Option<Uuid>,
     /// The "base" SQL query entered by the user (without ORDER BY / WHERE mods).
@@ -274,6 +351,32 @@ pub struct Core {
     /// Held rather than returned because [`Core::new`] cannot fail — clients
     /// collect it from [`Core::startup_events`].
     pub(crate) load_error: Option<CoreError>,
+}
+
+/// Written by hand rather than derived because `password_cache` holds
+/// plaintext database passwords. A derived `Debug` would print them, and this
+/// type is exactly the kind of thing that ends up in a `tracing::debug!` or a
+/// panic message — the same reasoning that keeps passwords out of
+/// [`CoreEvent::DiscoveredConnections`]. Only the number of cached passwords is
+/// reported; the keys are connection ids, which are not secret, but the values
+/// never leave this struct.
+impl std::fmt::Debug for Core {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Core")
+            .field("connections", &self.connections)
+            .field("manager", &self.manager)
+            .field("active_connection", &self.active_connection)
+            .field("base_sql", &self.base_sql)
+            .field("effective_sql", &self.effective_sql)
+            .field("last_columns", &self.last_columns)
+            .field("last_page", &self.last_page)
+            .field("sort_state", &self.sort_state)
+            .field("active_filter", &self.active_filter)
+            .field("discovered", &self.discovered)
+            .field("cached_passwords", &self.password_cache.len())
+            .field("load_error", &self.load_error)
+            .finish()
+    }
 }
 
 impl Core {
@@ -417,6 +520,12 @@ impl Core {
     // -----------------------------------------------------------------------
 
     /// Import a CSV or JSON file into a database table.
+    ///
+    /// # Errors
+    ///
+    /// Nothing is connected, or the import itself failed — see
+    /// [`import::import_file`], including its warning that a partial import is
+    /// not rolled back.
     pub async fn import_file(
         &self,
         path: &str,
@@ -429,6 +538,15 @@ impl Core {
     }
 
     /// Stream all rows of the current effective SQL to a file.
+    ///
+    /// Exports what the user is looking at, filter and sort included — the
+    /// *effective* SQL, not the text in the editor.
+    ///
+    /// # Errors
+    ///
+    /// No query has been run yet, nothing is connected, or the export failed —
+    /// see [`query::export_all`]. The first case is worth phrasing as "run a
+    /// query first" rather than as a failure.
     pub async fn export_all(
         &self,
         path: &str,
@@ -491,7 +609,7 @@ impl Core {
         match query::execute_page(&pool, &sql, page).await {
             Ok(result) => {
                 if !result.columns.is_empty() {
-                    self.last_columns = result.columns.clone();
+                    self.last_columns.clone_from(&result.columns);
                 }
                 self.last_page = result.page;
                 vec![CoreEvent::QueryResult(result)]
@@ -513,6 +631,28 @@ mod tests {
         assert!(core.active_connection.is_none());
         assert!(core.base_sql.is_none());
         assert!(core.effective_sql.is_none());
+    }
+
+    /// `Core` keeps a plaintext password cache so reconnects survive a keyring
+    /// that will not answer. Its `Debug` is hand-written to keep that cache out
+    /// of the output, and a `#[derive(Debug)]` added later would put every
+    /// cached database password into the first log line that prints a `Core`.
+    #[test]
+    fn the_password_cache_never_reaches_debug_output() {
+        let mut core = Core::default();
+        core.password_cache
+            .insert(Uuid::new_v4(), "hunter2-not-a-real-password".into());
+
+        let shown = format!("{core:?}");
+
+        assert!(
+            !shown.contains("hunter2"),
+            "a cached password leaked into Debug: {shown}"
+        );
+        assert!(
+            shown.contains("cached_passwords: 1"),
+            "how many are cached is still worth knowing: {shown}"
+        );
     }
 
     /// Normally there is nothing to report beyond the list itself.
