@@ -38,21 +38,11 @@ feature-depth = 1
 ignore = [
   # --- Fixable by a lockfile bump; left for a dedicated Cargo.lock change ---
 
-  # crossbeam-epoch <0.9.20: `fmt::Pointer` for `Atomic`/`Shared` dereferences
-  # the pointer, so formatting a null `Atomic` with `{:p}` is a wild read.
-  # Reached through criterion (dev-only) and moka -> hickory-resolver ->
-  # mongodb. sbql never formats a crossbeam pointer, and neither does mongodb
-  # on any path we call. Removable with `cargo update -p crossbeam-epoch`
-  # (0.9.20 is semver-compatible).
-  { id = "RUSTSEC-2026-0204", reason = "crossbeam-epoch: unreachable: no `{:p}` formatting of crossbeam pointers; fix is a lockfile bump to 0.9.20" },
-
-  # rustls-webpki 0.103.9: CRL distribution-point matching treats a
-  # non-matching CRL as authoritative, and the name-constraint /
-  # CRL-parsing-panic bugs below also apply. We do not do CRL-based
-  # revocation checking anywhere — the database TLS clients use default
-  # server-auth verification. Removable with
-  # `cargo update -p rustls-webpki` (0.103.13 is semver-compatible).
-  { id = "RUSTSEC-2026-0049", reason = "rustls-webpki: CRL revocation checking is not enabled by any sbql TLS client; fix is a lockfile bump to 0.103.13" },
+  # RUSTSEC-2026-0204 (crossbeam-epoch) and RUSTSEC-2026-0049 (rustls-webpki)
+  # were both listed here and are both gone: they only ever needed a lockfile
+  # bump, which has now happened (crossbeam-epoch 0.9.20, rustls-webpki
+  # 0.103.14). Do not re-add an ignore for something a `cargo update` fixes —
+  # a stale entry silently covers the regression when it comes back.
 
   # --- Blocked on an upstream semver-major bump we do not control ---
 
