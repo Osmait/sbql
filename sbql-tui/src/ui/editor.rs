@@ -13,7 +13,7 @@ use crate::app::{ConnectionState, EditorMode, EditorState, FocusedPanel};
 use crate::completion::CompletionKind;
 use crate::ui::theme;
 
-pub fn draw(
+pub(crate) fn draw(
     frame: &mut Frame,
     cache: &mut crate::ui::cache::RenderCache,
     editor: &mut EditorState,
@@ -37,7 +37,7 @@ pub fn draw(
                 .find(|c| c.id == id)
                 .map(|c| c.name.as_str())
                 .unwrap_or("connected");
-            format!(" SQL Editor [{}] ", name)
+            format!(" SQL Editor [{name}] ")
         }
         None => " SQL Editor (no connection) ".into(),
     };
@@ -148,12 +148,7 @@ pub fn draw(
 
     // --- Build visible lines ---
     let mut visible_lines: Vec<Line> = Vec::with_capacity(vp_h);
-    let text_lines: Vec<String> = editor
-        .textarea
-        .lines()
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let text_lines: Vec<String> = editor.textarea.lines().to_vec();
 
     for view_row in 0..vp_h {
         let line_idx = editor.scroll_row + view_row;

@@ -15,10 +15,10 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 
 /// One line of source split into styled runs.
-pub type HighlightedLine = Vec<(Style, String)>;
+pub(crate) type HighlightedLine = Vec<(Style, String)>;
 
 #[derive(Default)]
-pub struct RenderCache {
+pub(crate) struct RenderCache {
     highlight: Option<Vec<HighlightedLine>>,
     /// Editor revision the highlight was built from.
     highlight_revision: Option<u64>,
@@ -26,13 +26,13 @@ pub struct RenderCache {
 }
 
 impl RenderCache {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// Highlighted source for `revision`, rebuilding with `build` when the
     /// editor has moved on since the cached copy.
-    pub fn highlight(
+    pub(crate) fn highlight(
         &mut self,
         revision: u64,
         build: impl FnOnce() -> Vec<HighlightedLine>,
@@ -45,17 +45,17 @@ impl RenderCache {
     }
 
     /// The diagram canvas, if one has been built and not invalidated since.
-    pub fn diagram_canvas(&self) -> Option<&[Line<'static>]> {
+    pub(crate) fn diagram_canvas(&self) -> Option<&[Line<'static>]> {
         self.diagram_canvas.as_deref()
     }
 
-    pub fn set_diagram_canvas(&mut self, lines: Vec<Line<'static>>) {
+    pub(crate) fn set_diagram_canvas(&mut self, lines: Vec<Line<'static>>) {
         self.diagram_canvas = Some(lines);
     }
 
     /// Forget the diagram canvas — call when the diagram closes so a stale one
     /// cannot be shown by the next.
-    pub fn clear_diagram_canvas(&mut self) {
+    pub(crate) fn clear_diagram_canvas(&mut self) {
         self.diagram_canvas = None;
     }
 }

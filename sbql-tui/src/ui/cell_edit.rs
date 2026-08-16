@@ -23,7 +23,7 @@ const STAGE_HINT: &str = "Enter/^S: stage";
 const COMMIT_HINT: &str = "  ^W: commit  ";
 const CANCEL_HINT: &str = "Esc: cancel";
 
-pub fn draw(
+pub(crate) fn draw(
     frame: &mut Frame,
     edit: &mut CellEditState,
     layout: &LayoutCache,
@@ -197,7 +197,7 @@ mod tests {
                     &state.results,
                     frame.area(),
                     &mut hits,
-                )
+                );
             })
             .expect("draw");
 

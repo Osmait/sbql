@@ -19,7 +19,7 @@ pub(super) fn apply(
         ConnectionsAction::ConnectSelected => {
             if let Some(entry) = state.conn.selected_entry() {
                 let id = entry.config().id;
-                let _ = cmd_tx.send(CoreCommand::Connect(id));
+                send_command(cmd_tx, CoreCommand::Connect(id));
             }
         }
 
@@ -50,7 +50,7 @@ pub(super) fn apply(
             match state.conn.selected_entry() {
                 Some(ConnectionEntry::Discovered(found)) => {
                     let (id, name) = (found.config.id, found.config.name.clone());
-                    let _ = cmd_tx.send(CoreCommand::SaveDiscovered(id));
+                    send_command(cmd_tx, CoreCommand::SaveDiscovered(id));
                     state.inform(format!("Saved '{name}' — it will be there next launch."));
                 }
                 // Saying nothing on a saved row would look like the key is
@@ -84,7 +84,7 @@ pub(super) fn apply(
 
         ConnectionsAction::ConfirmDelete => {
             if let Some((id, name)) = state.conn.pending_delete.take() {
-                let _ = cmd_tx.send(CoreCommand::DeleteConnection(id));
+                send_command(cmd_tx, CoreCommand::DeleteConnection(id));
                 state.inform(format!("Deleted connection '{name}'."));
             }
         }
@@ -96,7 +96,7 @@ pub(super) fn apply(
 
         ConnectionsAction::DisconnectActive => {
             if let Some(id) = state.conn.active_id {
-                let _ = cmd_tx.send(CoreCommand::Disconnect(id));
+                send_command(cmd_tx, CoreCommand::Disconnect(id));
             }
         }
     }

@@ -46,7 +46,7 @@ pub(super) fn apply(
                 };
                 state.results.sent_sql = Some(sql.clone());
                 state.results.awaiting_new_query = true;
-                let _ = cmd_tx.send(CoreCommand::ExecuteQuery { sql });
+                send_command(cmd_tx, CoreCommand::ExecuteQuery { sql });
                 state.focused = FocusedPanel::Results;
             }
         }

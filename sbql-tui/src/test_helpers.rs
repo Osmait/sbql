@@ -11,7 +11,7 @@ use crate::handlers;
 use sbql_core::{CoreCommand, QueryResult};
 
 /// Create a simple key press event.
-pub fn key(code: KeyCode) -> KeyEvent {
+pub(crate) fn key(code: KeyCode) -> KeyEvent {
     KeyEvent {
         code,
         modifiers: KeyModifiers::empty(),
@@ -21,7 +21,7 @@ pub fn key(code: KeyCode) -> KeyEvent {
 }
 
 /// Create a key press event with modifiers.
-pub fn key_mod(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+pub(crate) fn key_mod(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
     KeyEvent {
         code,
         modifiers,
@@ -31,13 +31,17 @@ pub fn key_mod(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
 }
 
 /// Dispatch a key through `handle_key` → `apply`.
-pub fn dispatch(state: &mut AppState, k: KeyEvent, cmd_tx: &mpsc::UnboundedSender<CoreCommand>) {
+pub(crate) fn dispatch(
+    state: &mut AppState,
+    k: KeyEvent,
+    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
+) {
     let act = handlers::handle_key(state, k);
     action::apply(act, state, cmd_tx);
 }
 
 /// Create an `AppState` with mock results data.
-pub fn make_state_with_results() -> AppState {
+pub(crate) fn make_state_with_results() -> AppState {
     let mut state = AppState::new(vec![]);
     state.results.data = QueryResult {
         columns: vec!["id".into(), "name".into(), "email".into()],
@@ -61,7 +65,7 @@ pub fn make_state_with_results() -> AppState {
 }
 
 /// Create a command channel pair.
-pub fn cmd_channel() -> (
+pub(crate) fn cmd_channel() -> (
     mpsc::UnboundedSender<CoreCommand>,
     mpsc::UnboundedReceiver<CoreCommand>,
 ) {

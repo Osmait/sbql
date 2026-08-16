@@ -13,7 +13,7 @@
 
 /// What happens when moving past either end of a list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Overflow {
+pub(crate) enum Overflow {
     /// Stop at the end. Right for browsing lists, where overshooting and
     /// silently landing back at the top is disorienting.
     Clamp,
@@ -24,27 +24,27 @@ pub enum Overflow {
 
 /// A bounds-checked index into a list held somewhere else.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ListCursor {
+pub(crate) struct ListCursor {
     index: usize,
 }
 
 impl ListCursor {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { index: 0 }
     }
 
     /// The selected index. Callers should still use `.get(i)` on their list —
     /// the cursor is only valid for the length it was last moved against.
-    pub fn index(&self) -> usize {
+    pub(crate) fn index(&self) -> usize {
         self.index
     }
 
     /// Move to a specific index, clamped into the list.
-    pub fn select(&mut self, index: usize, len: usize) {
+    pub(crate) fn select(&mut self, index: usize, len: usize) {
         self.index = if len == 0 { 0 } else { index.min(len - 1) };
     }
 
-    pub fn next(&mut self, len: usize, overflow: Overflow) {
+    pub(crate) fn next(&mut self, len: usize, overflow: Overflow) {
         if len == 0 {
             self.index = 0;
             return;
@@ -55,7 +55,7 @@ impl ListCursor {
         };
     }
 
-    pub fn prev(&mut self, len: usize, overflow: Overflow) {
+    pub(crate) fn prev(&mut self, len: usize, overflow: Overflow) {
         if len == 0 {
             self.index = 0;
             return;
@@ -71,11 +71,11 @@ impl ListCursor {
     ///
     /// Call this whenever the backing list is replaced, otherwise a stale index
     /// silently points past the end.
-    pub fn clamp(&mut self, len: usize) {
+    pub(crate) fn clamp(&mut self, len: usize) {
         self.index = if len == 0 { 0 } else { self.index.min(len - 1) };
     }
 
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.index = 0;
     }
 }

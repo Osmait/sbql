@@ -23,7 +23,7 @@ use crate::app::AppState;
 use crate::error::Result;
 
 /// A surface the application can paint its state onto.
-pub trait Renderer {
+pub(crate) trait Renderer {
     /// Paint the current state.
     ///
     /// Takes `&mut AppState` because measuring is part of painting: viewport

@@ -54,13 +54,7 @@ pub(super) fn apply(
 
 /// Recompute autocomplete completions based on current editor state.
 pub(super) fn recompute_completions(state: &mut AppState) {
-    let lines: Vec<String> = state
-        .editor
-        .textarea
-        .lines()
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let lines: Vec<String> = state.editor.textarea.lines().to_vec();
     let (row, col) = state.editor.textarea.cursor();
     let prefix = completion::extract_prefix(&lines, row, col);
     if prefix.len() >= 2 {

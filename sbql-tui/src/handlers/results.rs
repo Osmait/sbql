@@ -4,7 +4,7 @@ use crate::action::{Action, CellEditAction, FilterAction, NavAction, ResultsActi
 use crate::app::AppState;
 use crate::events::is_commit;
 
-pub fn handle(state: &AppState, key: KeyEvent) -> Action {
+pub(crate) fn handle(state: &AppState, key: KeyEvent) -> Action {
     tracing::info!(
         "handle_key_results: code={:?} mods={:?} rows={} cols={}",
         key.code,
@@ -47,13 +47,11 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
                 ])
             }
         }
-        (KeyCode::Char('G'), KeyModifiers::NONE) | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
-            Action::Batch(vec![
-                Action::Nav(NavAction::ClearPendingG),
-                Action::Nav(NavAction::ClearPendingD),
-                Action::Results(ResultsAction::RowLast),
-            ])
-        }
+        (KeyCode::Char('G'), KeyModifiers::NONE | KeyModifiers::SHIFT) => Action::Batch(vec![
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+            Action::Results(ResultsAction::RowLast),
+        ]),
         (KeyCode::Char('d'), KeyModifiers::CONTROL) => Action::Batch(vec![
             Action::Nav(NavAction::ClearPendingG),
             Action::Nav(NavAction::ClearPendingD),
@@ -78,13 +76,11 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
                 ])
             }
         }
-        (KeyCode::Char('0'), KeyModifiers::NONE) | (KeyCode::Char('^'), KeyModifiers::NONE) => {
-            Action::Batch(vec![
-                Action::Nav(NavAction::ClearPendingG),
-                Action::Nav(NavAction::ClearPendingD),
-                Action::Results(ResultsAction::ColFirst),
-            ])
-        }
+        (KeyCode::Char('0' | '^'), KeyModifiers::NONE) => Action::Batch(vec![
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+            Action::Results(ResultsAction::ColFirst),
+        ]),
         (KeyCode::Char('$'), KeyModifiers::NONE) => Action::Batch(vec![
             Action::Nav(NavAction::ClearPendingG),
             Action::Nav(NavAction::ClearPendingD),
@@ -116,13 +112,11 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
             }
             Action::Batch(actions)
         }
-        (KeyCode::Enter, KeyModifiers::NONE) | (KeyCode::Char('i'), KeyModifiers::NONE) => {
-            Action::Batch(vec![
-                Action::Nav(NavAction::ClearPendingG),
-                Action::Nav(NavAction::ClearPendingD),
-                Action::CellEdit(CellEditAction::Enter),
-            ])
-        }
+        (KeyCode::Enter | KeyCode::Char('i'), KeyModifiers::NONE) => Action::Batch(vec![
+            Action::Nav(NavAction::ClearPendingG),
+            Action::Nav(NavAction::ClearPendingD),
+            Action::CellEdit(CellEditAction::Enter),
+        ]),
         _ if is_commit(&key) => Action::Batch(vec![
             Action::Nav(NavAction::ClearPendingG),
             Action::Nav(NavAction::ClearPendingD),
@@ -154,7 +148,7 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
 
 // Expose `extract_schema_table_from_sql` for testing.
 /// Extract `(schema, table)` from the first `FROM <name>` in the SQL.
-pub fn extract_schema_table_from_sql(sql: &str) -> Option<(String, String)> {
+pub(crate) fn extract_schema_table_from_sql(sql: &str) -> Option<(String, String)> {
     // The needle is matched on the original bytes: an offset found in
     // `sql.to_uppercase()` is not valid in `sql` (Unicode uppercasing can
     // change byte length — 'ﬁ' → "FI"), and slicing with it panicked inside a
