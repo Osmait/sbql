@@ -65,6 +65,12 @@ impl Notice {
             level: match err.severity {
                 Severity::Warning => Level::Warning,
                 Severity::Error => Level::Error,
+                // `Severity` is `#[non_exhaustive]`, so this arm is required.
+                // It resolves to `Error` rather than `Warning` deliberately: a
+                // severity this build does not recognise is more likely to
+                // matter than not, and a warning toast is dismissable enough
+                // that the user can miss it. Fail loud on the unknown.
+                _ => Level::Error,
             },
             text: err.message,
             detail: err.detail,
