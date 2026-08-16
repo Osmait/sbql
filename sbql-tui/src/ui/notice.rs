@@ -21,7 +21,12 @@ use crate::notice::{Level, Notice};
 const WIDTH_PCT: u16 = 70;
 const HEIGHT_PCT: u16 = 50;
 
-pub fn draw(frame: &mut Frame, notice: &Notice, area: Rect, hits: &mut crate::ui::hit::HitMap) {
+pub(crate) fn draw(
+    frame: &mut Frame,
+    notice: &Notice,
+    area: Rect,
+    hits: &mut crate::ui::hit::HitMap,
+) {
     let popup = centred(area, WIDTH_PCT, HEIGHT_PCT);
 
     let (title, accent) = match notice.level {
@@ -108,7 +113,7 @@ mod tests {
                     notice,
                     frame.area(),
                     &mut crate::ui::hit::HitMap::default(),
-                )
+                );
             })
             .expect("draw");
         terminal
@@ -204,7 +209,7 @@ mod tests {
     fn a_tiny_terminal_does_not_panic() {
         let notice = Notice::error("boom", 0);
         for (w, h) in [(1, 1), (2, 3), (10, 4)] {
-            let _ = render(&notice, w, h);
+            drop(render(&notice, w, h));
         }
     }
 }

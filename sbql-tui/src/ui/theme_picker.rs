@@ -17,7 +17,7 @@ use crate::ui::hit::{HitMap, Zone};
 use crate::ui::theme;
 
 /// Draw the picker over `screen`.
-pub fn draw(frame: &mut Frame, picker: &ThemePicker, screen: Rect, hits: &mut HitMap) {
+pub(crate) fn draw(frame: &mut Frame, picker: &ThemePicker, screen: Rect, hits: &mut HitMap) {
     let height = u16::try_from(theme::THEMES.len()).unwrap_or(u16::MAX) + 2;
     let area = centered(34, height.min(screen.height), screen);
 

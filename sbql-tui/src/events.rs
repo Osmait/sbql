@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 
 /// All events the main loop needs to handle.
 #[derive(Debug)]
-pub enum AppEvent {
+pub(crate) enum AppEvent {
     /// A keyboard event.
     Key(KeyEvent),
     /// A mouse event.
@@ -33,7 +33,7 @@ pub enum AppEvent {
 /// `AppEvent` values on `tx`.
 ///
 /// The thread runs until the channel is closed (i.e. the receiver is dropped).
-pub fn spawn_event_reader(tx: mpsc::UnboundedSender<AppEvent>) {
+pub(crate) fn spawn_event_reader(tx: mpsc::UnboundedSender<AppEvent>) {
     std::thread::spawn(move || loop {
         match crossterm::event::read() {
             Ok(Event::Key(k)) => {
@@ -58,7 +58,11 @@ pub fn spawn_event_reader(tx: mpsc::UnboundedSender<AppEvent>) {
                 // quit, since raw mode means Ctrl+C is a keypress and not a
                 // signal. It used to just show a message and leave the user
                 // with a window they had to kill from somewhere else.
-                let _ = tx.send(AppEvent::InputDied(e));
+                //
+                // The send failing means the UI is already gone, which is the
+                // same outcome this event asks for, so there is nothing to do
+                // with the error but leave.
+                drop(tx.send(AppEvent::InputDied(e)));
                 break;
             }
         }
@@ -70,17 +74,18 @@ pub fn spawn_event_reader(tx: mpsc::UnboundedSender<AppEvent>) {
 // ---------------------------------------------------------------------------
 
 /// Returns true for `q` without modifiers, or `Ctrl+C` / `Ctrl+Q`.
-pub fn is_quit(k: &KeyEvent) -> bool {
+pub(crate) fn is_quit(k: &KeyEvent) -> bool {
     matches!(
         (k.code, k.modifiers),
-        (KeyCode::Char('q'), KeyModifiers::NONE)
-            | (KeyCode::Char('c'), KeyModifiers::CONTROL)
-            | (KeyCode::Char('q'), KeyModifiers::CONTROL)
+        (
+            KeyCode::Char('q'),
+            KeyModifiers::NONE | KeyModifiers::CONTROL
+        ) | (KeyCode::Char('c'), KeyModifiers::CONTROL)
     )
 }
 
 /// Returns true for `Ctrl+S` or `F5` — the "run query" binding.
-pub fn is_run_query(k: &KeyEvent) -> bool {
+pub(crate) fn is_run_query(k: &KeyEvent) -> bool {
     matches!(
         (k.code, k.modifiers),
         (KeyCode::Char('s'), KeyModifiers::CONTROL) | (KeyCode::F(5), KeyModifiers::NONE)
@@ -94,10 +99,10 @@ pub fn is_run_query(k: &KeyEvent) -> bool {
 /// distinguishable from a bare Enter on terminals that speak the enhanced
 /// keyboard protocol, and losing the ability to commit on the others would be
 /// a poor trade for a nicer chord.
-pub fn is_commit(k: &KeyEvent) -> bool {
+pub(crate) fn is_commit(k: &KeyEvent) -> bool {
     matches!(
         (k.code, k.modifiers),
-        (KeyCode::Char('w'), KeyModifiers::CONTROL) | (KeyCode::Enter, KeyModifiers::CONTROL)
+        (KeyCode::Char('w') | KeyCode::Enter, KeyModifiers::CONTROL)
     )
 }
 

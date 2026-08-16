@@ -13,7 +13,7 @@ pub(super) fn apply(
         DiagramAction::Open => {
             if state.conn.active_id.is_some() {
                 state.diagram_requested = true;
-                let _ = cmd_tx.send(CoreCommand::LoadDiagram);
+                send_command(cmd_tx, CoreCommand::LoadDiagram);
             } else {
                 state.report("Connect to a database first (Enter on a connection).");
             }

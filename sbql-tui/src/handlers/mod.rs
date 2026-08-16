@@ -1,13 +1,13 @@
-pub mod cell_edit;
-pub mod connections;
-pub mod diagram;
-pub mod editor;
-pub mod filter;
-pub mod mouse;
-pub mod navigation;
-pub mod results;
-pub mod tables;
-pub mod theme;
+pub(crate) mod cell_edit;
+pub(crate) mod connections;
+pub(crate) mod diagram;
+pub(crate) mod editor;
+pub(crate) mod filter;
+pub(crate) mod mouse;
+pub(crate) mod navigation;
+pub(crate) mod results;
+pub(crate) mod tables;
+pub(crate) mod theme;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -16,7 +16,7 @@ use crate::app::{AppState, EditorMode, FocusedPanel, Mode, NavMode};
 use crate::events::is_quit;
 
 /// Top-level key dispatch. Returns an [`Action`] to be applied by the event loop.
-pub fn handle_key(state: &AppState, key: KeyEvent) -> Action {
+pub(crate) fn handle_key(state: &AppState, key: KeyEvent) -> Action {
     tracing::info!(
         "handle_key: mode={:?} focused={:?} code={:?} mods={:?}",
         state.mode(),

@@ -16,7 +16,7 @@ pub(super) fn apply(
                     warn_staged_changes_block_paging(state);
                 } else {
                     let next = state.results.current_page + 1;
-                    let _ = cmd_tx.send(CoreCommand::FetchPage { page: next });
+                    send_command(cmd_tx, CoreCommand::FetchPage { page: next });
                 }
             }
         }
@@ -49,7 +49,7 @@ pub(super) fn apply(
                     warn_staged_changes_block_paging(state);
                 } else {
                     let next = state.results.current_page + 1;
-                    let _ = cmd_tx.send(CoreCommand::FetchPage { page: next });
+                    send_command(cmd_tx, CoreCommand::FetchPage { page: next });
                 }
             }
         }
@@ -89,7 +89,7 @@ pub(super) fn apply(
                 return;
             };
             state.mutation.pending_delete_row = Some(row_idx);
-            let _ = cmd_tx.send(CoreCommand::GetPrimaryKeys { schema, table });
+            send_command(cmd_tx, CoreCommand::GetPrimaryKeys { schema, table });
         }
 
         ResultsAction::CommitPending => {
@@ -116,10 +116,10 @@ pub(super) fn apply(
             state.results.selected_col = idx;
             match state.results.next_sort_direction(&column) {
                 Some(direction) => {
-                    let _ = cmd_tx.send(CoreCommand::ApplyOrder { column, direction });
+                    send_command(cmd_tx, CoreCommand::ApplyOrder { column, direction });
                 }
                 None => {
-                    let _ = cmd_tx.send(CoreCommand::ClearOrder);
+                    send_command(cmd_tx, CoreCommand::ClearOrder);
                 }
             }
         }
@@ -131,10 +131,10 @@ pub(super) fn apply(
                 // silently drops) never shows up in the header.
                 match state.results.next_sort_direction(&column) {
                     Some(direction) => {
-                        let _ = cmd_tx.send(CoreCommand::ApplyOrder { column, direction });
+                        send_command(cmd_tx, CoreCommand::ApplyOrder { column, direction });
                     }
                     None => {
-                        let _ = cmd_tx.send(CoreCommand::ClearOrder);
+                        send_command(cmd_tx, CoreCommand::ClearOrder);
                     }
                 }
             }
@@ -151,7 +151,7 @@ fn request_previous_page(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<Co
         return;
     }
     let previous = state.results.current_page.saturating_sub(1);
-    let _ = cmd_tx.send(CoreCommand::FetchPage { page: previous });
+    send_command(cmd_tx, CoreCommand::FetchPage { page: previous });
 }
 
 pub(super) fn has_staged_changes(state: &AppState) -> bool {
@@ -184,21 +184,27 @@ pub(super) fn apply_commit_pending(
     let delete_count = state.mutation.pending_deletes.len();
 
     for edit in state.mutation.pending_edits.values() {
-        let _ = cmd_tx.send(CoreCommand::UpdateCell {
-            schema: edit.schema.clone(),
-            table: edit.table.clone(),
-            pk: edit.pk.clone(),
-            target_col: edit.col_name.clone(),
-            new_val: edit.new_val.clone(),
-        });
+        send_command(
+            cmd_tx,
+            CoreCommand::UpdateCell {
+                schema: edit.schema.clone(),
+                table: edit.table.clone(),
+                pk: edit.pk.clone(),
+                target_col: edit.col_name.clone(),
+                new_val: edit.new_val.clone(),
+            },
+        );
     }
 
     for del in state.mutation.pending_deletes.values() {
-        let _ = cmd_tx.send(CoreCommand::DeleteRow {
-            schema: del.schema.clone(),
-            table: del.table.clone(),
-            pk: del.pk.clone(),
-        });
+        send_command(
+            cmd_tx,
+            CoreCommand::DeleteRow {
+                schema: del.schema.clone(),
+                table: del.table.clone(),
+                pk: del.pk.clone(),
+            },
+        );
     }
 
     state.mutation.pending_edits.clear();
@@ -206,11 +212,10 @@ pub(super) fn apply_commit_pending(
     state.mutation.pending_d = false;
 
     let page = state.results.current_page;
-    let _ = cmd_tx.send(CoreCommand::FetchPage { page });
+    send_command(cmd_tx, CoreCommand::FetchPage { page });
 
     state.inform(format!(
-        "Committed: {} edit(s), {} delete(s).",
-        edit_count, delete_count
+        "Committed: {edit_count} edit(s), {delete_count} delete(s)."
     ));
 }
 

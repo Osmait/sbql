@@ -6,9 +6,9 @@
 //! its own.
 //!
 //! The loop is the controller in the usual TUI split: an event arrives, a pure
-//! handler turns it into an [`Action`], the reducer applies it, and the view
-//! draws the result. Nothing here decides *what* a key means or *how* anything
-//! looks.
+//! handler turns it into an [`Action`](action::Action), the reducer applies it,
+//! and the view draws the result. Nothing here decides *what* a key means or
+//! *how* anything looks.
 
 use sbql_core::{CoreCommand, CoreEvent};
 use tokio::sync::mpsc;
@@ -25,7 +25,7 @@ use crate::worker::spawn_worker;
 /// How often the spinner advances.
 const TICK: std::time::Duration = std::time::Duration::from_millis(100);
 
-pub struct Sbql {
+pub(crate) struct Sbql {
     state: AppState,
     /// Commands out to the core worker.
     cmd_tx: mpsc::UnboundedSender<CoreCommand>,
@@ -39,7 +39,7 @@ pub struct Sbql {
 
 impl Sbql {
     /// Wire up the worker, the input reader and the ticker.
-    pub fn new(startup_connection: Option<String>) -> Self {
+    pub(crate) fn new(startup_connection: Option<String>) -> Self {
         let (cmd_tx, mut core_rx) = spawn_worker();
         let (app_tx, events) = mpsc::unbounded_channel::<AppEvent>();
 
@@ -74,7 +74,7 @@ impl Sbql {
     ///
     /// Production goes through [`Sbql::new`]; tests use this to feed the loop
     /// synthetic events instead of real key presses.
-    pub fn with_channels(
+    pub(crate) fn with_channels(
         cmd_tx: mpsc::UnboundedSender<CoreCommand>,
         events: mpsc::UnboundedReceiver<AppEvent>,
         startup_connection: Option<String>,
@@ -92,7 +92,7 @@ impl Sbql {
     ///
     /// Takes any [`Renderer`], so the loop can be driven with no terminal — and
     /// so this layer never names a UI framework.
-    pub async fn run<R: Renderer>(&mut self, renderer: &mut R) -> Result<()> {
+    pub(crate) async fn run<R: Renderer>(&mut self, renderer: &mut R) -> Result<()> {
         Self::restore_theme_impl();
         self.ask_docker_what_is_running();
         self.draw(renderer)?;
@@ -177,11 +177,11 @@ impl Sbql {
         self.state.apply_core_event(event);
 
         if connected {
-            let _ = self.cmd_tx.send(CoreCommand::ListTables);
+            action::send_command(&self.cmd_tx, CoreCommand::ListTables);
         }
         if tables_loaded {
             // Column info for autocomplete rides along with the diagram data.
-            let _ = self.cmd_tx.send(CoreCommand::LoadDiagram);
+            action::send_command(&self.cmd_tx, CoreCommand::LoadDiagram);
         }
 
         self.state.layout.needs_redraw = true;
@@ -200,7 +200,7 @@ impl Sbql {
             });
 
         if let Some(cfg) = target {
-            let _ = self.cmd_tx.send(CoreCommand::Connect(cfg.id));
+            action::send_command(&self.cmd_tx, CoreCommand::Connect(cfg.id));
             self.auto_connected = true;
         }
     }
@@ -248,7 +248,7 @@ impl Sbql {
             // to scan relative to, and nothing worth telling the user about.
             return;
         };
-        let _ = self.cmd_tx.send(CoreCommand::DiscoverConnections { dir });
+        action::send_command(&self.cmd_tx, CoreCommand::DiscoverConnections { dir });
     }
 }
 

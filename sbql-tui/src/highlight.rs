@@ -68,7 +68,7 @@ fn style_for_highlight(idx: usize) -> Style {
     Style::default().fg(fg)
 }
 
-pub struct SqlHighlighter {
+pub(crate) struct SqlHighlighter {
     highlighter: Highlighter,
     /// `None` if the grammar would not load.
     ///
@@ -80,7 +80,7 @@ pub struct SqlHighlighter {
 }
 
 impl SqlHighlighter {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let config = match HighlightConfiguration::new(
             tree_sitter_sequel::LANGUAGE.into(),
             "sql",
@@ -109,7 +109,7 @@ impl SqlHighlighter {
     /// Each inner `Vec` corresponds to one line of the source text.
     /// Every `(Style, String)` pair represents a contiguous run of
     /// identically-styled characters within that line.
-    pub fn highlight_lines(&mut self, source: &str) -> Vec<Vec<(Style, String)>> {
+    pub(crate) fn highlight_lines(&mut self, source: &str) -> Vec<Vec<(Style, String)>> {
         let num_lines = source.lines().count().max(1);
         let mut lines: Vec<Vec<(Style, String)>> = Vec::with_capacity(num_lines);
         lines.push(Vec::new());
@@ -121,12 +121,11 @@ impl SqlHighlighter {
             return unstyled(source, default_style);
         };
 
-        let events = match self
+        let Ok(events) = self
             .highlighter
             .highlight(config, source.as_bytes(), None, |_| None)
-        {
-            Ok(iter) => iter,
-            Err(_) => return unstyled(source, default_style),
+        else {
+            return unstyled(source, default_style);
         };
 
         let mut style_stack: Vec<Style> = vec![default_style];

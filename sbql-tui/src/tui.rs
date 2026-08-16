@@ -38,7 +38,7 @@ use crate::renderer::Renderer;
 use crate::ui;
 
 /// The terminal, plus the render state that lives alongside it.
-pub struct Tui<B: Backend> {
+pub(crate) struct Tui<B: Backend> {
     terminal: Terminal<B>,
     /// Rendered output kept between frames. A rendering concern with a
     /// rendering lifetime, so it belongs here rather than on the application.
@@ -70,13 +70,13 @@ impl TakeoverProgress {
     fn roll_back(&self) {
         let mut out = io::stdout();
         if self.keyboard_enhanced {
-            let _ = execute!(out, PopKeyboardEnhancementFlags);
+            drop(execute!(out, PopKeyboardEnhancementFlags));
         }
         if self.alternate_screen {
-            let _ = execute!(out, LeaveAlternateScreen, DisableMouseCapture);
+            drop(execute!(out, LeaveAlternateScreen, DisableMouseCapture));
         }
         if self.raw_mode {
-            let _ = disable_raw_mode();
+            drop(disable_raw_mode());
         }
     }
 }
@@ -86,7 +86,7 @@ impl Tui<CrosstermBackend<Stdout>> {
     ///
     /// If any step fails the earlier ones are undone before returning, so a
     /// failed startup never costs the user their shell.
-    pub fn new() -> Result<Self> {
+    pub(crate) fn new() -> Result<Self> {
         install_panic_hook();
 
         let mut progress = TakeoverProgress::default();
@@ -141,7 +141,7 @@ impl<B: Backend> Tui<B> {
     /// view all run against `TestBackend` with no terminal attached. Nothing in
     /// the shipped binary builds a `Tui` this way, hence `cfg(test)`.
     #[cfg(test)]
-    pub fn with_backend(backend: B) -> Result<Self> {
+    pub(crate) fn with_backend(backend: B) -> Result<Self> {
         Ok(Self {
             terminal: Terminal::new(backend).map_err(TuiError::TerminalSetup)?,
             cache: ui::cache::RenderCache::new(),
@@ -158,7 +158,7 @@ impl<B: Backend> Tui<B> {
     /// reported at the end. Returning on the first failure instead would leave
     /// the alternate screen up with no second chance: `restored` is already set,
     /// so `Drop` would decline to try again.
-    pub fn restore(&mut self) -> Result<()> {
+    pub(crate) fn restore(&mut self) -> Result<()> {
         if self.restored || !self.owns_terminal {
             return Ok(());
         }
@@ -223,7 +223,7 @@ impl Tui<ratatui::backend::TestBackend> {
 impl<B: Backend> Drop for Tui<B> {
     fn drop(&mut self) {
         // Nothing useful to do with an error while unwinding.
-        let _ = self.restore();
+        drop(self.restore());
     }
 }
 
@@ -234,8 +234,14 @@ impl<B: Backend> Drop for Tui<B> {
 fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+        // Both discarded deliberately: the panic message is the thing that has
+        // to get out, and a restore that failed must not stop it being printed.
+        drop(disable_raw_mode());
+        drop(execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        ));
         previous(info);
     }));
 }

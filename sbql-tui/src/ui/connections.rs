@@ -50,7 +50,7 @@ pub(super) fn label_rect(line: Rect, start: u16, width: u16) -> Rect {
 // Connections panel (top-left)
 // ---------------------------------------------------------------------------
 
-pub fn draw_connections(
+pub(crate) fn draw_connections(
     frame: &mut Frame,
     conn: &ConnectionState,
     focused: FocusedPanel,
@@ -148,7 +148,7 @@ pub fn draw_connections(
 // Tables panel (bottom-left)
 // ---------------------------------------------------------------------------
 
-pub fn draw_tables(
+pub(crate) fn draw_tables(
     frame: &mut Frame,
     tables: &TableBrowserState,
     focused: FocusedPanel,
@@ -226,7 +226,7 @@ const HELP_SAVE: &str = "Enter: save";
 const HELP_GAP: &str = "  ";
 const HELP_CANCEL: &str = "Esc: cancel";
 
-pub fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect, hits: &mut HitMap) {
+pub(crate) fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect, hits: &mut HitMap) {
     let area = centered_rect(60, 70, screen);
 
     frame.render_widget(Clear, area);
