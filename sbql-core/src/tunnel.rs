@@ -27,9 +27,13 @@ impl Default for TunnelManager {
     }
 }
 
+/// What is kept per open tunnel: only the means to close it.
+///
+/// The local port is deliberately not stored. `open` returns it to the caller,
+/// which is the one party that needs it — keeping a second copy here only ever
+/// fed a `local_port()` lookup nobody called.
 #[derive(Debug)]
 struct TunnelHandle {
-    local_port: u16,
     shutdown: tokio::sync::watch::Sender<bool>,
 }
 
@@ -159,7 +163,6 @@ impl TunnelManager {
         self.tunnels.write().await.insert(
             config.id,
             TunnelHandle {
-                local_port,
                 shutdown: shutdown_tx,
             },
         );
@@ -172,12 +175,6 @@ impl TunnelManager {
         if let Some(handle) = self.tunnels.write().await.remove(&id) {
             let _ = handle.shutdown.send(true);
         }
-    }
-
-    /// Get the local port for an active tunnel.
-    #[allow(dead_code)]
-    pub(crate) async fn local_port(&self, id: Uuid) -> Option<u16> {
-        self.tunnels.read().await.get(&id).map(|h| h.local_port)
     }
 }
 

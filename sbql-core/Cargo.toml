@@ -44,7 +44,6 @@ mongodb.workspace = true
 tiberius.workspace = true
 bb8.workspace = true
 bb8-tiberius.workspace = true
-tokio-util.workspace = true
 russh.workspace = true
 
 # --- Platform credential stores ---------------------------------------------

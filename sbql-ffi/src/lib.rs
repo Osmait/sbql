@@ -155,6 +155,17 @@ impl SbqlFfiError {
 #[derive(uniffi::Object)]
 pub struct SbqlEngine {
     core: Arc<Mutex<sbql_core::Core>>,
+
+    /// Held, never read — and it must stay that way.
+    ///
+    /// This engine builds its own multi-threaded runtime in [`Self::new`].
+    /// Dropping the last `Arc` to a `Runtime` shuts its worker threads down,
+    /// so this field is what keeps the runtime alive for as long as Swift
+    /// holds the engine. Delete it as "unused" and every `async` method here
+    /// loses the executor underneath it.
+    ///
+    /// `#[allow(dead_code)]` because that is exactly what it looks like to the
+    /// compiler, which cannot see a `Drop` impl as a use.
     #[allow(dead_code)]
     runtime: Arc<tokio::runtime::Runtime>,
 }

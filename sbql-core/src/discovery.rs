@@ -245,7 +245,11 @@ pub(crate) fn parse_inspect(json: &str, dir: &Path) -> Vec<DiscoveredCredentials
     // reshuffle between scans.
     found.sort_by(|a, b| {
         let rank = |s: &DiscoverySource| match s {
-            DiscoverySource::Compose { here: true, .. } => 0,
+            // `is_here()` rather than repeating `here: true` — the predicate
+            // that decides "the stack the user came for" should have exactly
+            // one definition, and this was the only production caller it was
+            // missing.
+            DiscoverySource::Compose { .. } if s.is_here() => 0,
             DiscoverySource::Compose { .. } => 1,
             DiscoverySource::Container { .. } => 2,
         };

@@ -186,6 +186,45 @@ the ids are theirs, so you can look up the rationale.
 **[tool]** `unreachable_pub` is on. `pub` means "part of this crate's contract";
 anything reachable only from inside is `pub(crate)`.
 
+### Dead code, and why the compiler cannot find it here
+
+**[review]** `dead_code` reports nothing in this workspace, and that is not the
+same as there being none. It stops at three boundaries:
+
+- **`sbql-core` is a library.** rustc assumes every `pub` item has a downstream
+  consumer. Its only consumers are in this repo, so the question is answerable
+  by cross-referencing `sbql-tui`, `sbql-ffi`, and core's own `tests/`,
+  `benches/`, `examples/`.
+- **`sbql-ffi` exports to Swift.** The caller is not Rust. `sbql-macos` is in
+  this repo, so the same cross-reference works — remembering that uniffi
+  renames `snake_case` to `camelCase`.
+- **Enum variants cross crates.** `CoreCommand` is built by the frontends and
+  handled by core; `CoreEvent` is the reverse. A command nobody sends is dead
+  and nothing flags it.
+
+**[review]** Three traps, each of which produced a false positive the one time
+this was swept properly:
+
+1. **A type in a public signature is public API even if no consumer names it.**
+   `ValidationError` looked unreferenced; it is what `ConnectionDraft::build()`
+   returns, and the TUI calls that. A grep cannot see it.
+2. **A field held for its `Drop` looks exactly like a dead field.**
+   `SbqlEngine.runtime` is never read, and deleting it would shut down the
+   Tokio runtime under every async FFI call. Any `#[allow(dead_code)]` on a
+   field must carry a comment saying which of the two it is.
+3. **`SbqlError`'s variants are unused by every frontend on purpose.** That is
+   the two-error design in §3 working, not a finding.
+
+**[review]** When something is used only by tests, prefer finding its missing
+production caller over deleting it. `DiscoverySource::is_here` had test-only
+callers *and* a hand-inlined copy of its predicate in the discovery sort — the
+fix was to call it, not to remove it.
+
+**[tool]** `cargo machete` runs in CI and via `make audit`. It found three
+unused dependencies the first time it ran. It matches on the crate name in the
+source, so a dependency used only through a macro can false-positive; the fix
+is an `ignored` entry in that crate's `[package.metadata.cargo-machete]`.
+
 ### `#[non_exhaustive]`, and where it is wrong
 
 **[review]** `SbqlError` and `Severity` are `#[non_exhaustive]`. Both are things
