@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::action::{Action, NavAction};
 use crate::app::{AppState, FocusedPanel};
 
-pub fn try_navigate_panels(state: &AppState, key: KeyEvent) -> Option<Action> {
+pub(crate) fn try_navigate_panels(state: &AppState, key: KeyEvent) -> Option<Action> {
     let sidebar = !state.layout.sidebar_hidden;
     match key.code {
         KeyCode::Char('l') | KeyCode::Right => {
@@ -46,7 +46,7 @@ pub fn try_navigate_panels(state: &AppState, key: KeyEvent) -> Option<Action> {
     }
 }
 
-pub fn tab_next(current: FocusedPanel, sidebar_hidden: bool) -> FocusedPanel {
+pub(crate) fn tab_next(current: FocusedPanel, sidebar_hidden: bool) -> FocusedPanel {
     match current {
         FocusedPanel::Connections => {
             if sidebar_hidden {
@@ -67,7 +67,7 @@ pub fn tab_next(current: FocusedPanel, sidebar_hidden: bool) -> FocusedPanel {
     }
 }
 
-pub fn tab_prev(current: FocusedPanel, sidebar_hidden: bool) -> FocusedPanel {
+pub(crate) fn tab_prev(current: FocusedPanel, sidebar_hidden: bool) -> FocusedPanel {
     match current {
         FocusedPanel::Connections => FocusedPanel::Results,
         FocusedPanel::Tables => FocusedPanel::Connections,

@@ -17,15 +17,20 @@ fn path() -> Option<PathBuf> {
 }
 
 /// The connection id from the previous run, if one was recorded.
-pub fn last_connection_id() -> Option<String> {
+pub(crate) fn last_connection_id() -> Option<String> {
     let raw = std::fs::read_to_string(path()?).ok()?;
     let trimmed = raw.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-pub fn remember(id: &Uuid) {
+pub(crate) fn remember(id: &Uuid) {
     if let Some(path) = path() {
-        let _ = std::fs::write(path, id.to_string());
+        // Still ignored as far as the user is concerned (see the module docs),
+        // but written to the log: "it forgot my connection again" is otherwise
+        // a report with nothing behind it to look at.
+        if let Err(e) = std::fs::write(path, id.to_string()) {
+            tracing::debug!("could not record the last connection: {e}");
+        }
     }
 }
 
@@ -37,21 +42,27 @@ fn theme_path() -> Option<PathBuf> {
 }
 
 /// The theme chosen in a previous run, if one was recorded.
-pub fn last_theme() -> Option<String> {
+pub(crate) fn last_theme() -> Option<String> {
     let raw = std::fs::read_to_string(theme_path()?).ok()?;
     let trimmed = raw.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-pub fn remember_theme(name: &str) {
+pub(crate) fn remember_theme(name: &str) {
     if let Some(path) = theme_path() {
-        let _ = std::fs::write(path, name);
+        if let Err(e) = std::fs::write(path, name) {
+            tracing::debug!("could not record the chosen theme: {e}");
+        }
     }
 }
 
-pub fn forget() {
+pub(crate) fn forget() {
     if let Some(path) = path() {
-        let _ = std::fs::remove_file(path);
+        // `NotFound` is the ordinary case — disconnecting twice, or a first run
+        // that never recorded anything — so this is a debug line, not a warning.
+        if let Err(e) = std::fs::remove_file(path) {
+            tracing::debug!("could not clear the last connection: {e}");
+        }
     }
 }
 

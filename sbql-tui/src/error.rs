@@ -17,7 +17,7 @@ use std::io;
 use crate::cli::StartupError;
 
 #[derive(Debug, thiserror::Error)]
-pub enum TuiError {
+pub(crate) enum TuiError {
     /// Raw mode, the alternate screen or the backend could not be set up.
     #[error("could not take over the terminal")]
     TerminalSetup(#[source] io::Error),
@@ -39,7 +39,7 @@ pub enum TuiError {
     Startup(#[from] StartupError),
 }
 
-pub type Result<T> = std::result::Result<T, TuiError>;
+pub(crate) type Result<T> = std::result::Result<T, TuiError>;
 
 #[cfg(test)]
 mod tests {

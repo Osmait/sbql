@@ -34,7 +34,7 @@ pub(super) fn apply(
             state.filter.pending_live_apply_at = None;
             state.filter.last_applied_query = None;
             state.active_filter = None;
-            let _ = cmd_tx.send(CoreCommand::ClearFilter);
+            send_command(cmd_tx, CoreCommand::ClearFilter);
         }
 
         FilterAction::Input(input) => {
@@ -78,11 +78,11 @@ pub(super) fn apply(
             if query.trim().is_empty() {
                 state.active_filter = None;
                 state.filter.last_applied_query = None;
-                let _ = cmd_tx.send(CoreCommand::ClearFilter);
+                send_command(cmd_tx, CoreCommand::ClearFilter);
             } else {
                 state.active_filter = Some(query.clone());
                 state.filter.last_applied_query = Some(query.clone());
-                let _ = cmd_tx.send(CoreCommand::ApplyFilter { query });
+                send_command(cmd_tx, CoreCommand::ApplyFilter { query });
             }
         }
     }
@@ -151,15 +151,14 @@ pub(super) fn apply_refresh_filter_suggestions(
         return;
     };
 
-    let col_idx = match state
+    let Some(col_idx) = state
         .results
         .data
         .columns
         .iter()
         .position(|c| c.eq_ignore_ascii_case(&col))
-    {
-        Some(i) => i,
-        None => return,
+    else {
+        return;
     };
     let prefix_lower = value_prefix.to_lowercase();
     let mut local = std::collections::BTreeSet::new();
@@ -181,12 +180,15 @@ pub(super) fn apply_refresh_filter_suggestions(
     state.filter.loading_suggestions = true;
     state.filter.pending_live_apply_at =
         Some(std::time::Instant::now() + std::time::Duration::from_millis(250));
-    let _ = cmd_tx.send(CoreCommand::SuggestFilterValues {
-        column: col,
-        prefix: value_prefix.to_owned(),
-        limit: 20,
-        token: state.filter.suggestion_token,
-    });
+    send_command(
+        cmd_tx,
+        CoreCommand::SuggestFilterValues {
+            column: col,
+            prefix: value_prefix.to_owned(),
+            limit: 20,
+            token: state.filter.suggestion_token,
+        },
+    );
 }
 
 fn apply_selected_filter_suggestion(state: &mut AppState) -> bool {

@@ -5,7 +5,7 @@ use crate::action::{Action, CompletionAction, EditorAction, NavAction};
 use crate::app::{AppState, EditorMode};
 use crate::events::is_run_query;
 
-pub fn handle(state: &AppState, key: KeyEvent) -> Action {
+pub(crate) fn handle(state: &AppState, key: KeyEvent) -> Action {
     match state.editor.mode {
         EditorMode::Normal => match (key.code, key.modifiers) {
             (KeyCode::Char('i'), KeyModifiers::NONE) => {

@@ -56,10 +56,13 @@ fn apply_enter_cell_edit(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<Co
 
     state.mutation.pending_cell_edit = Some((row_idx, col_idx));
     tracing::info!("GetPrimaryKeys: schema={:?} table={:?}", schema, table_name);
-    let _ = cmd_tx.send(CoreCommand::GetPrimaryKeys {
-        schema,
-        table: table_name,
-    });
+    send_command(
+        cmd_tx,
+        CoreCommand::GetPrimaryKeys {
+            schema,
+            table: table_name,
+        },
+    );
 }
 
 pub(super) fn apply_stage_cell_edit(state: &mut AppState) {
@@ -79,8 +82,7 @@ pub(super) fn apply_stage_cell_edit(state: &mut AppState) {
             );
             let total = state.mutation.pending_edits.len() + state.mutation.pending_deletes.len();
             state.inform(format!(
-                "Staged edit on '{}'. Total staged: {}. Press Ctrl+W to commit.",
-                col_name, total
+                "Staged edit on '{col_name}'. Total staged: {total}. Press Ctrl+W to commit."
             ));
         } else {
             state.inform("No changes to stage (value unchanged).");

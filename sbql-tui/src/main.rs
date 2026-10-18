@@ -53,10 +53,12 @@ async fn main() -> ExitCode {
 /// and buries the one line that matters, the one telling the user to run
 /// `reset`. Writing it out by hand costs nothing and shows the whole chain.
 fn report(out: &mut impl Write, err: &dyn Error) {
-    let _ = writeln!(out, "sbql: {err}");
+    // Discarding the write errors on purpose: this *is* the error path, and if
+    // the stream we report on is itself broken there is nowhere left to say so.
+    drop(writeln!(out, "sbql: {err}"));
     let mut source = err.source();
     while let Some(cause) = source {
-        let _ = writeln!(out, "  caused by: {cause}");
+        drop(writeln!(out, "  caused by: {cause}"));
         source = cause.source();
     }
 }
@@ -83,7 +85,14 @@ async fn run() -> Result<()> {
             // run's own error is the one that explains what happened, so that
             // is what we return — but the user still has to be told their shell
             // may need `reset`, which the returned error would not say.
-            eprintln!("sbql: {restore_err}");
+            //
+            // Printing is safe *here* and nowhere else in this crate: the
+            // alternate screen has just been given back, so this lands in the
+            // user's shell rather than in the middle of a frame.
+            #[allow(clippy::print_stderr)]
+            {
+                eprintln!("sbql: {restore_err}");
+            }
             Err(app_err)
         }
         (Err(e), Ok(())) | (Ok(()), Err(e)) => Err(e),
@@ -100,6 +109,10 @@ async fn run() -> Result<()> {
 fn init_logging() {
     match try_init_logging() {
         Ok(path) => tracing::debug!("logging to {}", path.display()),
+        // Printing is safe *here* and nowhere else in this crate: this runs
+        // before the terminal is taken over, so it lands in the user's shell
+        // rather than in the middle of a frame.
+        #[allow(clippy::print_stderr)]
         Err(e) => eprintln!("sbql: logging disabled: {e}"),
     }
 }

@@ -11,6 +11,8 @@
 //!   4. Re-serialize back to a SQL string.
 //!   5. On parse failure fall back to a safe subquery wrapper.
 
+use std::fmt::Write as _;
+
 use sqlparser::ast::{Expr, Ident, Offset, OffsetRows, OrderByExpr, Query, Statement, Value};
 use sqlparser::dialect::{MsSqlDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect};
 use sqlparser::parser::Parser;
@@ -33,7 +35,9 @@ fn ident_quote_char(backend: DbBackend) -> char {
 /// Direction for column ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortDirection {
+    /// `ASC`.
     Ascending,
+    /// `DESC`.
     Descending,
 }
 
@@ -43,6 +47,13 @@ pub enum SortDirection {
 
 /// Inject (or replace) an `ORDER BY <column> ASC/DESC` clause into `sql`.
 /// If the SQL cannot be parsed, wraps it in a subquery.
+///
+/// # Errors
+///
+/// The backend has no `ORDER BY` — Redis, DynamoDB and MongoDB do not take
+/// SQL. There is nothing to retry: a client should not offer sorting on those
+/// backends in the first place, and this error is the backstop for one that
+/// does.
 #[tracing::instrument(skip_all, fields(column, direction = ?direction, backend = ?backend))]
 pub fn apply_order(
     sql: &str,
@@ -116,6 +127,12 @@ fn quote_column(column: &str, backend: DbBackend) -> String {
 }
 
 /// Remove the `ORDER BY` clause from `sql`.
+///
+/// # Errors
+///
+/// The SQL could not be parsed. Unlike [`apply_order`] there is no subquery
+/// fallback — you cannot strip a clause you could not find — so the caller
+/// keeps the SQL it already had.
 #[tracing::instrument(skip_all, fields(backend = ?backend))]
 pub fn clear_order(sql: &str, backend: DbBackend) -> Result<String> {
     if backend == DbBackend::Redis
@@ -138,6 +155,14 @@ pub fn clear_order(sql: &str, backend: DbBackend) -> Result<String> {
 /// `filter_query` format:
 /// - `"col:value"` → `WHERE col ILIKE '%value%'` (PG) / `LIKE ... COLLATE NOCASE` (SQLite)
 /// - `"plain text"` → adds an `OR` ILIKE/LIKE for every provided column.
+///
+/// # Errors
+///
+/// The backend takes no SQL (Redis, DynamoDB, MongoDB), or a whole-row filter
+/// was asked for on a backend that cannot cast a row to text and `columns` was
+/// empty. The second case is recoverable and the message says how: run the
+/// query first so there are columns to search, or filter one column with
+/// `col:value`.
 #[tracing::instrument(skip_all, fields(backend = ?backend))]
 pub fn apply_filter(
     sql: &str,
@@ -205,7 +230,15 @@ pub fn apply_filter(
                         ors.push_str(" OR ");
                     }
                     let c = quote(c);
-                    ors.push_str(&format!("CAST(_sbql_filter.{c} AS {cast_ty}) {like_op} '%{escaped}%'{match_suffix}"));
+                    // `write!` into the buffer, not `push_str(&format!(..))`:
+                    // the latter allocates a throwaway `String` per column, and
+                    // a wide result set has a lot of columns. Writing to a
+                    // `String` cannot fail, so the `fmt::Result` is discarded
+                    // rather than unwrapped.
+                    let _ = write!(
+                        ors,
+                        "CAST(_sbql_filter.{c} AS {cast_ty}) {like_op} '%{escaped}%'{match_suffix}"
+                    );
                 }
                 Ok(format!(
                     "SELECT * FROM ({trimmed}) AS _sbql_filter WHERE {ors}"

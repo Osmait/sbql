@@ -4,7 +4,7 @@ use tui_textarea::Input;
 use crate::action::{Action, FilterAction};
 use crate::app::AppState;
 
-pub fn handle(state: &AppState, key: KeyEvent) -> Action {
+pub(crate) fn handle(state: &AppState, key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Esc => {
             if state.filter.show_suggestions {
@@ -143,7 +143,7 @@ mod tests {
         let act = handle(&state, key(KeyCode::Enter));
         assert!(matches!(
             act,
-            Action::Filter(FilterAction::ApplySuggestion) | Action::Filter(FilterAction::Apply)
+            Action::Filter(FilterAction::ApplySuggestion | FilterAction::Apply)
         ));
     }
 }

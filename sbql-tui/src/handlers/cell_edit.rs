@@ -5,7 +5,7 @@ use crate::action::{Action, CellEditAction, ResultsAction};
 use crate::app::AppState;
 use crate::events::is_commit;
 
-pub fn handle(_state: &AppState, key: KeyEvent) -> Action {
+pub(crate) fn handle(_state: &AppState, key: KeyEvent) -> Action {
     match (key.code, key.modifiers) {
         (KeyCode::Esc, _) => Action::CellEdit(CellEditAction::Cancel),
         (KeyCode::Char('s'), KeyModifiers::CONTROL) | (KeyCode::Enter, KeyModifiers::NONE) => {

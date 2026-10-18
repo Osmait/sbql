@@ -35,7 +35,7 @@ impl TryFrom<FfiConnectionConfig> for sbql_core::ConnectionConfig {
         let id = uuid::Uuid::parse_str(&c.id).map_err(|e| SbqlFfiError::InvalidArgument {
             msg: format!("Invalid UUID: {e}"),
         })?;
-        Ok(sbql_core::ConnectionConfig {
+        Ok(Self {
             id,
             name: c.name,
             backend: c.backend.into(),
@@ -62,13 +62,13 @@ impl TryFrom<FfiConnectionConfig> for sbql_core::ConnectionConfig {
 impl From<sbql_core::DbBackend> for FfiDbBackend {
     fn from(b: sbql_core::DbBackend) -> Self {
         match b {
-            sbql_core::DbBackend::Postgres => FfiDbBackend::Postgres,
-            sbql_core::DbBackend::Mysql => FfiDbBackend::Mysql,
-            sbql_core::DbBackend::Sqlite => FfiDbBackend::Sqlite,
-            sbql_core::DbBackend::Redis => FfiDbBackend::Redis,
-            sbql_core::DbBackend::DynamoDb => FfiDbBackend::DynamoDb,
-            sbql_core::DbBackend::MongoDb => FfiDbBackend::MongoDb,
-            sbql_core::DbBackend::SqlServer => FfiDbBackend::SqlServer,
+            sbql_core::DbBackend::Postgres => Self::Postgres,
+            sbql_core::DbBackend::Mysql => Self::Mysql,
+            sbql_core::DbBackend::Sqlite => Self::Sqlite,
+            sbql_core::DbBackend::Redis => Self::Redis,
+            sbql_core::DbBackend::DynamoDb => Self::DynamoDb,
+            sbql_core::DbBackend::MongoDb => Self::MongoDb,
+            sbql_core::DbBackend::SqlServer => Self::SqlServer,
         }
     }
 }
@@ -76,13 +76,13 @@ impl From<sbql_core::DbBackend> for FfiDbBackend {
 impl From<FfiDbBackend> for sbql_core::DbBackend {
     fn from(b: FfiDbBackend) -> Self {
         match b {
-            FfiDbBackend::Postgres => sbql_core::DbBackend::Postgres,
-            FfiDbBackend::Mysql => sbql_core::DbBackend::Mysql,
-            FfiDbBackend::Sqlite => sbql_core::DbBackend::Sqlite,
-            FfiDbBackend::Redis => sbql_core::DbBackend::Redis,
-            FfiDbBackend::DynamoDb => sbql_core::DbBackend::DynamoDb,
-            FfiDbBackend::MongoDb => sbql_core::DbBackend::MongoDb,
-            FfiDbBackend::SqlServer => sbql_core::DbBackend::SqlServer,
+            FfiDbBackend::Postgres => Self::Postgres,
+            FfiDbBackend::Mysql => Self::Mysql,
+            FfiDbBackend::Sqlite => Self::Sqlite,
+            FfiDbBackend::Redis => Self::Redis,
+            FfiDbBackend::DynamoDb => Self::DynamoDb,
+            FfiDbBackend::MongoDb => Self::MongoDb,
+            FfiDbBackend::SqlServer => Self::SqlServer,
         }
     }
 }
@@ -94,11 +94,11 @@ impl From<FfiDbBackend> for sbql_core::DbBackend {
 impl From<sbql_core::SslMode> for FfiSslMode {
     fn from(s: sbql_core::SslMode) -> Self {
         match s {
-            sbql_core::SslMode::Prefer => FfiSslMode::Prefer,
-            sbql_core::SslMode::Disable => FfiSslMode::Disable,
-            sbql_core::SslMode::Require => FfiSslMode::Require,
-            sbql_core::SslMode::VerifyCa => FfiSslMode::VerifyCa,
-            sbql_core::SslMode::VerifyFull => FfiSslMode::VerifyFull,
+            sbql_core::SslMode::Prefer => Self::Prefer,
+            sbql_core::SslMode::Disable => Self::Disable,
+            sbql_core::SslMode::Require => Self::Require,
+            sbql_core::SslMode::VerifyCa => Self::VerifyCa,
+            sbql_core::SslMode::VerifyFull => Self::VerifyFull,
         }
     }
 }
@@ -106,11 +106,11 @@ impl From<sbql_core::SslMode> for FfiSslMode {
 impl From<FfiSslMode> for sbql_core::SslMode {
     fn from(s: FfiSslMode) -> Self {
         match s {
-            FfiSslMode::Prefer => sbql_core::SslMode::Prefer,
-            FfiSslMode::Disable => sbql_core::SslMode::Disable,
-            FfiSslMode::Require => sbql_core::SslMode::Require,
-            FfiSslMode::VerifyCa => sbql_core::SslMode::VerifyCa,
-            FfiSslMode::VerifyFull => sbql_core::SslMode::VerifyFull,
+            FfiSslMode::Prefer => Self::Prefer,
+            FfiSslMode::Disable => Self::Disable,
+            FfiSslMode::Require => Self::Require,
+            FfiSslMode::VerifyCa => Self::VerifyCa,
+            FfiSslMode::VerifyFull => Self::VerifyFull,
         }
     }
 }
@@ -122,8 +122,8 @@ impl From<FfiSslMode> for sbql_core::SslMode {
 impl From<FfiSortDirection> for sbql_core::SortDirection {
     fn from(d: FfiSortDirection) -> Self {
         match d {
-            FfiSortDirection::Ascending => sbql_core::SortDirection::Ascending,
-            FfiSortDirection::Descending => sbql_core::SortDirection::Descending,
+            FfiSortDirection::Ascending => Self::Ascending,
+            FfiSortDirection::Descending => Self::Descending,
         }
     }
 }

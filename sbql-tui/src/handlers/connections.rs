@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::action::{Action, ConnectionsAction, FormAction, NavAction};
 use crate::app::{AppState, FocusedPanel};
 
-pub fn handle(state: &AppState, key: KeyEvent) -> Action {
+pub(crate) fn handle(state: &AppState, key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => {
             // `conn.len()`, not `connections.len()`: the cursor also walks the
@@ -76,19 +76,19 @@ pub fn handle(state: &AppState, key: KeyEvent) -> Action {
     }
 }
 
-pub fn handle_confirm_delete(_state: &AppState, key: KeyEvent) -> Action {
+pub(crate) fn handle_confirm_delete(_state: &AppState, key: KeyEvent) -> Action {
     match key.code {
-        KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+        KeyCode::Char('y' | 'Y') | KeyCode::Enter => {
             Action::Connections(ConnectionsAction::ConfirmDelete)
         }
-        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+        KeyCode::Char('n' | 'N') | KeyCode::Esc => {
             Action::Connections(ConnectionsAction::CancelDelete)
         }
         _ => Action::Noop,
     }
 }
 
-pub fn handle_form(state: &AppState, key: KeyEvent) -> Action {
+pub(crate) fn handle_form(state: &AppState, key: KeyEvent) -> Action {
     let form = &state.conn.form;
     match key.code {
         KeyCode::Esc => Action::Form(FormAction::Close),

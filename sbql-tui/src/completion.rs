@@ -3,21 +3,21 @@ use sbql_core::{DiagramData, TableEntry};
 use crate::list_cursor::{ListCursor, Overflow};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompletionKind {
+pub(crate) enum CompletionKind {
     Table,
     Column,
     Keyword,
 }
 
 #[derive(Debug, Clone)]
-pub struct CompletionItem {
+pub(crate) struct CompletionItem {
     pub text: String,
     pub detail: String,
     pub kind: CompletionKind,
 }
 
 #[derive(Debug, Default)]
-pub struct CompletionState {
+pub(crate) struct CompletionState {
     pub visible: bool,
     pub items: Vec<CompletionItem>,
     pub cursor: ListCursor,
@@ -25,7 +25,7 @@ pub struct CompletionState {
 }
 
 impl CompletionState {
-    pub fn dismiss(&mut self) {
+    pub(crate) fn dismiss(&mut self) {
         self.visible = false;
         self.items.clear();
         self.cursor.reset();
@@ -33,25 +33,25 @@ impl CompletionState {
     }
 
     /// A short popup, so it wraps: cycling is quicker than reversing.
-    pub fn move_up(&mut self) {
+    pub(crate) fn move_up(&mut self) {
         self.cursor.prev(self.items.len(), Overflow::Wrap);
     }
 
-    pub fn move_down(&mut self) {
+    pub(crate) fn move_down(&mut self) {
         self.cursor.next(self.items.len(), Overflow::Wrap);
     }
 
-    pub fn selected(&self) -> usize {
+    pub(crate) fn selected(&self) -> usize {
         self.cursor.index()
     }
 
-    pub fn selected_item(&self) -> Option<&CompletionItem> {
+    pub(crate) fn selected_item(&self) -> Option<&CompletionItem> {
         self.items.get(self.cursor.index())
     }
 }
 
 /// SQL keywords offered by autocomplete.
-pub const SQL_KEYWORDS: &[&str] = &[
+pub(crate) const SQL_KEYWORDS: &[&str] = &[
     "SELECT",
     "FROM",
     "WHERE",
@@ -135,7 +135,7 @@ pub const SQL_KEYWORDS: &[&str] = &[
 /// converted to a byte offset before slicing. Treating it as a byte index
 /// panicked (or misread continuation bytes) as soon as the line held any
 /// non-ASCII text.
-pub fn extract_prefix(lines: &[String], row: usize, col: usize) -> String {
+pub(crate) fn extract_prefix(lines: &[String], row: usize, col: usize) -> String {
     let Some(line) = lines.get(row) else {
         return String::new();
     };
@@ -155,7 +155,7 @@ pub fn extract_prefix(lines: &[String], row: usize, col: usize) -> String {
 }
 
 /// Compute completion candidates for the given prefix.
-pub fn compute_completions(
+pub(crate) fn compute_completions(
     prefix: &str,
     tables: &[TableEntry],
     diagram: Option<&DiagramData>,
@@ -222,9 +222,9 @@ pub fn compute_completions(
 impl CompletionKind {
     fn cmp_order(self) -> u8 {
         match self {
-            CompletionKind::Table => 0,
-            CompletionKind::Column => 1,
-            CompletionKind::Keyword => 2,
+            Self::Table => 0,
+            Self::Column => 1,
+            Self::Keyword => 2,
         }
     }
 }

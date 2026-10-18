@@ -23,10 +23,8 @@ async fn test_database_schema_and_mutations() {
 
     // The default testcontainers-modules postgres setup uses:
     // user: postgres, db: postgres, password: postgres
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
 
     // 2. Connect to the database using sqlx
     let pg_pool = PgPool::connect(&connection_string)
@@ -209,10 +207,8 @@ async fn test_execute_page_pagination() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 
@@ -225,7 +221,7 @@ async fn test_execute_page_pagination() {
     // Insert 150 rows to exceed PAGE_SIZE (100)
     for i in 0..150 {
         sqlx::query("INSERT INTO many_rows (val) VALUES ($1)")
-            .bind(format!("row_{}", i))
+            .bind(format!("row_{i}"))
             .execute(&pg_pool)
             .await
             .unwrap();
@@ -253,10 +249,8 @@ async fn test_execute_page_empty_result() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 
@@ -278,10 +272,8 @@ async fn test_boolean_and_numeric_types() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 
@@ -338,10 +330,8 @@ async fn test_date_time_types() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 
@@ -385,10 +375,8 @@ async fn test_array_types() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 
@@ -432,10 +420,8 @@ async fn test_suggest_distinct_values() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 
@@ -471,10 +457,8 @@ async fn test_suggest_distinct_values_special_chars() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 
@@ -510,10 +494,8 @@ async fn test_user_defined_limit_respected() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 
@@ -541,10 +523,8 @@ async fn test_pg_null_in_all_types() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 
@@ -603,10 +583,8 @@ async fn test_pg_unicode_roundtrip() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 
@@ -650,10 +628,8 @@ async fn test_pg_jsonb_nested() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 
@@ -682,10 +658,8 @@ async fn test_pg_composite_pk() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 
@@ -714,10 +688,8 @@ async fn test_pg_view_in_list_tables() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 
@@ -745,10 +717,8 @@ async fn test_pg_special_chars_in_data() {
     let container = Postgres::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(5432).await.unwrap();
-    let connection_string = format!(
-        "postgresql://postgres:postgres@{}:{}/postgres",
-        host_ip, host_port
-    );
+    let connection_string =
+        format!("postgresql://postgres:postgres@{host_ip}:{host_port}/postgres");
     let pg_pool = PgPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Postgres(pg_pool.clone());
 

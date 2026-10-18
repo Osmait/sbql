@@ -1,3 +1,10 @@
+//! Opening, reusing and closing the live database pools.
+//!
+//! One [`ConnectionManager`] owns every open pool for a [`Core`](crate::Core),
+//! keyed by connection id, along with the SSH tunnels some of them are routed
+//! through. It is the only place that knows how to turn a
+//! [`ConnectionConfig`] plus a password into a driver handle.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -13,25 +20,21 @@ use crate::pool::{DbBackend, DbPool};
 use crate::tunnel::TunnelManager;
 
 /// Manages a map of live [`DbPool`] instances keyed by connection id.
-#[derive(Clone, Default)]
-pub struct ConnectionManager {
+///
+/// Cloning shares the pools rather than duplicating them: every clone is a
+/// handle on the same map, which is what lets [`Core`](crate::Core) be `Clone`.
+#[derive(Clone, Default, Debug)]
+pub(crate) struct ConnectionManager {
     pools: Arc<RwLock<HashMap<Uuid, DbPool>>>,
     tunnel_manager: Arc<TunnelManager>,
 }
 
 impl ConnectionManager {
-    pub fn new() -> Self {
-        Self {
-            pools: Arc::new(RwLock::new(HashMap::new())),
-            tunnel_manager: Arc::new(TunnelManager::new()),
-        }
-    }
-
     /// Open (or reuse) a connection pool with an explicit password.
     /// If SSH tunneling is enabled on the config, an SSH tunnel is opened first
     /// and the database connection is routed through `localhost:<tunnel_port>`.
     #[tracing::instrument(skip_all, fields(name = config.name, backend = ?config.backend))]
-    pub async fn connect_with_password(
+    pub(crate) async fn connect_with_password(
         &self,
         config: &ConnectionConfig,
         password: &str,
@@ -218,7 +221,14 @@ impl ConnectionManager {
     }
 
     /// Ping a connection by running `SELECT 1`.
-    pub async fn ping(&self, id: Uuid) -> Result<()> {
+    ///
+    /// `#[cfg(test)]` because nothing in the shipped path calls it: a pool that
+    /// has gone away surfaces on the next real query, and pinging first would
+    /// double the round-trips for no new information. It stays because the
+    /// discovery test uses it to prove scraped credentials actually open a
+    /// working connection, which is the one place a liveness check earns itself.
+    #[cfg(test)]
+    pub(crate) async fn ping(&self, id: Uuid) -> Result<()> {
         let guard = self.pools.read().await;
         let pool = guard
             .get(&id)
@@ -235,7 +245,10 @@ impl ConnectionManager {
             }
             DbPool::Redis(cm) => {
                 let mut conn = cm.as_ref().clone();
-                let _: String = redis::cmd("PING").query_async(&mut conn).await?;
+                // The reply ("PONG") is of no interest — only that the
+                // round-trip succeeded. `::<String>` is still needed to tell
+                // redis what to decode the reply into.
+                redis::cmd("PING").query_async::<String>(&mut conn).await?;
             }
             DbPool::DynamoDb(client) => {
                 client
@@ -264,7 +277,7 @@ impl ConnectionManager {
     }
 
     /// Get a clone of the pool for the given connection id.
-    pub async fn get(&self, id: Uuid) -> Result<DbPool> {
+    pub(crate) async fn get(&self, id: Uuid) -> Result<DbPool> {
         let guard = self.pools.read().await;
         guard
             .get(&id)
@@ -273,7 +286,7 @@ impl ConnectionManager {
     }
 
     /// Close and remove a pool, and shut down any associated SSH tunnel.
-    pub async fn disconnect(&self, id: Uuid) {
+    pub(crate) async fn disconnect(&self, id: Uuid) {
         if let Some(pool) = self.pools.write().await.remove(&id) {
             pool.close().await;
             tracing::info!("Disconnected {}", id);
@@ -282,7 +295,7 @@ impl ConnectionManager {
     }
 
     /// Returns the ids of all currently open connections.
-    pub async fn active_ids(&self) -> Vec<Uuid> {
+    pub(crate) async fn active_ids(&self) -> Vec<Uuid> {
         self.pools.read().await.keys().copied().collect()
     }
 }
@@ -293,14 +306,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_connection_manager_initialization() {
-        let manager = ConnectionManager::new();
+        let manager = ConnectionManager::default();
         let ids = manager.active_ids().await;
         assert!(ids.is_empty());
     }
 
     #[tokio::test]
     async fn test_manager_get_missing_pool() {
-        let manager = ConnectionManager::new();
+        let manager = ConnectionManager::default();
         let id = Uuid::new_v4();
 
         let result = manager.get(id).await;
@@ -314,7 +327,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_manager_ping_missing_pool() {
-        let manager = ConnectionManager::new();
+        let manager = ConnectionManager::default();
         let id = Uuid::new_v4();
 
         let result = manager.ping(id).await;
@@ -328,7 +341,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_manager_disconnect_missing_pool() {
-        let manager = ConnectionManager::new();
+        let manager = ConnectionManager::default();
         let id = Uuid::new_v4();
 
         // This should just silently return without doing anything or crashing
@@ -341,7 +354,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_sqlite_in_memory() {
-        let manager = ConnectionManager::new();
+        let manager = ConnectionManager::default();
         let config = ConnectionConfig::new_sqlite("test", ":memory:");
         manager
             .connect_with_password(&config, "")
@@ -353,7 +366,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_twice_is_idempotent() {
-        let manager = ConnectionManager::new();
+        let manager = ConnectionManager::default();
         let config = ConnectionConfig::new_sqlite("test", ":memory:");
         manager
             .connect_with_password(&config, "")
@@ -370,7 +383,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ping_sqlite_pool() {
-        let manager = ConnectionManager::new();
+        let manager = ConnectionManager::default();
         let config = ConnectionConfig::new_sqlite("test", ":memory:");
         manager.connect_with_password(&config, "").await.unwrap();
         manager
@@ -381,7 +394,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_disconnect_removes_pool() {
-        let manager = ConnectionManager::new();
+        let manager = ConnectionManager::default();
         let config = ConnectionConfig::new_sqlite("test", ":memory:");
         manager.connect_with_password(&config, "").await.unwrap();
         assert!(!manager.active_ids().await.is_empty());
@@ -395,7 +408,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_invalid_connection_string() {
-        let manager = ConnectionManager::new();
+        let manager = ConnectionManager::default();
         let mut config = ConnectionConfig::new_sqlite("bad", "");
         // Provide an invalid file path that doesn't exist and can't be created
         config.file_path = Some("/nonexistent/directory/that/does/not/exist/test.db".to_string());

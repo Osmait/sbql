@@ -26,7 +26,7 @@ use crate::ui::hit::{Side, Zone};
 ///
 /// Hit-testing needs the regions from the last draw, so this reads geometry as
 /// well as state — but it stays a pure function of both.
-pub fn handle(state: &AppState, mouse: MouseEvent) -> Action {
+pub(crate) fn handle(state: &AppState, mouse: MouseEvent) -> Action {
     let (col, row) = (mouse.column, mouse.row);
 
     match mouse.kind {

@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::action::{Action, NavAction, TablesAction};
 use crate::app::{AppState, FocusedPanel};
 
-pub fn handle(state: &AppState, key: KeyEvent) -> Action {
+pub(crate) fn handle(state: &AppState, key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => {
             if !state.tables.tables.is_empty() {

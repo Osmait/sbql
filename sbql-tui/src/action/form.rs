@@ -79,7 +79,7 @@ fn apply_form_submit(state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCo
         }
     };
 
-    let _ = cmd_tx.send(CoreCommand::SaveConnection { config, password });
+    send_command(cmd_tx, CoreCommand::SaveConnection { config, password });
     state.conn.form.visible = false;
     state.conn.form.error = None;
 }

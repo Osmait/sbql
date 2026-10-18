@@ -7,41 +7,57 @@ use sqlx::{MySqlPool, PgPool, SqlitePool};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DbBackend {
+    /// PostgreSQL, over `sqlx`. The default for a new connection.
     #[default]
     Postgres,
+    /// SQLite, a local file rather than a server.
     Sqlite,
+    /// MySQL or MariaDB — same wire protocol, same code path.
     Mysql,
+    /// Redis. Commands, not SQL: no schema, no sorting, no filtering.
     Redis,
+    /// DynamoDB via the AWS SDK. `database` holds the region.
     DynamoDb,
+    /// MongoDB. Documents are flattened to columns for display.
     MongoDb,
+    /// Microsoft SQL Server, over `tiberius` behind a `bb8` pool.
     SqlServer,
 }
 
 /// A pool that wraps one of the supported backends: PostgreSQL, SQLite, MySQL, Redis, DynamoDB, MongoDB, or SQL Server.
 #[derive(Clone)]
 pub enum DbPool {
+    /// A `sqlx` PostgreSQL pool.
     Postgres(PgPool),
+    /// A `sqlx` SQLite pool, capped at one connection — SQLite serialises
+    /// writers anyway.
     Sqlite(SqlitePool),
+    /// A `sqlx` MySQL pool.
     Mysql(MySqlPool),
+    /// A redis connection manager, which reconnects on its own.
     Redis(Box<redis::aio::ConnectionManager>),
+    /// An AWS SDK client. Boxed because it is far larger than the other
+    /// variants and would otherwise set the size of every `DbPool`.
     DynamoDb(Box<aws_sdk_dynamodb::Client>),
+    /// A MongoDB handle to one database.
     MongoDb(Box<mongodb::Database>),
+    /// A `bb8` pool over `tiberius`.
     SqlServer(Box<bb8::Pool<bb8_tiberius::ConnectionManager>>),
 }
 
 impl std::fmt::Debug for DbPool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DbPool::Postgres(_) => f.debug_tuple("Postgres").field(&"PgPool(..)").finish(),
-            DbPool::Sqlite(_) => f.debug_tuple("Sqlite").field(&"SqlitePool(..)").finish(),
-            DbPool::Mysql(_) => f.debug_tuple("Mysql").field(&"MySqlPool(..)").finish(),
-            DbPool::Redis(_) => f
+            Self::Postgres(_) => f.debug_tuple("Postgres").field(&"PgPool(..)").finish(),
+            Self::Sqlite(_) => f.debug_tuple("Sqlite").field(&"SqlitePool(..)").finish(),
+            Self::Mysql(_) => f.debug_tuple("Mysql").field(&"MySqlPool(..)").finish(),
+            Self::Redis(_) => f
                 .debug_tuple("Redis")
                 .field(&"ConnectionManager(..)")
                 .finish(),
-            DbPool::DynamoDb(_) => f.debug_tuple("DynamoDb").field(&"Client(..)").finish(),
-            DbPool::MongoDb(_) => f.debug_tuple("MongoDb").field(&"Database(..)").finish(),
-            DbPool::SqlServer(_) => f.debug_tuple("SqlServer").field(&"bb8::Pool(..)").finish(),
+            Self::DynamoDb(_) => f.debug_tuple("DynamoDb").field(&"Client(..)").finish(),
+            Self::MongoDb(_) => f.debug_tuple("MongoDb").field(&"Database(..)").finish(),
+            Self::SqlServer(_) => f.debug_tuple("SqlServer").field(&"bb8::Pool(..)").finish(),
         }
     }
 }
@@ -50,26 +66,26 @@ impl DbPool {
     /// Which backend this pool targets.
     pub fn backend(&self) -> DbBackend {
         match self {
-            DbPool::Postgres(_) => DbBackend::Postgres,
-            DbPool::Sqlite(_) => DbBackend::Sqlite,
-            DbPool::Mysql(_) => DbBackend::Mysql,
-            DbPool::Redis(_) => DbBackend::Redis,
-            DbPool::DynamoDb(_) => DbBackend::DynamoDb,
-            DbPool::MongoDb(_) => DbBackend::MongoDb,
-            DbPool::SqlServer(_) => DbBackend::SqlServer,
+            Self::Postgres(_) => DbBackend::Postgres,
+            Self::Sqlite(_) => DbBackend::Sqlite,
+            Self::Mysql(_) => DbBackend::Mysql,
+            Self::Redis(_) => DbBackend::Redis,
+            Self::DynamoDb(_) => DbBackend::DynamoDb,
+            Self::MongoDb(_) => DbBackend::MongoDb,
+            Self::SqlServer(_) => DbBackend::SqlServer,
         }
     }
 
     /// Gracefully shut down the pool.
     pub async fn close(&self) {
         match self {
-            DbPool::Postgres(p) => p.close().await,
-            DbPool::Sqlite(p) => p.close().await,
-            DbPool::Mysql(p) => p.close().await,
-            DbPool::Redis(_) => { /* ConnectionManager manages its own lifecycle */ }
-            DbPool::DynamoDb(_) => { /* SDK client manages its own lifecycle */ }
-            DbPool::MongoDb(_) => { /* MongoDB client manages its own lifecycle */ }
-            DbPool::SqlServer(_) => { /* bb8 pool manages its own lifecycle */ }
+            Self::Postgres(p) => p.close().await,
+            Self::Sqlite(p) => p.close().await,
+            Self::Mysql(p) => p.close().await,
+            Self::Redis(_) => { /* ConnectionManager manages its own lifecycle */ }
+            Self::DynamoDb(_) => { /* SDK client manages its own lifecycle */ }
+            Self::MongoDb(_) => { /* MongoDB client manages its own lifecycle */ }
+            Self::SqlServer(_) => { /* bb8 pool manages its own lifecycle */ }
         }
     }
 }

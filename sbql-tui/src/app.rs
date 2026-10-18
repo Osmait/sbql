@@ -20,7 +20,7 @@ use crate::ui::hit::HitMap;
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FocusedPanel {
+pub(crate) enum FocusedPanel {
     Connections,
     Tables,
     Editor,
@@ -36,13 +36,13 @@ pub enum FocusedPanel {
 /// - `Normal`: cursor moves with hjkl; `i` enters Insert.
 /// - `Insert`: full tui-textarea editing; `Esc` returns to Normal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EditorMode {
+pub(crate) enum EditorMode {
     Normal,
     Insert,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NavMode {
+pub(crate) enum NavMode {
     Global,
     Panel,
 }
@@ -52,7 +52,7 @@ pub enum NavMode {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-pub struct ConnectionForm {
+pub(crate) struct ConnectionForm {
     pub visible: bool,
     /// The connection being typed. All field data, validation and the
     /// backend's field list come from `sbql-core`, so the TUI and the macOS
@@ -75,14 +75,14 @@ impl Default for ConnectionForm {
 }
 
 impl ConnectionForm {
-    pub fn open_new() -> Self {
+    pub(crate) fn open_new() -> Self {
         Self {
             visible: true,
             ..Default::default()
         }
     }
 
-    pub fn open_edit(cfg: &ConnectionConfig) -> Self {
+    pub(crate) fn open_edit(cfg: &ConnectionConfig) -> Self {
         Self {
             visible: true,
             draft: ConnectionDraft::from_config(cfg),
@@ -92,19 +92,19 @@ impl ConnectionForm {
     }
 
     /// One row for the backend picker plus one per field the backend declares.
-    pub fn field_count(&self) -> usize {
+    pub(crate) fn field_count(&self) -> usize {
         1 + self.draft.spec().fields.len()
     }
 
     /// Which connection field a row edits. `None` for the backend picker.
-    pub fn field_at(&self, idx: usize) -> Option<&'static FieldSpec> {
+    pub(crate) fn field_at(&self, idx: usize) -> Option<&'static FieldSpec> {
         if idx == 0 {
             return None;
         }
         self.draft.spec().fields.get(idx - 1)
     }
 
-    pub fn field_label(&self, idx: usize) -> &'static str {
+    pub(crate) fn field_label(&self, idx: usize) -> &'static str {
         match self.field_at(idx) {
             _ if idx == 0 => "Backend",
             Some(spec) => spec.label,
@@ -113,14 +113,14 @@ impl ConnectionForm {
     }
 
     /// The active row's value, when it is one that is typed into.
-    pub fn active_value_mut(&mut self) -> Option<&mut String> {
+    pub(crate) fn active_value_mut(&mut self) -> Option<&mut String> {
         let field = self.field_at(self.field_index)?.field;
         self.draft.value_mut(field)
     }
 
     /// The row showing a given field, so a validation error can move the
     /// cursor to the field it is complaining about.
-    pub fn row_of(&self, field: sbql_core::ConnectionField) -> Option<usize> {
+    pub(crate) fn row_of(&self, field: sbql_core::ConnectionField) -> Option<usize> {
         self.draft
             .spec()
             .fields
@@ -129,13 +129,13 @@ impl ConnectionForm {
             .map(|i| i + 1)
     }
 
-    pub fn cycle_backend(&mut self) {
+    pub(crate) fn cycle_backend(&mut self) {
         self.draft.set_backend(self.draft.backend.next());
         self.field_index = 0;
     }
 
     /// Cycle through SSL mode options (for the SSL Mode field).
-    pub fn cycle_ssl_mode(&mut self) {
+    pub(crate) fn cycle_ssl_mode(&mut self) {
         self.draft.ssl_mode = match self.draft.ssl_mode {
             SslMode::Prefer => SslMode::Require,
             SslMode::Require => SslMode::VerifyFull,
@@ -151,7 +151,7 @@ impl ConnectionForm {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-pub struct CellEditState {
+pub(crate) struct CellEditState {
     pub row_idx: usize,
     pub col_idx: usize,
     pub col_name: String,
@@ -166,7 +166,7 @@ pub struct CellEditState {
 
 impl CellEditState {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         row_idx: usize,
         col_idx: usize,
         col_name: String,
@@ -189,7 +189,7 @@ impl CellEditState {
         }
     }
 
-    pub fn current_value(&self) -> String {
+    pub(crate) fn current_value(&self) -> String {
         self.textarea.lines().join("\n")
     }
 }
@@ -199,7 +199,7 @@ impl CellEditState {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Default)]
-pub struct FilterBar {
+pub(crate) struct FilterBar {
     pub visible: bool,
     pub textarea: TextArea<'static>,
     pub suggestions: Vec<String>,
@@ -217,7 +217,7 @@ pub struct FilterBar {
 
 /// A cell edit that has been staged locally but not yet committed to the DB.
 #[derive(Debug, Clone)]
-pub struct PendingEdit {
+pub(crate) struct PendingEdit {
     pub new_val: String,
     pub schema: String,
     pub table: String,
@@ -230,7 +230,7 @@ pub struct PendingEdit {
 
 /// A row marked for deletion, with its full PK already resolved.
 #[derive(Debug, Clone)]
-pub struct PendingDelete {
+pub(crate) struct PendingDelete {
     pub schema: String,
     pub table: String,
     pub pk: Vec<(String, String)>,
@@ -241,7 +241,7 @@ pub struct PendingDelete {
 // ---------------------------------------------------------------------------
 
 /// State for the full-screen database diagram view.
-pub struct DiagramState {
+pub(crate) struct DiagramState {
     pub data: DiagramData,
     /// Index of the selected table in the left sidebar list.
     pub selected_table: usize,
@@ -269,13 +269,13 @@ pub struct DiagramState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiagramGlyphMode {
+pub(crate) enum DiagramGlyphMode {
     Ascii,
     Unicode,
 }
 
 impl DiagramState {
-    pub fn new(data: DiagramData) -> Self {
+    pub(crate) fn new(data: DiagramData) -> Self {
         Self {
             data,
             selected_table: 0,
@@ -297,7 +297,7 @@ impl DiagramState {
 // Composable sub-states
 // ---------------------------------------------------------------------------
 
-pub struct ConnectionState {
+pub(crate) struct ConnectionState {
     pub connections: Vec<ConnectionConfig>,
     /// Databases found running in Docker this session. Offered below the saved
     /// ones and never written to disk unless the user asks.
@@ -316,31 +316,31 @@ pub struct ConnectionState {
 /// the cursor moves through them as one. Making that a type means every call
 /// site has to say which kind it is looking at instead of assuming.
 #[derive(Debug, Clone, Copy)]
-pub enum ConnectionEntry<'a> {
+pub(crate) enum ConnectionEntry<'a> {
     Saved(&'a ConnectionConfig),
     Discovered(&'a DiscoveredConnection),
 }
 
 impl<'a> ConnectionEntry<'a> {
-    pub fn config(self) -> &'a ConnectionConfig {
+    pub(crate) fn config(self) -> &'a ConnectionConfig {
         match self {
             ConnectionEntry::Saved(c) => c,
             ConnectionEntry::Discovered(d) => &d.config,
         }
     }
 
-    pub fn is_discovered(self) -> bool {
+    pub(crate) fn is_discovered(self) -> bool {
         matches!(self, ConnectionEntry::Discovered(_))
     }
 }
 
 impl ConnectionState {
-    pub fn selected(&self) -> usize {
+    pub(crate) fn selected(&self) -> usize {
         self.cursor.index()
     }
 
     /// Every row the panel draws, saved first.
-    pub fn entries(&self) -> impl Iterator<Item = ConnectionEntry<'_>> {
+    pub(crate) fn entries(&self) -> impl Iterator<Item = ConnectionEntry<'_>> {
         self.connections
             .iter()
             .map(ConnectionEntry::Saved)
@@ -349,36 +349,36 @@ impl ConnectionState {
 
     /// How many rows the cursor can land on. Not `connections.len()` — that
     /// would make the discovered ones unreachable.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.connections.len() + self.discovered.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    pub fn entry(&self, idx: usize) -> Option<ConnectionEntry<'_>> {
+    pub(crate) fn entry(&self, idx: usize) -> Option<ConnectionEntry<'_>> {
         self.entries().nth(idx)
     }
 
     /// The row the cursor is on.
-    pub fn selected_entry(&self) -> Option<ConnectionEntry<'_>> {
+    pub(crate) fn selected_entry(&self) -> Option<ConnectionEntry<'_>> {
         self.entry(self.selected())
     }
 }
 
-pub struct TableBrowserState {
+pub(crate) struct TableBrowserState {
     pub tables: Vec<TableEntry>,
     pub cursor: ListCursor,
 }
 
 impl TableBrowserState {
-    pub fn selected(&self) -> usize {
+    pub(crate) fn selected(&self) -> usize {
         self.cursor.index()
     }
 }
 
-pub struct EditorState {
+pub(crate) struct EditorState {
     pub textarea: TextArea<'static>,
     pub mode: EditorMode,
     // Syntax highlighting
@@ -399,12 +399,12 @@ pub struct EditorState {
 
 impl EditorState {
     /// Get the current SQL text from the editor.
-    pub fn sql(&self) -> String {
+    pub(crate) fn sql(&self) -> String {
         self.textarea.lines().join("\n")
     }
 
     /// Record that the text changed, so the view knows to re-highlight.
-    pub fn mark_text_changed(&mut self) {
+    pub(crate) fn mark_text_changed(&mut self) {
         self.revision = self.revision.wrapping_add(1);
     }
 }
@@ -421,7 +421,7 @@ enum Landing {
 }
 
 #[derive(Default)]
-pub struct ResultsState {
+pub(crate) struct ResultsState {
     pub data: QueryResult,
     /// The SQL whose execution produced `data` — what row edits and deletes
     /// resolve their target table from. The editor text is *not* usable for
@@ -461,7 +461,7 @@ pub struct ResultsState {
 }
 
 impl ResultsState {
-    pub fn move_row_down_with_page_hint(&mut self) -> bool {
+    pub(crate) fn move_row_down_with_page_hint(&mut self) -> bool {
         let len = self.data.rows.len();
         if len == 0 {
             return false;
@@ -481,7 +481,7 @@ impl ResultsState {
     /// Returns whether the caller should fetch it. Without this, landing on
     /// the first row of a page was a dead end: the rows above were only
     /// reachable by leaving the table and opening it again.
-    pub fn move_row_up_with_page_hint(&mut self) -> bool {
+    pub(crate) fn move_row_up_with_page_hint(&mut self) -> bool {
         if self.selected_row > 0 {
             self.selected_row -= 1;
             self.clamp_scroll();
@@ -501,7 +501,7 @@ impl ResultsState {
         }
     }
 
-    pub fn move_col_right(&mut self) {
+    pub(crate) fn move_col_right(&mut self) {
         let max = self.data.columns.len().saturating_sub(1);
         if self.selected_col < max {
             self.selected_col += 1;
@@ -509,7 +509,7 @@ impl ResultsState {
         }
     }
 
-    pub fn move_col_left(&mut self) {
+    pub(crate) fn move_col_left(&mut self) {
         if self.selected_col > 0 {
             self.selected_col -= 1;
             self.clamp_col_scroll();
@@ -517,13 +517,13 @@ impl ResultsState {
     }
 
     /// Jump to the first row (vim `gg`).
-    pub fn move_row_first(&mut self) {
+    pub(crate) fn move_row_first(&mut self) {
         self.selected_row = 0;
         self.clamp_scroll();
     }
 
     /// Jump to the last row of the current page (vim `G`).
-    pub fn move_row_last(&mut self) {
+    pub(crate) fn move_row_last(&mut self) {
         let len = self.data.rows.len();
         if len > 0 {
             self.selected_row = len - 1;
@@ -532,7 +532,7 @@ impl ResultsState {
     }
 
     /// Move down by half the viewport height (vim `Ctrl+d`).
-    pub fn move_row_half_page_down(&mut self) -> bool {
+    pub(crate) fn move_row_half_page_down(&mut self) -> bool {
         let half = (self.viewport_height / 2).max(1);
         let len = self.data.rows.len();
         if len == 0 {
@@ -557,7 +557,7 @@ impl ResultsState {
     /// Move up by half the viewport height (vim `Ctrl+u`).
     /// Move up half a screen, or ask for the previous page when already at
     /// the top. Mirrors [`Self::move_row_half_page_down`].
-    pub fn move_row_half_page_up(&mut self) -> bool {
+    pub(crate) fn move_row_half_page_up(&mut self) -> bool {
         if self.selected_row == 0 {
             return self.current_page > 0;
         }
@@ -568,13 +568,13 @@ impl ResultsState {
     }
 
     /// Jump to the first column (vim `0` / `^`).
-    pub fn move_col_first(&mut self) {
+    pub(crate) fn move_col_first(&mut self) {
         self.selected_col = 0;
         self.clamp_col_scroll();
     }
 
     /// Jump to the last column (vim `$`).
-    pub fn move_col_last(&mut self) {
+    pub(crate) fn move_col_last(&mut self) {
         let max = self.data.columns.len().saturating_sub(1);
         self.selected_col = max;
         self.clamp_col_scroll();
@@ -592,7 +592,7 @@ impl ResultsState {
     }
 
     /// Return the column name under the current cursor.
-    pub fn selected_column_name(&self) -> Option<&str> {
+    pub(crate) fn selected_column_name(&self) -> Option<&str> {
         self.data.columns.get(self.selected_col).map(String::as_str)
     }
 
@@ -603,7 +603,7 @@ impl ResultsState {
     /// reported, and the answer is sent as a command — writing the new sort
     /// locally as well is what let the cached sort survive a disconnect that
     /// had already dropped it.
-    pub fn next_sort_direction(&self, col: &str) -> Option<SortDirection> {
+    pub(crate) fn next_sort_direction(&self, col: &str) -> Option<SortDirection> {
         match &self.sort {
             Some((sorted, SortDirection::Ascending)) if sorted == col => {
                 Some(SortDirection::Descending)
@@ -615,7 +615,7 @@ impl ResultsState {
     }
 }
 
-pub struct MutationState {
+pub(crate) struct MutationState {
     pub cell_edit: Option<CellEditState>,
     pub pending_cell_edit: Option<(usize, usize)>,
     pub pending_edits: HashMap<(usize, usize), PendingEdit>,
@@ -626,7 +626,7 @@ pub struct MutationState {
 
 impl MutationState {
     /// Discard all staged (uncommitted) edits and deletes.
-    pub fn discard_pending(&mut self) {
+    pub(crate) fn discard_pending(&mut self) {
         self.pending_edits.clear();
         self.pending_deletes.clear();
         self.pending_delete_row = None;
@@ -638,7 +638,7 @@ impl MutationState {
 ///
 /// Holds what to go back to: moving the cursor applies a theme immediately so
 /// the whole UI is the preview, and Esc has to be able to undo that.
-pub struct ThemePicker {
+pub(crate) struct ThemePicker {
     pub visible: bool,
     pub cursor: ListCursor,
     /// The theme that was in use when the picker opened.
@@ -657,7 +657,7 @@ impl Default for ThemePicker {
 
 impl ThemePicker {
     /// Open on the theme in use, so the list starts where the eye is.
-    pub fn open() -> Self {
+    pub(crate) fn open() -> Self {
         let current = crate::ui::theme::current_index();
         let mut cursor = ListCursor::new();
         cursor.select(current, crate::ui::theme::THEMES.len());
@@ -668,18 +668,18 @@ impl ThemePicker {
         }
     }
 
-    pub fn selected(&self) -> usize {
+    pub(crate) fn selected(&self) -> usize {
         self.cursor.index()
     }
 }
 
-pub struct VimState {
+pub(crate) struct VimState {
     pub nav_mode: NavMode,
     pub pending_leader: bool,
     pub pending_g: bool,
 }
 
-pub struct LayoutCache {
+pub(crate) struct LayoutCache {
     /// The results grid's rect from the last draw.
     ///
     /// The only panel rect still needed outside drawing: the cell-edit popup
@@ -721,7 +721,7 @@ impl LayoutCache {
     /// neighbourhood is deliberate: a terminal cell is already a large target,
     /// and a drifting double-click that acts on the row *next* to the one the
     /// user pointed at is worse than no double-click at all.
-    pub fn is_double_click(&self, col: u16, row: u16, tick: u64) -> bool {
+    pub(crate) fn is_double_click(&self, col: u16, row: u16, tick: u64) -> bool {
         self.last_click.is_some_and(|(c, r, t)| {
             c == col && r == row && tick.wrapping_sub(t) <= DOUBLE_CLICK_TICKS
         })
@@ -739,7 +739,7 @@ impl LayoutCache {
 /// them — so the answer to "who gets this key" is declared here rather than
 /// implied by the order of a chain of `if`s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
+pub(crate) enum Mode {
     /// Full-screen schema diagram. Takes every key.
     Diagram,
     /// The full text of the current notice, over the workspace.
@@ -758,7 +758,7 @@ pub enum Mode {
     Browsing,
 }
 
-pub struct AppState {
+pub(crate) struct AppState {
     // ---- panels ----
     pub focused: FocusedPanel,
 
@@ -806,7 +806,7 @@ impl AppState {
     /// The single place overlay precedence is decided. Callers `match` on the
     /// result, so adding an overlay forces every dispatch site to say what it
     /// does with it, instead of silently falling through to the panel keys.
-    pub fn mode(&self) -> Mode {
+    pub(crate) fn mode(&self) -> Mode {
         if self.diagram.is_some() {
             Mode::Diagram
         } else if self.theme_picker.visible {
@@ -830,7 +830,7 @@ impl AppState {
     ///
     /// Opening an overlay goes through here first, so two can never be open at
     /// once and `mode()` never has to arbitrate between contradictory state.
-    pub fn close_overlays(&mut self) {
+    pub(crate) fn close_overlays(&mut self) {
         self.diagram = None;
         self.diagram_requested = false;
         self.mutation.cell_edit = None;
@@ -847,36 +847,36 @@ impl AppState {
     // -----------------------------------------------------------------------
 
     /// Confirm that something worked. Clears itself after a few seconds.
-    pub fn inform(&mut self, text: impl Into<String>) {
+    pub(crate) fn inform(&mut self, text: impl Into<String>) {
         self.notice = Some(Notice::info(text, self.tick));
     }
 
     /// Report a failure the TUI worked out on its own.
-    pub fn report(&mut self, text: impl Into<String>) {
+    pub(crate) fn report(&mut self, text: impl Into<String>) {
         self.notice = Some(Notice::error(text, self.tick));
     }
 
     /// Report what the core sent back, keeping its kind, severity and cause.
-    pub fn report_core(&mut self, err: sbql_core::CoreError) {
+    pub(crate) fn report_core(&mut self, err: sbql_core::CoreError) {
         self.notice = Some(Notice::from_core(err, self.tick));
     }
 
     /// Take the message down.
-    pub fn dismiss_notice(&mut self) {
+    pub(crate) fn dismiss_notice(&mut self) {
         self.notice = None;
         self.notice_detail_open = false;
     }
 
     /// What the status bar is saying, if anything.
     #[cfg(test)]
-    pub fn notice_text(&self) -> Option<&str> {
+    pub(crate) fn notice_text(&self) -> Option<&str> {
         self.notice.as_ref().map(|n| n.text.as_str())
     }
 
     /// Whether the bar is currently showing a failure (not a warning, not a
     /// confirmation).
     #[cfg(test)]
-    pub fn is_failing(&self) -> bool {
+    pub(crate) fn is_failing(&self) -> bool {
         self.notice
             .as_ref()
             .is_some_and(|n| n.level == crate::notice::Level::Error)
@@ -885,7 +885,7 @@ impl AppState {
     /// Drop the current notice if it has been up long enough.
     ///
     /// Returns whether anything changed, so the caller knows to repaint.
-    pub fn expire_notice(&mut self) -> bool {
+    pub(crate) fn expire_notice(&mut self) -> bool {
         let expired = self
             .notice
             .as_ref()
@@ -898,7 +898,7 @@ impl AppState {
 
     /// Number of overlays currently open. Should only ever be 0 or 1.
     #[cfg(test)]
-    pub fn open_overlay_count(&self) -> usize {
+    pub(crate) fn open_overlay_count(&self) -> usize {
         [
             self.diagram.is_some(),
             self.notice_detail_open,
@@ -913,7 +913,7 @@ impl AppState {
         .count()
     }
 
-    pub fn new(connections: Vec<ConnectionConfig>) -> Self {
+    pub(crate) fn new(connections: Vec<ConnectionConfig>) -> Self {
         let mut textarea = TextArea::default();
         textarea.set_placeholder_text("-- Write SQL here. Press Ctrl+S or F5 to run.");
 
@@ -1032,7 +1032,7 @@ impl AppState {
     // -----------------------------------------------------------------------
 
     /// Apply an incoming [`CoreEvent`] to the application state.
-    pub fn apply_core_event(&mut self, event: CoreEvent) {
+    pub(crate) fn apply_core_event(&mut self, event: CoreEvent) {
         self.layout.needs_redraw = true;
         match event {
             CoreEvent::ConnectionList(conns) => {
@@ -1136,7 +1136,7 @@ impl AppState {
 
                 // Preserve previous columns when current page has no rows.
                 if result.columns.is_empty() && !self.results.data.columns.is_empty() {
-                    result.columns = self.results.data.columns.clone();
+                    result.columns.clone_from(&self.results.data.columns);
                 }
 
                 self.results.data = result;

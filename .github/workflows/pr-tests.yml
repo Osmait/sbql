@@ -8,6 +8,78 @@ permissions:
   contents: read
 
 jobs:
+  # CONTRIBUTING.md has claimed a zero-warnings policy since the repo existed,
+  # and until this job nothing enforced it. Separate from `test` so a formatting
+  # slip reports as a formatting slip, and so it fails in seconds instead of
+  # after the container-backed suites.
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        # keyring links the Secret Service client against libdbus on Linux.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt
+        run: cargo fmt --all --check
+
+      # `--all-targets` here but not in `test`: clippy only *builds* the
+      # benchmarks, it does not run them, so the teardown panic that forces the
+      # test job to be selective does not apply.
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      # The keyring-free build is a supported configuration, and its cfg-gated
+      # branches are invisible to the run above.
+      - name: cargo clippy (no keyring)
+        run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+
+      # `broken_intra_doc_links` is `deny` in Cargo.toml, but only rustdoc ever
+      # evaluates it — a clippy run will not catch a link broken by a rename.
+      - name: cargo doc
+        run: cargo doc --workspace --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  # Supply-chain audit: RustSec advisories, licence compatibility, banned and
+  # duplicated crates, and where the sources come from. Config and the reason
+  # behind every exception live in `deny.toml`; `make audit` runs the same
+  # thing locally.
+  #
+  # Deliberately none of the setup the `test` job needs: cargo-deny resolves
+  # the graph from Cargo.lock and never invokes rustc, so there is nothing to
+  # link against (no libdbus for keyring) and nothing to cache (no
+  # Swatinem/rust-cache). The action ships a prebuilt binary, so this job
+  # finishes in seconds while `test` is still compiling.
+  cargo-deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          # All four checks, so a new dependency cannot slip past by only
+          # being clean on advisories.
+          command: check advisories licenses bans sources
+
   test:
     name: cargo test
     runs-on: ubuntu-latest

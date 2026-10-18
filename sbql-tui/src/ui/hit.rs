@@ -16,7 +16,7 @@ use crate::app::FocusedPanel;
 
 /// Which way a horizontal affordance points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Side {
+pub(crate) enum Side {
     Left,
     Right,
 }
@@ -27,7 +27,7 @@ pub enum Side {
 /// plus a `register` call at the point that draws it — never arithmetic on
 /// panel coordinates performed somewhere far away from the drawing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Zone {
+pub(crate) enum Zone {
     /// The body of a panel. Clicking focuses it; the more specific zones
     /// registered on top say what else the click means.
     Panel(FocusedPanel),
@@ -90,7 +90,7 @@ pub enum Zone {
 
 /// The regions of the last frame, in the order they were painted.
 #[derive(Debug, Default, Clone)]
-pub struct HitMap {
+pub(crate) struct HitMap {
     zones: Vec<(Rect, Zone)>,
 }
 
@@ -98,12 +98,12 @@ impl HitMap {
     /// Forget the previous frame. Called once at the top of every draw, so a
     /// zone can never outlive the thing that drew it — a stale suggestion row
     /// would otherwise keep swallowing clicks after the popup closed.
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.zones.clear();
     }
 
     /// Record a region. Later calls win, so draw order is click order.
-    pub fn register(&mut self, rect: Rect, zone: Zone) {
+    pub(crate) fn register(&mut self, rect: Rect, zone: Zone) {
         // A zero-sized rect can never be hit and only makes the scan longer;
         // widgets legitimately produce them when a panel is collapsed.
         if rect.width > 0 && rect.height > 0 {
@@ -116,7 +116,7 @@ impl HitMap {
     /// The rect comes back because the caller usually needs it: turning a click
     /// into a text position or a scroll offset is arithmetic against the region
     /// that was actually drawn.
-    pub fn hit(&self, col: u16, row: u16) -> Option<(Rect, Zone)> {
+    pub(crate) fn hit(&self, col: u16, row: u16) -> Option<(Rect, Zone)> {
         self.zones
             .iter()
             .rev()
@@ -128,7 +128,7 @@ impl HitMap {
     ///
     /// For scrolling, where the pointer is usually over a row rather than the
     /// panel, but the panel is what scrolls.
-    pub fn hit_matching(
+    pub(crate) fn hit_matching(
         &self,
         col: u16,
         row: u16,
@@ -149,7 +149,7 @@ impl HitMap {
 
 /// Whether a point falls inside a rect. Right and bottom edges are exclusive,
 /// as ratatui's rects are.
-pub fn contains(rect: Rect, col: u16, row: u16) -> bool {
+pub(crate) fn contains(rect: Rect, col: u16, row: u16) -> bool {
     col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
 }
 

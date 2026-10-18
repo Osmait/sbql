@@ -25,7 +25,7 @@ async fn setup_dynamodb() -> (
 
     let host = container.get_host().await.unwrap();
     let port = container.get_host_port_ipv4(8000).await.unwrap();
-    let endpoint = format!("http://{}:{}", host, port);
+    let endpoint = format!("http://{host}:{port}");
 
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(aws_config::Region::new("us-east-1"))
@@ -232,7 +232,7 @@ async fn test_dynamodb_empty_table() {
 
     let host = container.get_host().await.unwrap();
     let port = container.get_host_port_ipv4(8000).await.unwrap();
-    let endpoint = format!("http://{}:{}", host, port);
+    let endpoint = format!("http://{host}:{port}");
 
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(aws_config::Region::new("us-east-1"))
@@ -294,9 +294,8 @@ async fn test_dynamodb_attribute_types() {
 
     // Insert an item with various attribute types
     use aws_sdk_dynamodb::types::AttributeValue;
-    let client = match &pool {
-        DbPool::DynamoDb(c) => c,
-        _ => panic!("Expected DynamoDb pool"),
+    let DbPool::DynamoDb(client) = &pool else {
+        panic!("Expected DynamoDb pool")
     };
 
     client
@@ -357,9 +356,8 @@ async fn test_dynamodb_number_set() {
     let (_client, pool, _container) = setup_dynamodb().await;
 
     use aws_sdk_dynamodb::types::AttributeValue;
-    let client = match &pool {
-        DbPool::DynamoDb(c) => c,
-        _ => panic!("Expected DynamoDb pool"),
+    let DbPool::DynamoDb(client) = &pool else {
+        panic!("Expected DynamoDb pool")
     };
 
     client
@@ -382,7 +380,7 @@ async fn test_dynamodb_number_set() {
     let cols = &result.columns;
     let row = &result.rows[0];
     let ns_idx = cols.iter().position(|c| c == "lucky_numbers").unwrap();
-    assert!(row[ns_idx].contains("7"), "NS: {}", row[ns_idx]);
+    assert!(row[ns_idx].contains('7'), "NS: {}", row[ns_idx]);
     assert!(row[ns_idx].contains("13"), "NS: {}", row[ns_idx]);
     assert!(row[ns_idx].contains("42"), "NS: {}", row[ns_idx]);
 }
@@ -394,9 +392,8 @@ async fn test_dynamodb_nested_map() {
     use aws_sdk_dynamodb::types::AttributeValue;
     use std::collections::HashMap;
 
-    let client = match &pool {
-        DbPool::DynamoDb(c) => c,
-        _ => panic!("Expected DynamoDb pool"),
+    let DbPool::DynamoDb(client) = &pool else {
+        panic!("Expected DynamoDb pool")
     };
 
     // Build deeply nested map: {b: {c: {d: "deep"}}}
@@ -442,9 +439,8 @@ async fn test_dynamodb_binary_type() {
 
     use aws_sdk_dynamodb::types::AttributeValue;
 
-    let client = match &pool {
-        DbPool::DynamoDb(c) => c,
-        _ => panic!("Expected DynamoDb pool"),
+    let DbPool::DynamoDb(client) = &pool else {
+        panic!("Expected DynamoDb pool")
     };
 
     let binary_data = aws_sdk_dynamodb::primitives::Blob::new(vec![0xDE, 0xAD, 0xBE, 0xEF]);
@@ -484,7 +480,7 @@ async fn test_dynamodb_multiple_tables() {
 
     let host = container.get_host().await.unwrap();
     let port = container.get_host_port_ipv4(8000).await.unwrap();
-    let endpoint = format!("http://{}:{}", host, port);
+    let endpoint = format!("http://{host}:{port}");
 
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(aws_config::Region::new("us-east-1"))
@@ -548,9 +544,8 @@ async fn test_dynamodb_null_attribute() {
     let (_client, pool, _container) = setup_dynamodb().await;
 
     use aws_sdk_dynamodb::types::AttributeValue;
-    let client = match &pool {
-        DbPool::DynamoDb(c) => c,
-        _ => panic!("Expected DynamoDb pool"),
+    let DbPool::DynamoDb(client) = &pool else {
+        panic!("Expected DynamoDb pool")
     };
 
     client

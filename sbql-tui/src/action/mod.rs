@@ -26,7 +26,7 @@ use sbql_core::CoreCommand;
 /// Handlers produce `Action` values without mutating state directly.
 /// The event loop calls [`apply`] to execute them.
 #[derive(Debug)]
-pub enum Action {
+pub(crate) enum Action {
     /// Focus, modes, and pending vim prefixes.
     Nav(NavAction),
     /// Moving around and acting on the results grid.
@@ -69,11 +69,11 @@ pub enum Action {
     /// other variant, and would otherwise set the size of every `Action`.
     SendCommand(Box<CoreCommand>),
     /// Apply several actions in order.
-    Batch(Vec<Action>),
+    Batch(Vec<Self>),
 }
 
 #[derive(Debug)]
-pub enum NavAction {
+pub(crate) enum NavAction {
     FocusPanel(FocusedPanel),
     SetNavMode(NavMode),
     SetEditorMode(EditorMode),
@@ -86,7 +86,7 @@ pub enum NavAction {
 }
 
 #[derive(Debug)]
-pub enum ResultsAction {
+pub(crate) enum ResultsAction {
     RowDown,
     RowUp,
     ColRight,
@@ -109,7 +109,7 @@ pub enum ResultsAction {
 }
 
 #[derive(Debug)]
-pub enum CellEditAction {
+pub(crate) enum CellEditAction {
     Enter,
     Stage,
     Cancel,
@@ -117,7 +117,7 @@ pub enum CellEditAction {
 }
 
 #[derive(Debug)]
-pub enum EditorAction {
+pub(crate) enum EditorAction {
     Input(Input),
     CursorMove(CursorMove),
     RunQuery,
@@ -138,7 +138,7 @@ pub enum EditorAction {
 }
 
 #[derive(Debug)]
-pub enum CompletionAction {
+pub(crate) enum CompletionAction {
     Up,
     Down,
     Accept,
@@ -146,7 +146,7 @@ pub enum CompletionAction {
 }
 
 #[derive(Debug)]
-pub enum ConnectionsAction {
+pub(crate) enum ConnectionsAction {
     Select(usize),
     ConnectSelected,
     DisconnectActive,
@@ -160,7 +160,7 @@ pub enum ConnectionsAction {
 }
 
 #[derive(Debug)]
-pub enum FormAction {
+pub(crate) enum FormAction {
     Close,
     NextField,
     PrevField,
@@ -174,13 +174,13 @@ pub enum FormAction {
 }
 
 #[derive(Debug)]
-pub enum TablesAction {
+pub(crate) enum TablesAction {
     Select(usize),
     OpenSelected,
 }
 
 #[derive(Debug)]
-pub enum FilterAction {
+pub(crate) enum FilterAction {
     Open,
     Close,
     CloseSuggestions,
@@ -194,7 +194,7 @@ pub enum FilterAction {
 }
 
 #[derive(Debug)]
-pub enum DiagramAction {
+pub(crate) enum DiagramAction {
     Open,
     Close,
     Scroll {
@@ -222,7 +222,7 @@ pub enum DiagramAction {
 /// Moving the cursor applies the theme at once — the whole UI is the preview —
 /// so closing has to say whether the change is kept or undone.
 #[derive(Debug)]
-pub enum ThemeAction {
+pub(crate) enum ThemeAction {
     Open,
     Next,
     Prev,
@@ -236,17 +236,35 @@ pub enum ThemeAction {
 
 impl Action {
     /// Wrap a core command for dispatch.
-    pub fn send(cmd: CoreCommand) -> Self {
-        Action::SendCommand(Box::new(cmd))
+    pub(crate) fn send(cmd: CoreCommand) -> Self {
+        Self::SendCommand(Box::new(cmd))
+    }
+}
+
+/// Hand a command to the core worker, tolerating a worker that has already
+/// stopped.
+///
+/// The send can only fail one way: the worker task is gone, which happens once,
+/// on the way out. There is no queue to retry against and no user to tell —
+/// the terminal is being handed back — so the command is dropped and the fact
+/// is written to the log instead. Deliberately *not* logged with the command
+/// itself: `CoreCommand::SaveConnection` carries a password, and its `Debug`
+/// form would put it in a file on disk.
+pub(crate) fn send_command(cmd_tx: &mpsc::UnboundedSender<CoreCommand>, cmd: CoreCommand) {
+    if cmd_tx.send(cmd).is_err() {
+        tracing::debug!("core worker has stopped; command dropped");
     }
 }
 
 /// Apply an action to state and send any commands.
-/// Apply an action to state and send any commands.
 ///
 /// This is only a router: each domain owns its own reducer below, so adding a
 /// case means touching one match instead of one 500-line one.
-pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCommand>) {
+pub(crate) fn apply(
+    action: Action,
+    state: &mut AppState,
+    cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
+) {
     match action {
         Action::Nav(a) => nav::apply(a, state, cmd_tx),
         Action::Results(a) => results::apply(a, state, cmd_tx),
@@ -298,7 +316,7 @@ pub fn apply(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSende
                 results::warn_staged_changes_block_paging(state);
                 return;
             }
-            let _ = cmd_tx.send(cmd);
+            send_command(cmd_tx, cmd);
         }
 
         Action::Batch(actions) => {
@@ -321,7 +339,7 @@ pub(crate) fn parse_filter_input_test(input: &str) -> Option<(String, &str)> {
 
 /// Apply live filter if the debounce deadline has passed. Called from tick.
 /// Returns `true` if a filter was actually applied (state changed).
-pub fn apply_live_filter_if_due(
+pub(crate) fn apply_live_filter_if_due(
     state: &mut AppState,
     cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
 ) -> bool {
@@ -347,7 +365,7 @@ pub fn apply_live_filter_if_due(
         if state.filter.last_applied_query.is_some() {
             state.filter.last_applied_query = None;
             state.active_filter = None;
-            let _ = cmd_tx.send(CoreCommand::ClearFilter);
+            send_command(cmd_tx, CoreCommand::ClearFilter);
             return true;
         }
         return false;
@@ -359,7 +377,7 @@ pub fn apply_live_filter_if_due(
 
     state.filter.last_applied_query = Some(trimmed.clone());
     state.active_filter = Some(trimmed.clone());
-    let _ = cmd_tx.send(CoreCommand::ApplyFilter { query: trimmed });
+    send_command(cmd_tx, CoreCommand::ApplyFilter { query: trimmed });
     true
 }
 

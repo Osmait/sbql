@@ -9,7 +9,10 @@ use crate::sql_util::{quote_ident, quote_ident_mysql, quote_ident_sqlserver};
 /// A table entry returned by schema introspection.
 #[derive(Debug, Clone)]
 pub struct TableEntry {
+    /// Owning schema — `public` on PostgreSQL, `main` on SQLite, the database
+    /// name on MySQL.
     pub schema: String,
+    /// Table name, unqualified.
     pub name: String,
 }
 
@@ -27,21 +30,32 @@ impl TableEntry {
 /// A single column in a table, with metadata for diagram rendering.
 #[derive(Debug, Clone)]
 pub struct ColumnInfo {
+    /// Column name, as the database spells it.
     pub name: String,
+    /// The database's own type name, not a normalised one — `varchar`,
+    /// `int4`, `TEXT`. Shown as-is because normalising loses what the user
+    /// actually declared.
     pub data_type: String,
+    /// Part of the primary key. Rows can only be edited or deleted when some
+    /// column says yes here.
     pub is_pk: bool,
+    /// Accepts NULL.
     pub is_nullable: bool,
 }
 
 /// Full schema of one table (used for the diagram).
 #[derive(Debug, Clone)]
 pub struct TableSchema {
+    /// Owning schema.
     pub schema: String,
+    /// Table name, unqualified.
     pub name: String,
+    /// Columns in declaration order.
     pub columns: Vec<ColumnInfo>,
 }
 
 impl TableSchema {
+    /// `schema.name`, the form that goes into SQL.
     pub fn qualified(&self) -> String {
         format!("{}.{}", self.schema, self.name)
     }
@@ -69,7 +83,9 @@ pub struct ForeignKey {
 /// Everything needed to render the database diagram.
 #[derive(Debug, Clone, Default)]
 pub struct DiagramData {
+    /// Every table, with its columns — the boxes.
     pub tables: Vec<TableSchema>,
+    /// Every foreign key — the arrows between them.
     pub foreign_keys: Vec<ForeignKey>,
 }
 
@@ -78,6 +94,15 @@ pub struct DiagramData {
 // ---------------------------------------------------------------------------
 
 /// List all user-visible tables.
+///
+/// Redis answers with an empty list — it has no tables, and that is not a
+/// failure.
+///
+/// # Errors
+///
+/// Introspection failed: usually the connection dropped, occasionally the login
+/// cannot read the catalog. Both leave the sidebar empty, so distinguish them —
+/// only the first is worth offering a reconnect for.
 #[tracing::instrument(skip_all)]
 pub async fn list_tables(pool: &DbPool) -> Result<Vec<TableEntry>> {
     match pool {
@@ -92,6 +117,16 @@ pub async fn list_tables(pool: &DbPool) -> Result<Vec<TableEntry>> {
 }
 
 /// Return the primary key column name(s) for a given table.
+///
+/// An empty result means the table genuinely has no primary key, which is the
+/// signal that its rows cannot be edited or deleted — there is no way to
+/// address one unambiguously.
+///
+/// # Errors
+///
+/// The catalog lookup failed. Treat it as "editing unavailable" rather than
+/// falling back to editing without a key: that is how an UPDATE ends up
+/// matching every row.
 #[tracing::instrument(skip_all, fields(schema, table))]
 pub async fn get_primary_keys(pool: &DbPool, schema: &str, table: &str) -> Result<Vec<String>> {
     match pool {
@@ -106,6 +141,16 @@ pub async fn get_primary_keys(pool: &DbPool, schema: &str, table: &str) -> Resul
 }
 
 /// Load all table schemas + FK relationships for the diagram view.
+///
+/// Backends with no relational catalog (Redis, DynamoDB, MongoDB) return an
+/// empty [`DiagramData`] rather than an error — there is simply no diagram to
+/// draw.
+///
+/// # Errors
+///
+/// Introspection failed. This reads the whole catalog and is the heaviest
+/// schema call, so on a large database a timeout here can mean the connection
+/// is fine and only this is too slow.
 #[tracing::instrument(skip_all)]
 pub async fn load_diagram(pool: &DbPool) -> Result<DiagramData> {
     match pool {
@@ -124,6 +169,14 @@ pub async fn load_diagram(pool: &DbPool) -> Result<DiagramData> {
 /// `pk` is every `(column, value)` component of the row's primary key; the
 /// WHERE clause matches all of them, so a composite key addresses exactly one
 /// row rather than every row sharing its first component.
+///
+/// # Errors
+///
+/// `pk` was empty — refused rather than run, because a WHERE-less UPDATE
+/// rewrites the table — or the database rejected the statement (type mismatch,
+/// constraint, read-only user). Nothing was written in either case, so the cell
+/// on screen must be reverted to its old value rather than left showing the
+/// edit.
 pub async fn execute_cell_update(
     pool: &DbPool,
     schema: &str,
@@ -161,6 +214,12 @@ pub async fn execute_cell_update(
 }
 
 /// Execute a single-row DELETE identified by its full primary key.
+///
+/// # Errors
+///
+/// `pk` was empty — refused outright, since a WHERE-less DELETE empties the
+/// table — or the database rejected the statement, typically a foreign key
+/// still pointing at the row. The row is still there; leave it in the grid.
 pub async fn execute_row_delete(
     pool: &DbPool,
     schema: &str,
@@ -1290,7 +1349,7 @@ async fn get_primary_keys_dynamodb(
         .map_err(|e| SbqlError::DynamoDb(e.to_string()))?;
     let table_desc = resp
         .table()
-        .ok_or_else(|| SbqlError::Schema(format!("Table {} not found", table)))?;
+        .ok_or_else(|| SbqlError::Schema(format!("Table {table} not found")))?;
     let pks: Vec<String> = table_desc
         .key_schema()
         .iter()

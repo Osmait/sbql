@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 /// Returns `(cmd_tx, event_rx)`:
 /// - `cmd_tx` — the UI uses this to send commands to the Core.
 /// - `event_rx` — the UI receives Core responses from this.
-pub fn spawn_worker() -> (
+pub(crate) fn spawn_worker() -> (
     mpsc::UnboundedSender<CoreCommand>,
     mpsc::UnboundedReceiver<CoreEvent>,
 ) {
@@ -23,15 +23,21 @@ pub fn spawn_worker() -> (
 
         // Whatever the core wants said before the first command: the connection
         // list, and any reason it came back empty.
+        // A send can only fail because the UI dropped the receiver, i.e. it quit
+        // before the first frame. Discarded rather than reported: there is
+        // nobody left to report to, and the loop below already exits on it.
         for ev in core.startup_events() {
-            let _ = event_tx.send(ev);
+            drop(event_tx.send(ev));
         }
 
         while let Some(cmd) = cmd_rx.recv().await {
             // Each command declares whether it is worth a spinner, so adding
             // one here cannot accidentally blank the results pane.
             if cmd.shows_progress() {
-                let _ = event_tx.send(CoreEvent::Loading);
+                // Same as above, and deliberately not an early return: a UI that
+                // has gone away still leaves the command to be run for its
+                // side effects.
+                drop(event_tx.send(CoreEvent::Loading));
             }
 
             let events = core.handle(cmd).await;
@@ -79,7 +85,7 @@ mod tests {
         let (cmd_tx, mut event_rx) = spawn_worker();
 
         // Drain initial event
-        let _ = event_rx.recv().await;
+        drop(event_rx.recv().await);
 
         // Send a command that triggers Loading
         cmd_tx.send(CoreCommand::ListTables).unwrap();
@@ -94,7 +100,7 @@ mod tests {
             CoreEvent::Error(e) => {
                 assert_eq!(e.kind, sbql_core::ErrorKind::NoActiveConnection);
             }
-            _ => panic!("Expected Error event, got {:?}", error_event),
+            _ => panic!("Expected Error event, got {error_event:?}"),
         }
     }
 }

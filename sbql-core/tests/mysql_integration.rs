@@ -22,7 +22,7 @@ async fn setup_mysql() -> (MySqlPool, DbPool, testcontainers::ContainerAsync<Mys
 
     // testcontainers-modules mysql defaults: user=root, password=<empty or "my-secret-pw">, db=test
     // Try the default connection
-    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let connection_string = format!("mysql://root@{host_ip}:{host_port}/test");
     let my_pool = MySqlPool::connect(&connection_string)
         .await
         .expect("Failed to connect to MySQL container");
@@ -177,7 +177,7 @@ async fn test_mysql_pagination() {
     let container = Mysql::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(3306).await.unwrap();
-    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let connection_string = format!("mysql://root@{host_ip}:{host_port}/test");
     let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Mysql(my_pool.clone());
 
@@ -214,7 +214,7 @@ async fn test_mysql_types() {
     let container = Mysql::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(3306).await.unwrap();
-    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let connection_string = format!("mysql://root@{host_ip}:{host_port}/test");
     let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Mysql(my_pool.clone());
 
@@ -307,7 +307,7 @@ async fn test_mysql_suggest_distinct_values() {
     let container = Mysql::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(3306).await.unwrap();
-    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let connection_string = format!("mysql://root@{host_ip}:{host_port}/test");
     let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Mysql(my_pool.clone());
 
@@ -338,7 +338,7 @@ async fn test_mysql_empty_result() {
     let container = Mysql::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(3306).await.unwrap();
-    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let connection_string = format!("mysql://root@{host_ip}:{host_port}/test");
     let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Mysql(my_pool.clone());
 
@@ -360,7 +360,7 @@ async fn test_mysql_null_handling() {
     let container = Mysql::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(3306).await.unwrap();
-    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let connection_string = format!("mysql://root@{host_ip}:{host_port}/test");
     let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Mysql(my_pool.clone());
 
@@ -403,7 +403,7 @@ async fn test_mysql_unicode() {
     let container = Mysql::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(3306).await.unwrap();
-    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let connection_string = format!("mysql://root@{host_ip}:{host_port}/test");
     let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Mysql(my_pool.clone());
 
@@ -442,7 +442,7 @@ async fn test_mysql_json_nested() {
     let container = Mysql::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(3306).await.unwrap();
-    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let connection_string = format!("mysql://root@{host_ip}:{host_port}/test");
     let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Mysql(my_pool.clone());
 
@@ -484,7 +484,7 @@ async fn test_mysql_enum_type() {
     let container = Mysql::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(3306).await.unwrap();
-    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let connection_string = format!("mysql://root@{host_ip}:{host_port}/test");
     let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Mysql(my_pool.clone());
 
@@ -518,7 +518,7 @@ async fn test_mysql_user_limit() {
     let container = Mysql::default().start().await.unwrap();
     let host_ip = container.get_host().await.unwrap();
     let host_port = container.get_host_port_ipv4(3306).await.unwrap();
-    let connection_string = format!("mysql://root@{}:{}/test", host_ip, host_port);
+    let connection_string = format!("mysql://root@{host_ip}:{host_port}/test");
     let my_pool = MySqlPool::connect(&connection_string).await.unwrap();
     let pool = DbPool::Mysql(my_pool.clone());
 

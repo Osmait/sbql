@@ -5,7 +5,13 @@
 
 use sbql_core::{ConnectionConfig, Core, CoreCommand, CoreEvent};
 
+// Printing *is* what this example does — it is a hand-run probe against a local
+// MySQL, read off a normal terminal. The workspace `print_stdout` lint is aimed
+// at the TUI, where a stray write lands in the middle of the alternate screen;
+// nothing here holds a screen, so the exemption is scoped to this one function
+// rather than turned off for the crate.
 #[tokio::main]
+#[allow(clippy::print_stdout)]
 async fn main() {
     let mut core = Core::default();
 
@@ -51,7 +57,7 @@ async fn main() {
                 println!("Query: {} cols, {} rows", r.columns.len(), r.rows.len());
                 println!("Columns: {:?}", r.columns);
                 for (i, row) in r.rows.iter().enumerate().take(2) {
-                    println!("Row {i}: {:?}", row);
+                    println!("Row {i}: {row:?}");
                 }
             }
             CoreEvent::Error(e) => println!("QUERY ERROR: {e}"),
@@ -59,5 +65,6 @@ async fn main() {
         }
     }
 
-    let _ = core.handle(CoreCommand::Disconnect(id)).await;
+    // Teardown; the events it reports have nowhere left to go.
+    drop(core.handle(CoreCommand::Disconnect(id)).await);
 }

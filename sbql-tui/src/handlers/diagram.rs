@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::action::{Action, DiagramAction};
 use crate::app::AppState;
 
-pub fn handle(state: &AppState, key: KeyEvent) -> Action {
+pub(crate) fn handle(state: &AppState, key: KeyEvent) -> Action {
     // If search is active, intercept all keys for the search input
     if let Some(ref diag) = state.diagram {
         if diag.search_active {

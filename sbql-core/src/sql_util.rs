@@ -4,17 +4,17 @@
 //! identifier in the appropriate quote characters for the target backend.
 
 /// Quote a PostgreSQL/SQLite identifier (doubles `"`).
-pub fn quote_ident(name: &str) -> String {
+pub(crate) fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
 /// Quote a MySQL identifier (doubles `` ` ``).
-pub fn quote_ident_mysql(name: &str) -> String {
+pub(crate) fn quote_ident_mysql(name: &str) -> String {
     format!("`{}`", name.replace('`', "``"))
 }
 
 /// Quote a SQL Server identifier (doubles `]`).
-pub fn quote_ident_sqlserver(name: &str) -> String {
+pub(crate) fn quote_ident_sqlserver(name: &str) -> String {
     format!("[{}]", name.replace(']', "]]"))
 }
 

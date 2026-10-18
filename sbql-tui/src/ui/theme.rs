@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// them. Accessors exist only for the roles something actually draws with, so
 /// an unused one shows up as dead code rather than sitting here forever.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Palette {
+pub(crate) struct Palette {
     pub base: Color,
     pub surface0: Color,
     pub surface1: Color,
@@ -55,7 +55,7 @@ pub struct Palette {
 
 /// A named palette.
 #[derive(Debug, Clone, Copy)]
-pub struct Theme {
+pub(crate) struct Theme {
     pub name: &'static str,
     pub palette: Palette,
 }
@@ -65,7 +65,7 @@ const fn rgb(r: u8, g: u8, b: u8) -> Color {
 }
 
 /// Every theme on offer, in the order the picker lists them.
-pub const THEMES: &[Theme] = &[
+pub(crate) const THEMES: &[Theme] = &[
     Theme {
         name: "Catppuccin Mocha",
         palette: Palette {
@@ -341,23 +341,23 @@ fn current() -> &'static Palette {
 }
 
 /// Switch to a theme by index. Ignored if out of range.
-pub fn set(index: usize) {
+pub(crate) fn set(index: usize) {
     if index < THEMES.len() {
         CURRENT.store(index, Ordering::Relaxed);
     }
 }
 
-pub fn current_index() -> usize {
+pub(crate) fn current_index() -> usize {
     CURRENT.load(Ordering::Relaxed).min(THEMES.len() - 1)
 }
 
-pub fn current_name() -> &'static str {
+pub(crate) fn current_name() -> &'static str {
     THEMES[current_index()].name
 }
 
 /// Switch by name, as stored in the config file. Returns whether it matched;
 /// a name that does not is left to the caller to report or ignore.
-pub fn set_by_name(name: &str) -> bool {
+pub(crate) fn set_by_name(name: &str) -> bool {
     match THEMES.iter().position(|t| t.name == name) {
         Some(i) => {
             set(i);
@@ -367,87 +367,87 @@ pub fn set_by_name(name: &str) -> bool {
     }
 }
 
-pub fn base() -> Color {
+pub(crate) fn base() -> Color {
     current().base
 }
 
-pub fn surface0() -> Color {
+pub(crate) fn surface0() -> Color {
     current().surface0
 }
 
-pub fn surface2() -> Color {
+pub(crate) fn surface2() -> Color {
     current().surface2
 }
 
-pub fn overlay0() -> Color {
+pub(crate) fn overlay0() -> Color {
     current().overlay0
 }
 
-pub fn overlay1() -> Color {
+pub(crate) fn overlay1() -> Color {
     current().overlay1
 }
 
-pub fn overlay2() -> Color {
+pub(crate) fn overlay2() -> Color {
     current().overlay2
 }
 
-pub fn subtext0() -> Color {
+pub(crate) fn subtext0() -> Color {
     current().subtext0
 }
 
-pub fn text() -> Color {
+pub(crate) fn text() -> Color {
     current().text
 }
 
-pub fn flamingo() -> Color {
+pub(crate) fn flamingo() -> Color {
     current().flamingo
 }
 
-pub fn pink() -> Color {
+pub(crate) fn pink() -> Color {
     current().pink
 }
 
-pub fn mauve() -> Color {
+pub(crate) fn mauve() -> Color {
     current().mauve
 }
 
-pub fn red() -> Color {
+pub(crate) fn red() -> Color {
     current().red
 }
 
-pub fn maroon() -> Color {
+pub(crate) fn maroon() -> Color {
     current().maroon
 }
 
-pub fn peach() -> Color {
+pub(crate) fn peach() -> Color {
     current().peach
 }
 
-pub fn yellow() -> Color {
+pub(crate) fn yellow() -> Color {
     current().yellow
 }
 
-pub fn green() -> Color {
+pub(crate) fn green() -> Color {
     current().green
 }
 
-pub fn teal() -> Color {
+pub(crate) fn teal() -> Color {
     current().teal
 }
 
-pub fn sky() -> Color {
+pub(crate) fn sky() -> Color {
     current().sky
 }
 
-pub fn sapphire() -> Color {
+pub(crate) fn sapphire() -> Color {
     current().sapphire
 }
 
-pub fn blue() -> Color {
+pub(crate) fn blue() -> Color {
     current().blue
 }
 
-pub fn lavender() -> Color {
+pub(crate) fn lavender() -> Color {
     current().lavender
 }
 
