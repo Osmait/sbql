@@ -70,27 +70,23 @@ ignore = [
   { id = "RUSTSEC-2026-0118", reason = "hickory-proto: DNSSEC validation is not enabled by mongodb's resolver; needs hickory 0.26, pinned by mongodb 3.5" },
   { id = "RUSTSEC-2026-0119", reason = "hickory-proto: requires a hostile DNS server on the SRV lookup path; needs hickory 0.26, pinned by mongodb 3.5" },
 
-  # russh 0.48 / russh-cryptovec 0.48: a malicious or compromised SSH server
-  # can drive an unbounded 32-bit allocation (0154) or unchecked CryptoVec
-  # growth (0153) in the client, i.e. crash the TUI by OOM. This is the one
-  # entry here that is a genuine, reachable denial of service — it is capped
-  # at DoS against a user who is already connecting to a server they do not
-  # trust, but it is real. The fix is russh 0.60.3, a semver-major bump of a
-  # workspace dependency, which is a code change and not in scope for this
-  # config. FLAGGED FOR FOLLOW-UP: bump russh/russh-keys to 0.60.3.
-  { id = "RUSTSEC-2026-0153", reason = "russh-cryptovec: DoS reachable from a hostile SSH server; needs a semver-major bump to russh 0.60.3 — tracked as follow-up work" },
-  { id = "RUSTSEC-2026-0154", reason = "russh: DoS reachable from a hostile SSH server; needs a semver-major bump to russh 0.60.3 — tracked as follow-up work" },
+  # RUSTSEC-2026-0154 (russh) and RUSTSEC-2026-0153 (russh-cryptovec) were
+  # both listed here and are both gone: the semver-major bump to russh 0.62
+  # has landed, `russh-keys` is folded into it, and `russh-cryptovec` has left
+  # the graph entirely. Do not re-add an ignore for either — that would
+  # silently cover a downgrade back onto the vulnerable line.
 
   # --- No upstream fix exists ---
 
   # rsa 0.9.x, the Marvin attack: PKCS#1 v1.5 decryption leaks key material
-  # through timing. Reached via russh/russh-keys/ssh-key (SSH RSA host and
-  # client keys) and sqlx-mysql (the MySQL auth handshake). sbql is always
-  # the client here, and the attack needs an adversary who can request many
-  # decryptions and time them precisely — the inverse of our position. There
-  # is no patched release; the RustSec entry has had "no safe upgrade" since
-  # 2023. Removable when rsa ships a constant-time implementation.
-  { id = "RUSTSEC-2023-0071", reason = "rsa: timing sidechannel requires the attacker to time our decryptions at scale; sbql is the client in every RSA path. No patched release exists upstream" },
+  # through timing. Reached only via sqlx-mysql now (the MySQL auth
+  # handshake) — the SSH stack used to be the other route, but russh 0.62 and
+  # ssh-key 0.7 are on rsa 0.10-rc, which is outside the advisory range. sbql
+  # is always the client here, and the attack needs an adversary who can
+  # request many decryptions and time them precisely — the inverse of our
+  # position. There is no patched 0.9 release; the RustSec entry has had "no
+  # safe upgrade" since 2023. Removable when sqlx moves to rsa 0.10.
+  { id = "RUSTSEC-2023-0071", reason = "rsa: timing sidechannel requires the attacker to time our decryptions at scale; sbql is the client in the one remaining RSA path (sqlx-mysql auth). No patched 0.9 release exists upstream" },
 
   # paste 1.0.15: unmaintained, not vulnerable. A proc-macro pulled by
   # ratatui 0.29, so it runs at build time and contributes no code to the

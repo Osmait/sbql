@@ -20,6 +20,7 @@ async fn main() {
     core.handle(CoreCommand::SaveConnection {
         config,
         password: Some("root123".into()),
+        ssh_password: None,
     })
     .await;
 

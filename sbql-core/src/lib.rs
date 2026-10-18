@@ -72,6 +72,15 @@ pub enum CoreCommand {
         config: ConnectionConfig,
         /// `Some` to set or replace, `None` to leave the stored one alone.
         password: Option<String>,
+        /// The SSH tunnel password, same convention as `password`, with one
+        /// addition: `Some("")` *clears* the stored one.
+        ///
+        /// It travels in the command rather than being written by the client
+        /// so that it lands on the far side of `validate()` — writing it first
+        /// meant an invalid config left a secret in the OS keychain under an
+        /// id that never reached `connections.toml`, unreferenced and
+        /// unreachable from any UI.
+        ssh_password: Option<String>,
     },
     /// Remove a connection config from disk and keyring.
     DeleteConnection(Uuid),
@@ -463,9 +472,11 @@ impl Core {
     /// Process a single [`CoreCommand`] and return zero or more [`CoreEvent`]s.
     pub async fn handle(&mut self, cmd: CoreCommand) -> Vec<CoreEvent> {
         match cmd {
-            CoreCommand::SaveConnection { config, password } => {
-                handlers::connection::save(self, config, password).await
-            }
+            CoreCommand::SaveConnection {
+                config,
+                password,
+                ssh_password,
+            } => handlers::connection::save(self, config, password, ssh_password).await,
             CoreCommand::DeleteConnection(id) => handlers::connection::delete(self, id).await,
             CoreCommand::DiscoverConnections { dir } => {
                 handlers::connection::discover(self, dir).await

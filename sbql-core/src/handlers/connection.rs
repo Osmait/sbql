@@ -7,6 +7,7 @@ pub(crate) async fn save(
     core: &mut Core,
     config: ConnectionConfig,
     password: Option<String>,
+    ssh_password: Option<String>,
 ) -> Vec<CoreEvent> {
     // Last gate before anything is persisted. Clients validate as the user
     // types, but they are not trusted to — a client that forgets (as the macOS
@@ -21,7 +22,7 @@ pub(crate) async fn save(
     // A keyring that refuses the write is not fatal — the connection is still
     // saved and the password is cached for this session — but the user has to
     // hear about it, otherwise the password is quietly gone on the next launch.
-    let mut warning = None;
+    let mut warnings = Vec::new();
     if let Some(ref pw) = password {
         if let Err(e) = config.save_password(pw) {
             tracing::warn!("Keyring save failed (will use in-memory cache): {e}");
@@ -31,15 +32,12 @@ pub(crate) async fn save(
             //
             // The summary stays one line for a status bar; the store's own
             // complaint (which carries the fix-it hint) rides along in `detail`.
-            warning = Some(
+            warnings.push(
                 CoreError::warning(
                     ErrorKind::Credentials,
                     "Connection saved, password NOT stored (session only)",
                 )
-                .with_detail(match &e {
-                    SbqlError::Keyring(msg) => msg.clone(),
-                    other => other.to_string(),
-                }),
+                .with_detail(store_complaint(&e)),
             );
         }
         core.password_cache.insert(config.id, pw.clone());
@@ -48,6 +46,35 @@ pub(crate) async fn save(
             if let Ok(pw) = config.load_password() {
                 e.insert(pw);
             }
+        }
+    }
+
+    // The SSH password is written here, beside the database one, and for the
+    // same reason: this is the first point at which the config is known to be
+    // valid. `SbqlEngine::save_connection` used to write it before dispatching
+    // this command, so a config that `validate()` then rejected left a secret
+    // in the OS keychain under an id that never reached `connections.toml` —
+    // unreferenced, invisible to every UI, and permanent.
+    //
+    // `Some("")` means the user cleared the field, which `save_ssh_password`
+    // turns into a delete. A refused write is a warning for the same reason as
+    // above, with one difference worth knowing: `Core` caches the database
+    // password for the session, but nothing caches the SSH one, so a refused
+    // write means the next tunnel opens with no password at all.
+    if let Some(ref ssh_pw) = ssh_password {
+        if let Err(e) = config.save_ssh_password(ssh_pw) {
+            // Deliberately logs the connection name and the store's complaint,
+            // never the value: this is the one place the plaintext is in hand.
+            tracing::warn!("SSH keyring write failed for '{}': {e}", config.name);
+            let summary = if ssh_pw.is_empty() {
+                "Connection saved, old SSH password NOT removed"
+            } else {
+                "Connection saved, SSH password NOT stored (tunnel will have none)"
+            };
+            warnings.push(
+                CoreError::warning(ErrorKind::Credentials, summary)
+                    .with_detail(store_complaint(&e)),
+            );
         }
     }
 
@@ -88,10 +115,18 @@ pub(crate) async fn save(
     // the client keeps showing a sort indicator for an ORDER BY that no longer
     // exists in any query.
     events.extend(sort_dropped);
-    if let Some(warning) = warning {
-        events.push(CoreEvent::Error(warning));
-    }
+    events.extend(warnings.into_iter().map(CoreEvent::Error));
     events
+}
+
+/// The store's own complaint, which is the half of the message that carries a
+/// fix-it hint. `SbqlError::Keyring` already holds a one-line, user-facing
+/// string; anything else has to be stringified.
+fn store_complaint(e: &SbqlError) -> String {
+    match e {
+        SbqlError::Keyring(msg) => msg.clone(),
+        other => other.to_string(),
+    }
 }
 
 pub(crate) async fn delete(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
@@ -104,6 +139,16 @@ pub(crate) async fn delete(core: &mut Core, id: Uuid) -> Vec<CoreEvent> {
         if let Err(e) = cfg.delete_password() {
             tracing::warn!(
                 "Removed '{}' but its saved password could not be deleted: {e}",
+                cfg.name
+            );
+        }
+        // The SSH password lives under its own service and used to be deleted
+        // by nobody at all, so it outlived every connection it belonged to.
+        // `delete_ssh_password` already treats "nothing stored" as success, so
+        // reaching this warning means the store genuinely refused.
+        if let Err(e) = cfg.delete_ssh_password() {
+            tracing::warn!(
+                "Removed '{}' but its saved SSH password could not be deleted: {e}",
                 cfg.name
             );
         }
@@ -158,7 +203,10 @@ pub(crate) async fn save_discovered(core: &mut Core, id: Uuid) -> Vec<CoreEvent>
     }
 
     let password = core.password_cache.get(&id).cloned();
-    let mut events = save(core, found.config.clone(), password).await;
+    // Discovery scrapes database credentials out of Docker; it never learns an
+    // SSH one, so there is nothing to write and `None` leaves any existing
+    // stored password alone.
+    let mut events = save(core, found.config.clone(), password, None).await;
     // It is a saved connection now, so it must not also be offered as a
     // discovery — the list would show it twice, under two different rules.
     core.discovered.retain(|d| d.config.id != id);
@@ -273,6 +321,7 @@ mod tests {
             .handle(CoreCommand::SaveConnection {
                 config,
                 password: None,
+                ssh_password: None,
             })
             .await;
 
@@ -301,6 +350,7 @@ mod tests {
             .handle(CoreCommand::SaveConnection {
                 config,
                 password: Some("secret".into()),
+                ssh_password: None,
             })
             .await;
 
@@ -324,6 +374,7 @@ mod tests {
             .handle(CoreCommand::SaveConnection {
                 config,
                 password: Some("pw".into()),
+                ssh_password: None,
             })
             .await;
 
@@ -361,6 +412,7 @@ mod tests {
             .handle(CoreCommand::SaveConnection {
                 config,
                 password: Some("secret".into()),
+                ssh_password: None,
             })
             .await;
 
@@ -409,6 +461,7 @@ mod tests {
             .handle(CoreCommand::SaveConnection {
                 config,
                 password: Some("secret".into()),
+                ssh_password: None,
             })
             .await;
 
@@ -417,6 +470,202 @@ mod tests {
             "opting out of the keyring is not an error: {events:?}"
         );
         assert_eq!(core.password_cache.get(&id), Some(&"secret".to_string()));
+    }
+
+    /// A tunnelled Postgres connection, spelled once so the SSH tests below
+    /// differ only in what they are asserting.
+    fn tunnelled(name: &str) -> ConnectionConfig {
+        let mut config = ConnectionConfig::new_postgres(name, "localhost", 5432, "u", "db");
+        config.ssh_enabled = true;
+        config.ssh_host = "bastion.example.com".into();
+        config.ssh_port = 22;
+        config.ssh_user = "jump".into();
+        config.ssh_auth_method = "password".into();
+        config
+    }
+
+    /// Deliberately spelled so no scanner mistakes it for a real credential.
+    const FIXTURE_SSH_PASSWORD: &str = "fixture-ssh-value-not-a-credential";
+
+    /// Bug 1. The SSH password used to be written by `SbqlEngine::save_connection`
+    /// *before* the command was dispatched, so a config that `validate()` then
+    /// rejected left a secret in the OS keychain under an id that never reached
+    /// `connections.toml` — unreferenced, invisible to every UI, and permanent.
+    #[tokio::test]
+    async fn an_invalid_config_does_not_leave_an_ssh_password_behind() {
+        isolate_from_the_machine();
+        let _store = crate::config::store_fault::FakeStore::new();
+        let mut core = Core::default();
+        core.connections.clear();
+
+        // Exactly what the macOS form allowed through: named, but no host.
+        let mut config = tunnelled("orphan-maker");
+        config.host = String::new();
+
+        let events = core
+            .handle(CoreCommand::SaveConnection {
+                config: config.clone(),
+                password: Some("pw".into()),
+                ssh_password: Some(FIXTURE_SSH_PASSWORD.into()),
+            })
+            .await;
+
+        assert!(
+            matches!(&events[0], CoreEvent::Error(e) if e.kind == ErrorKind::Config),
+            "{events:?}"
+        );
+        assert!(core.connections.is_empty());
+        assert_eq!(
+            config.load_ssh_password(),
+            "",
+            "a rejected config orphaned an SSH password in the credential store"
+        );
+    }
+
+    /// Bug 2. There was no `delete_ssh_password` at all, so the secret outlived
+    /// the connection it belonged to for as long as the user kept the machine.
+    #[tokio::test]
+    async fn deleting_a_connection_deletes_its_ssh_password() {
+        isolate_from_the_machine();
+        let _store = crate::config::store_fault::FakeStore::new();
+        let mut core = Core::default();
+        core.connections.clear();
+        let config = tunnelled("to-delete-with-tunnel");
+        let id = config.id;
+
+        core.handle(CoreCommand::SaveConnection {
+            config: config.clone(),
+            password: None,
+            ssh_password: Some(FIXTURE_SSH_PASSWORD.into()),
+        })
+        .await;
+        assert_eq!(config.load_ssh_password(), FIXTURE_SSH_PASSWORD);
+
+        core.handle(CoreCommand::DeleteConnection(id)).await;
+
+        assert_eq!(
+            config.load_ssh_password(),
+            "",
+            "the connection is gone and its SSH password is not"
+        );
+    }
+
+    /// Bug 3, from the client's side: blanking the field has to reach the
+    /// store, not just the form.
+    #[tokio::test]
+    async fn clearing_the_ssh_password_on_a_save_clears_the_stored_one() {
+        isolate_from_the_machine();
+        let _store = crate::config::store_fault::FakeStore::new();
+        let mut core = Core::default();
+        core.connections.clear();
+        let config = tunnelled("re-saved");
+
+        core.handle(CoreCommand::SaveConnection {
+            config: config.clone(),
+            password: None,
+            ssh_password: Some(FIXTURE_SSH_PASSWORD.into()),
+        })
+        .await;
+        assert_eq!(config.load_ssh_password(), FIXTURE_SSH_PASSWORD);
+
+        let events = core
+            .handle(CoreCommand::SaveConnection {
+                config: config.clone(),
+                password: None,
+                ssh_password: Some(String::new()),
+            })
+            .await;
+
+        assert_eq!(config.load_ssh_password(), "");
+        assert!(
+            !events.iter().any(|e| matches!(e, CoreEvent::Error(_))),
+            "clearing a password the store accepted is not worth a warning: {events:?}"
+        );
+    }
+
+    /// `None` is how a client says "I did not ask about this field" — the TUI
+    /// says it on every save, because its form has no SSH password input. It
+    /// must not be read as "clear it".
+    #[tokio::test]
+    async fn saving_without_an_ssh_password_leaves_the_stored_one_alone() {
+        isolate_from_the_machine();
+        let _store = crate::config::store_fault::FakeStore::new();
+        let mut core = Core::default();
+        core.connections.clear();
+        let config = tunnelled("edited-elsewhere");
+
+        core.handle(CoreCommand::SaveConnection {
+            config: config.clone(),
+            password: None,
+            ssh_password: Some(FIXTURE_SSH_PASSWORD.into()),
+        })
+        .await;
+
+        let mut renamed = config.clone();
+        renamed.name = "renamed".into();
+        core.handle(CoreCommand::SaveConnection {
+            config: renamed,
+            password: None,
+            ssh_password: None,
+        })
+        .await;
+
+        assert_eq!(config.load_ssh_password(), FIXTURE_SSH_PASSWORD);
+    }
+
+    /// The severity half of bug 1: the FFI dropped a refused SSH write into a
+    /// `tracing::warn!` that nothing on the macOS path records, so the user was
+    /// told nothing. It now gets the same `Severity::Warning` as the database
+    /// password — the connection really was saved, and the password really was
+    /// not.
+    #[tokio::test]
+    async fn a_refused_ssh_password_write_still_saves_the_connection() {
+        isolate_from_the_machine();
+        let _faulty_store = crate::config::store_fault::ForcedFailure::new();
+        let mut core = Core::default();
+        core.connections.clear();
+        let config = tunnelled("unstorable-tunnel");
+        let id = config.id;
+
+        let events = core
+            .handle(CoreCommand::SaveConnection {
+                config,
+                password: None,
+                ssh_password: Some(FIXTURE_SSH_PASSWORD.into()),
+            })
+            .await;
+
+        assert!(
+            core.connections.iter().any(|c| c.id == id),
+            "the connection itself must survive a refused keyring write"
+        );
+
+        let warning = events
+            .iter()
+            .find_map(|e| match e {
+                CoreEvent::Error(err) => Some(err.clone()),
+                _ => None,
+            })
+            .expect("a refused SSH write has to reach the user");
+
+        assert!(warning.is_warning(), "{warning:?}");
+        assert_eq!(warning.kind, ErrorKind::Credentials);
+        assert!(
+            warning.message.contains("SSH password NOT stored"),
+            "{warning}"
+        );
+        // Same single-line status-bar budget as the database password warning.
+        assert!(warning.message.len() < 160, "{warning}");
+        assert!(
+            warning.detail.is_some(),
+            "the store's own complaint should survive: {warning:?}"
+        );
+        // §2: the value itself must not travel inside anything renderable.
+        let rendered = format!("{warning} {:?}", warning.detail);
+        assert!(
+            !rendered.contains(FIXTURE_SSH_PASSWORD),
+            "the SSH password leaked into a user-facing message: {rendered}"
+        );
     }
 
     #[tokio::test]
@@ -595,6 +844,7 @@ mod tests {
             .handle(CoreCommand::SaveConnection {
                 config: edited,
                 password: None,
+                ssh_password: None,
             })
             .await;
 
@@ -639,6 +889,7 @@ mod tests {
             .handle(CoreCommand::SaveConnection {
                 config: renamed,
                 password: None,
+                ssh_password: None,
             })
             .await;
 

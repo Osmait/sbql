@@ -215,28 +215,19 @@ impl SbqlEngine {
         ssh_password: Option<String>,
     ) -> Result<Vec<FfiConnectionConfig>, SbqlFfiError> {
         let core_config: sbql_core::ConnectionConfig = config.try_into()?;
-        if let Some(ref ssh_pass) = ssh_password {
-            if let Err(e) = core_config.save_ssh_password(ssh_pass) {
-                // This used to be an `eprintln!`, which meant nobody ever saw
-                // it: this crate is linked into a SwiftUI app, whose stderr
-                // goes to a Console log no user opens. `tracing` is where the
-                // rest of the stack already reports a refused keyring write
-                // (see `handlers::connection::save`), so it is at least
-                // routable — the macOS side still has to install a subscriber.
-                //
-                // Worth knowing when reading this: unlike the database
-                // password, which `Core` keeps in `password_cache` for the
-                // session, a rejected SSH password is simply gone. The next
-                // `connect` reads an empty one back from the keyring and the
-                // tunnel fails as though the user typed it wrong.
-                tracing::warn!("SSH keyring save failed for '{}': {e}", core_config.name);
-            }
-        }
+        // The SSH password used to be written to the keyring right here, before
+        // the command was dispatched — and therefore before `validate()` ran
+        // inside the save handler. A config the handler then rejected left the
+        // secret behind under an id that never reached `connections.toml`. It
+        // now rides in the command and is written beside the database password,
+        // on the far side of validation. The Swift-facing signature is
+        // unchanged; only where the value is written moved.
         let mut core = self.core.lock().await;
         let events = core
             .handle(sbql_core::CoreCommand::SaveConnection {
                 config: core_config,
                 password,
+                ssh_password,
             })
             .await;
         extract_connection_list(events)
