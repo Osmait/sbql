@@ -108,6 +108,20 @@ pub(crate) fn handle_key(state: &AppState, key: KeyEvent) -> Action {
         return editor::handle(state, key);
     }
 
+    // Esc on staged changes discards them, as the results help line says.
+    // Checked before the generic Esc below, which used to swallow every Esc —
+    // the results handler's discard was never reached, and the only way to
+    // drop a staged change was to run another query.
+    if key.code == KeyCode::Esc
+        && state.focused == FocusedPanel::Results
+        && (!state.mutation.pending_edits.is_empty() || !state.mutation.pending_deletes.is_empty())
+    {
+        return Action::Batch(vec![
+            Action::DismissNotice,
+            Action::Results(crate::action::ResultsAction::DiscardPendingOrEsc),
+        ]);
+    }
+
     // Esc leaves panel mode and returns to global mode.
     if key.code == KeyCode::Esc {
         let mut actions = vec![

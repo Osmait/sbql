@@ -35,6 +35,9 @@ pub(crate) struct Notice {
     /// Set when this came from the core, and the reason a `CoreError` is worth
     /// having: it is what [`Notice::hint`] reads.
     pub kind: Option<ErrorKind>,
+    /// Advice that knows more than `kind` does — what the TUI was doing when
+    /// the error arrived. Wins over the generic hint for the kind.
+    pub advice: Option<&'static str>,
     /// The tick this was posted on. Compared against the current tick to expire
     /// it — a wall clock would be one more thing for tests to control.
     pub posted_at: u64,
@@ -47,6 +50,7 @@ impl Notice {
             text: text.into(),
             detail: None,
             kind: None,
+            advice: None,
             posted_at: now,
         }
     }
@@ -75,6 +79,7 @@ impl Notice {
             text: err.message,
             detail: err.detail,
             kind: Some(err.kind),
+            advice: None,
             posted_at: now,
         }
     }
@@ -112,6 +117,9 @@ impl Notice {
     /// used to be able to print the message and nothing else, so "No active
     /// connection" left the user to work out that connections open with Enter.
     pub(crate) fn hint(&self) -> Option<&'static str> {
+        if self.advice.is_some() {
+            return self.advice;
+        }
         match self.kind? {
             ErrorKind::NoActiveConnection => {
                 Some("Pick a connection in the Connections panel (F1) and press Enter to open it.")

@@ -106,7 +106,12 @@ tokio = { version = "1", features = ["full"] }
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "sqlite", "mysql", "uuid", "chrono", "json", "bigdecimal"] }
 redis = { version = "0.27", features = ["tokio-comp", "aio", "connection-manager"] }
 aws-config = { version = "1", features = ["behavior-version-latest"] }
-aws-sdk-dynamodb = "1"
+# Default features off for one reason: the default `rustls` feature pulls in
+# the SDK's legacy HTTPS client (hyper 0.14, rustls 0.21, h2 0.3), whose
+# advisories (RUSTSEC-2026-0258, -0346, -0349) have no fix on those lines.
+# `default-https-client` is the modern client aws-config already uses, so
+# nothing new enters the graph.
+aws-sdk-dynamodb = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 mongodb = "3"
 
 # SQL parsing

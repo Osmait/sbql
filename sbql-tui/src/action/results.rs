@@ -1,6 +1,7 @@
 //! Moving around and acting on the results grid.
 
 use super::*;
+use sbql_core::RowChange;
 
 /// Moving around and acting on the results grid.
 pub(super) fn apply(
@@ -175,48 +176,44 @@ pub(super) fn apply_commit_pending(
     state: &mut AppState,
     cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
 ) {
+    if state.mutation.committing {
+        state.inform("Commit in progress…");
+        return;
+    }
     if state.mutation.pending_edits.is_empty() && state.mutation.pending_deletes.is_empty() {
         state.report("Nothing to commit — no staged edits or deletes.");
         return;
     }
 
-    let edit_count = state.mutation.pending_edits.len();
-    let delete_count = state.mutation.pending_deletes.len();
+    // One command, one transaction: either every staged change lands or none
+    // does. Edits go first so a row edited and deleted ends up deleted.
+    let edits = state
+        .mutation
+        .pending_edits
+        .values()
+        .map(|e| RowChange::Update {
+            schema: e.schema.clone(),
+            table: e.table.clone(),
+            pk: e.pk.clone(),
+            target_col: e.col_name.clone(),
+            new_val: e.new_val.clone(),
+        });
+    let deletes = state
+        .mutation
+        .pending_deletes
+        .values()
+        .map(|d| RowChange::Delete {
+            schema: d.schema.clone(),
+            table: d.table.clone(),
+            pk: d.pk.clone(),
+        });
+    let changes = edits.chain(deletes).collect();
 
-    for edit in state.mutation.pending_edits.values() {
-        send_command(
-            cmd_tx,
-            CoreCommand::UpdateCell {
-                schema: edit.schema.clone(),
-                table: edit.table.clone(),
-                pk: edit.pk.clone(),
-                target_col: edit.col_name.clone(),
-                new_val: edit.new_val.clone(),
-            },
-        );
-    }
-
-    for del in state.mutation.pending_deletes.values() {
-        send_command(
-            cmd_tx,
-            CoreCommand::DeleteRow {
-                schema: del.schema.clone(),
-                table: del.table.clone(),
-                pk: del.pk.clone(),
-            },
-        );
-    }
-
-    state.mutation.pending_edits.clear();
-    state.mutation.pending_deletes.clear();
+    // The staged changes are kept until core answers: on success they are
+    // cleared and the page refreshed, on failure they are still there.
+    state.mutation.committing = true;
     state.mutation.pending_d = false;
-
-    let page = state.results.current_page;
-    send_command(cmd_tx, CoreCommand::FetchPage { page });
-
-    state.inform(format!(
-        "Committed: {edit_count} edit(s), {delete_count} delete(s)."
-    ));
+    send_command(cmd_tx, CoreCommand::CommitChanges { changes });
 }
 
 #[cfg(test)]

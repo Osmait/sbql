@@ -164,6 +164,7 @@ impl Sbql {
         // Follow-up work the event implies, decided before the state consumes it.
         let connected = matches!(event, CoreEvent::Connected(_));
         let tables_loaded = matches!(event, CoreEvent::TableList(_));
+        let committed = matches!(event, CoreEvent::ChangesCommitted(_));
 
         match &event {
             CoreEvent::Connected(id) => session::remember(id),
@@ -178,6 +179,12 @@ impl Sbql {
 
         if connected {
             action::send_command(&self.cmd_tx, CoreCommand::ListTables);
+        }
+        if committed {
+            // Only after core confirms: refreshing before the commit lands
+            // would show the old rows, and a failed commit wants none.
+            let page = self.state.results.current_page;
+            action::send_command(&self.cmd_tx, CoreCommand::FetchPage { page });
         }
         if tables_loaded {
             // Column info for autocomplete rides along with the diagram data.

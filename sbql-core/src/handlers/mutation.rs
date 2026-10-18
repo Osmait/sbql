@@ -1,4 +1,4 @@
-use crate::{schema, Core, CoreEvent};
+use crate::{schema, Core, CoreEvent, RowChange};
 
 pub(crate) async fn update_cell(
     core: &mut Core,
@@ -31,6 +31,17 @@ pub(crate) async fn delete_row(
     };
     match schema::execute_row_delete(&pool, &schema_name, &table, &pk).await {
         Ok(()) => vec![CoreEvent::RowDeleted],
+        Err(e) => vec![CoreEvent::error(&e)],
+    }
+}
+
+pub(crate) async fn commit_changes(core: &mut Core, changes: Vec<RowChange>) -> Vec<CoreEvent> {
+    let pool = match core.active_pool().await {
+        Ok(p) => p,
+        Err(e) => return vec![CoreEvent::error(&e)],
+    };
+    match schema::execute_changes(&pool, &changes).await {
+        Ok(summary) => vec![CoreEvent::ChangesCommitted(summary)],
         Err(e) => vec![CoreEvent::error(&e)],
     }
 }
@@ -150,5 +161,104 @@ mod tests {
         } else {
             panic!("Expected QueryResult");
         }
+    }
+
+    fn update(id: &str, name: &str) -> crate::RowChange {
+        crate::RowChange::Update {
+            schema: "main".into(),
+            table: "test_table".into(),
+            pk: vec![("id".into(), id.into())],
+            target_col: "name".into(),
+            new_val: name.into(),
+        }
+    }
+
+    fn delete(id: &str) -> crate::RowChange {
+        crate::RowChange::Delete {
+            schema: "main".into(),
+            table: "test_table".into(),
+            pk: vec![("id".into(), id.into())],
+        }
+    }
+
+    /// Run setup SQL straight on the pool — `ExecuteQuery` pages its input,
+    /// which is not what DDL wants.
+    async fn exec(core: &mut Core, sql: &str) {
+        let pool = core.active_pool().await.unwrap();
+        if let crate::pool::DbPool::Sqlite(sq) = &pool {
+            sqlx::query(sql).execute(sq).await.unwrap();
+        }
+    }
+
+    async fn names(core: &mut Core) -> Vec<Vec<String>> {
+        let events = core
+            .handle(CoreCommand::ExecuteQuery {
+                sql: "SELECT id, name FROM test_table ORDER BY id".into(),
+            })
+            .await;
+        match &events[0] {
+            CoreEvent::QueryResult(r) => r.rows.clone(),
+            other => panic!("Expected QueryResult, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn commit_changes_applies_edits_and_deletes() {
+        let (mut core, _id) = setup_sqlite_core().await;
+        exec(
+            &mut core,
+            "INSERT INTO test_table (id, name) VALUES (2, 'Bob')",
+        )
+        .await;
+
+        let events = core
+            .handle(CoreCommand::CommitChanges {
+                changes: vec![update("1", "Alicia"), delete("2")],
+            })
+            .await;
+
+        assert!(matches!(
+            &events[0],
+            CoreEvent::ChangesCommitted(crate::CommitSummary {
+                updated: 1,
+                deleted: 1
+            })
+        ));
+        assert_eq!(
+            names(&mut core).await,
+            vec![vec!["1".to_string(), "Alicia".into()]]
+        );
+    }
+
+    /// A delete blocked by a foreign key used to leave the edits before it
+    /// applied while the TUI announced the whole commit as done.
+    #[tokio::test]
+    async fn commit_changes_is_all_or_nothing() {
+        let (mut core, _id) = setup_sqlite_core().await;
+        for sql in [
+            "INSERT INTO test_table (id, name) VALUES (2, 'Bob')",
+            "CREATE TABLE child (id INTEGER PRIMARY KEY, parent INTEGER NOT NULL REFERENCES test_table(id))",
+            "INSERT INTO child (id, parent) VALUES (1, 1)",
+        ] {
+            exec(&mut core, sql).await;
+        }
+
+        let events = core
+            .handle(CoreCommand::CommitChanges {
+                changes: vec![update("2", "Roberto"), delete("1")],
+            })
+            .await;
+
+        assert!(
+            matches!(&events[0], CoreEvent::Error(e) if e.message.contains("FOREIGN KEY")),
+            "got {events:?}"
+        );
+        assert_eq!(
+            names(&mut core).await,
+            vec![
+                vec!["1".to_string(), "Alice".into()],
+                vec!["2".to_string(), "Bob".into()],
+            ]
+        );
     }
 }

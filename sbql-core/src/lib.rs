@@ -45,7 +45,9 @@ pub use import::ImportFormat;
 pub use pool::{DbBackend, DbPool};
 pub use query::{ExportFormat, QueryResult, PAGE_SIZE};
 pub use query_builder::{format_sql, SortDirection};
-pub use schema::{ColumnInfo, DiagramData, ForeignKey, TableEntry, TableSchema};
+pub use schema::{
+    ColumnInfo, CommitSummary, DiagramData, ForeignKey, RowChange, TableEntry, TableSchema,
+};
 
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -180,6 +182,15 @@ pub enum CoreCommand {
         /// the table.
         pk: Vec<(String, String)>,
     },
+    /// Apply staged edits and deletes in one transaction — all or none.
+    ///
+    /// Answered by [`CoreEvent::ChangesCommitted`], or by a single error after
+    /// which nothing was applied.
+    CommitChanges {
+        /// Applied in order. Every change needs a non-empty primary key, or
+        /// the whole commit is refused before anything runs.
+        changes: Vec<RowChange>,
+    },
 }
 
 impl CoreCommand {
@@ -216,7 +227,8 @@ impl CoreCommand {
             | Self::ApplyFilter { .. }
             | Self::ClearFilter
             | Self::UpdateCell { .. }
-            | Self::DeleteRow { .. } => true,
+            | Self::DeleteRow { .. }
+            | Self::CommitChanges { .. } => true,
         }
     }
 }
@@ -263,6 +275,8 @@ pub enum CoreEvent {
     CellUpdated,
     /// A row DELETE completed successfully.
     RowDeleted,
+    /// Every change in a [`CoreCommand::CommitChanges`] was applied.
+    ChangesCommitted(CommitSummary),
     /// Primary key columns for a table.
     PrimaryKeys {
         /// Schema that was asked about.
@@ -511,6 +525,9 @@ impl Core {
             }
             CoreCommand::DeleteRow { schema, table, pk } => {
                 handlers::mutation::delete_row(self, schema, table, pk).await
+            }
+            CoreCommand::CommitChanges { changes } => {
+                handlers::mutation::commit_changes(self, changes).await
             }
         }
     }

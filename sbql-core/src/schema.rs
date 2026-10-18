@@ -1,6 +1,6 @@
 //! Schema introspection via `information_schema` (PG) or `sqlite_master` + PRAGMAs (SQLite).
 
-use sqlx::{MySqlPool, PgPool, Row, SqlitePool};
+use sqlx::{MySqlConnection, MySqlPool, PgConnection, PgPool, Row, SqliteConnection, SqlitePool};
 
 use crate::error::{Result, SbqlError};
 use crate::pool::DbPool;
@@ -192,11 +192,16 @@ pub async fn execute_cell_update(
     }
     match pool {
         DbPool::Postgres(pg) => {
-            execute_cell_update_pg(pg, schema, table, pk, target_col, new_val).await
+            let mut conn = pg.acquire().await?;
+            execute_cell_update_pg(&mut conn, schema, table, pk, target_col, new_val).await
         }
-        DbPool::Sqlite(sq) => execute_cell_update_sqlite(sq, table, pk, target_col, new_val).await,
+        DbPool::Sqlite(sq) => {
+            let mut conn = sq.acquire().await?;
+            execute_cell_update_sqlite(&mut conn, table, pk, target_col, new_val).await
+        }
         DbPool::Mysql(my) => {
-            execute_cell_update_mysql(my, schema, table, pk, target_col, new_val).await
+            let mut conn = my.acquire().await?;
+            execute_cell_update_mysql(&mut conn, schema, table, pk, target_col, new_val).await
         }
         DbPool::Redis(_) => Err(SbqlError::Schema(
             "Cell update not supported for Redis".into(),
@@ -208,7 +213,8 @@ pub async fn execute_cell_update(
             "Cell update not supported for MongoDB".into(),
         )),
         DbPool::SqlServer(pool) => {
-            execute_cell_update_sqlserver(pool, schema, table, pk, target_col, new_val).await
+            let mut conn = sqlserver_conn(pool).await?;
+            execute_cell_update_sqlserver(&mut conn, schema, table, pk, target_col, new_val).await
         }
     }
 }
@@ -232,9 +238,18 @@ pub async fn execute_row_delete(
         ));
     }
     match pool {
-        DbPool::Postgres(pg) => execute_row_delete_pg(pg, schema, table, pk).await,
-        DbPool::Sqlite(sq) => execute_row_delete_sqlite(sq, table, pk).await,
-        DbPool::Mysql(my) => execute_row_delete_mysql(my, schema, table, pk).await,
+        DbPool::Postgres(pg) => {
+            let mut conn = pg.acquire().await?;
+            execute_row_delete_pg(&mut conn, schema, table, pk).await
+        }
+        DbPool::Sqlite(sq) => {
+            let mut conn = sq.acquire().await?;
+            execute_row_delete_sqlite(&mut conn, table, pk).await
+        }
+        DbPool::Mysql(my) => {
+            let mut conn = my.acquire().await?;
+            execute_row_delete_mysql(&mut conn, schema, table, pk).await
+        }
         DbPool::Redis(_) => Err(SbqlError::Schema(
             "Row delete not supported for Redis".into(),
         )),
@@ -244,8 +259,168 @@ pub async fn execute_row_delete(
         DbPool::MongoDb(_) => Err(SbqlError::Schema(
             "Row delete not supported for MongoDB".into(),
         )),
-        DbPool::SqlServer(pool) => execute_row_delete_sqlserver(pool, schema, table, pk).await,
+        DbPool::SqlServer(pool) => {
+            let mut conn = sqlserver_conn(pool).await?;
+            execute_row_delete_sqlserver(&mut conn, schema, table, pk).await
+        }
     }
+}
+
+/// One staged change to a row, addressed by its full primary key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RowChange {
+    /// Set one cell.
+    Update {
+        /// Owning schema.
+        schema: String,
+        /// Table name.
+        table: String,
+        /// Every `(column, value)` component of the row's primary key.
+        pk: Vec<(String, String)>,
+        /// The column being changed.
+        target_col: String,
+        /// Its new value, as text; the database coerces it.
+        new_val: String,
+    },
+    /// Remove the row.
+    Delete {
+        /// Owning schema.
+        schema: String,
+        /// Table name.
+        table: String,
+        /// Every `(column, value)` component of the row's primary key.
+        pk: Vec<(String, String)>,
+    },
+}
+
+impl RowChange {
+    fn pk(&self) -> &[(String, String)] {
+        match self {
+            Self::Update { pk, .. } | Self::Delete { pk, .. } => pk,
+        }
+    }
+}
+
+/// How many of each change a commit applied.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CommitSummary {
+    /// Cells changed.
+    pub updated: usize,
+    /// Rows removed.
+    pub deleted: usize,
+}
+
+/// Apply every change in one transaction: all of them, or none.
+///
+/// Sending the changes one command at a time let a commit half-succeed — an
+/// edit landed, the delete after it hit a foreign key, and the user was left
+/// with a database matching neither what they staged nor what they started
+/// from. Changes run in the order given.
+///
+/// # Errors
+///
+/// A change had an empty `pk` — refused before anything runs — the backend
+/// has no row editing (Redis, DynamoDB, MongoDB), or the database rejected a
+/// statement (constraint, type mismatch, read-only user). In every case the
+/// transaction was rolled back and nothing was written, so the staged changes
+/// are still worth keeping.
+pub async fn execute_changes(pool: &DbPool, changes: &[RowChange]) -> Result<CommitSummary> {
+    if changes.iter().any(|c| c.pk().is_empty()) {
+        return Err(SbqlError::Schema(
+            "Every staged change needs at least one primary key column".into(),
+        ));
+    }
+    let mut summary = CommitSummary::default();
+    for change in changes {
+        match change {
+            RowChange::Update { .. } => summary.updated += 1,
+            RowChange::Delete { .. } => summary.deleted += 1,
+        }
+    }
+    match pool {
+        DbPool::Postgres(pg) => {
+            let mut tx = pg.begin().await?;
+            for change in changes {
+                match change {
+                    RowChange::Update {
+                        schema,
+                        table,
+                        pk,
+                        target_col,
+                        new_val,
+                    } => {
+                        execute_cell_update_pg(&mut tx, schema, table, pk, target_col, new_val)
+                            .await?;
+                    }
+                    RowChange::Delete { schema, table, pk } => {
+                        execute_row_delete_pg(&mut tx, schema, table, pk).await?;
+                    }
+                }
+            }
+            tx.commit().await?;
+        }
+        DbPool::Sqlite(sq) => {
+            let mut tx = sq.begin().await?;
+            for change in changes {
+                match change {
+                    RowChange::Update {
+                        table,
+                        pk,
+                        target_col,
+                        new_val,
+                        ..
+                    } => {
+                        execute_cell_update_sqlite(&mut tx, table, pk, target_col, new_val).await?;
+                    }
+                    RowChange::Delete { table, pk, .. } => {
+                        execute_row_delete_sqlite(&mut tx, table, pk).await?;
+                    }
+                }
+            }
+            tx.commit().await?;
+        }
+        DbPool::Mysql(my) => {
+            let mut tx = my.begin().await?;
+            for change in changes {
+                match change {
+                    RowChange::Update {
+                        schema,
+                        table,
+                        pk,
+                        target_col,
+                        new_val,
+                    } => {
+                        execute_cell_update_mysql(&mut tx, schema, table, pk, target_col, new_val)
+                            .await?;
+                    }
+                    RowChange::Delete { schema, table, pk } => {
+                        execute_row_delete_mysql(&mut tx, schema, table, pk).await?;
+                    }
+                }
+            }
+            tx.commit().await?;
+        }
+        DbPool::SqlServer(pool) => {
+            let mut conn = sqlserver_conn(pool).await?;
+            execute_changes_sqlserver(&mut conn, changes).await?;
+        }
+        DbPool::Redis(_) => {
+            return Err(SbqlError::Schema(
+                "Row changes not supported for Redis".into(),
+            ))
+        }
+        DbPool::DynamoDb(_) => {
+            return Err(SbqlError::Schema(
+                "Row changes not supported for DynamoDB".into(),
+            ))
+        }
+        DbPool::MongoDb(_) => {
+            return Err(SbqlError::Schema(
+                "Row changes not supported for MongoDB".into(),
+            ))
+        }
+    }
+    Ok(summary)
 }
 
 // ---------------------------------------------------------------------------
@@ -541,14 +716,14 @@ fn pg_pk_where(pk: &[(String, String)], first_param: usize) -> String {
 }
 
 async fn execute_cell_update_pg(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     schema: &str,
     table: &str,
     pk: &[(String, String)],
     target_col: &str,
     new_val: &str,
 ) -> Result<()> {
-    let target_type = resolve_column_type(pool, schema, table, target_col).await?;
+    let target_type = resolve_column_type(&mut *conn, schema, table, target_col).await?;
     if !is_safe_pg_type(&target_type) {
         return Err(SbqlError::Schema(format!(
             "Unsafe column type: {target_type}"
@@ -566,12 +741,12 @@ async fn execute_cell_update_pg(
     for (_, val) in pk {
         query = query.bind(val);
     }
-    query.execute(pool).await?;
+    query.execute(conn).await?;
     Ok(())
 }
 
 async fn execute_row_delete_pg(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     schema: &str,
     table: &str,
     pk: &[(String, String)],
@@ -586,12 +761,12 @@ async fn execute_row_delete_pg(
     for (_, val) in pk {
         query = query.bind(val);
     }
-    query.execute(pool).await?;
+    query.execute(conn).await?;
     Ok(())
 }
 
 async fn resolve_column_type(
-    pool: &PgPool,
+    conn: &mut PgConnection,
     schema: &str,
     table: &str,
     column: &str,
@@ -613,7 +788,7 @@ async fn resolve_column_type(
     .bind(schema)
     .bind(table)
     .bind(column)
-    .fetch_optional(pool)
+    .fetch_optional(conn)
     .await?;
 
     let Some(row) = row else {
@@ -752,7 +927,7 @@ fn sqlite_pk_where(pk: &[(String, String)], first_param: usize) -> String {
 }
 
 async fn execute_cell_update_sqlite(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     table: &str,
     pk: &[(String, String)],
     target_col: &str,
@@ -768,12 +943,12 @@ async fn execute_cell_update_sqlite(
     for (_, val) in pk {
         query = query.bind(val);
     }
-    query.execute(pool).await?;
+    query.execute(conn).await?;
     Ok(())
 }
 
 async fn execute_row_delete_sqlite(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     table: &str,
     pk: &[(String, String)],
 ) -> Result<()> {
@@ -786,7 +961,7 @@ async fn execute_row_delete_sqlite(
     for (_, val) in pk {
         query = query.bind(val);
     }
-    query.execute(pool).await?;
+    query.execute(conn).await?;
     Ok(())
 }
 
@@ -951,7 +1126,7 @@ fn mysql_pk_where(pk: &[(String, String)]) -> String {
 }
 
 async fn execute_cell_update_mysql(
-    pool: &MySqlPool,
+    conn: &mut MySqlConnection,
     schema: &str,
     table: &str,
     pk: &[(String, String)],
@@ -969,12 +1144,12 @@ async fn execute_cell_update_mysql(
     for (_, val) in pk {
         query = query.bind(val);
     }
-    query.execute(pool).await?;
+    query.execute(conn).await?;
     Ok(())
 }
 
 async fn execute_row_delete_mysql(
-    pool: &MySqlPool,
+    conn: &mut MySqlConnection,
     schema: &str,
     table: &str,
     pk: &[(String, String)],
@@ -989,7 +1164,7 @@ async fn execute_row_delete_mysql(
     for (_, val) in pk {
         query = query.bind(val);
     }
-    query.execute(pool).await?;
+    query.execute(conn).await?;
     Ok(())
 }
 
@@ -1260,7 +1435,7 @@ fn sqlserver_pk_where(pk: &[(String, String)], first_param: usize) -> String {
 }
 
 async fn execute_cell_update_sqlserver(
-    pool: &bb8::Pool<bb8_tiberius::ConnectionManager>,
+    conn: &mut SqlServerClient,
     schema: &str,
     table: &str,
     pk: &[(String, String)],
@@ -1280,10 +1455,6 @@ async fn execute_cell_update_sqlserver(
     for val in &pk_vals {
         params.push(val);
     }
-    let mut conn = pool
-        .get()
-        .await
-        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
     conn.execute(&sql, &params)
         .await
         .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
@@ -1291,7 +1462,7 @@ async fn execute_cell_update_sqlserver(
 }
 
 async fn execute_row_delete_sqlserver(
-    pool: &bb8::Pool<bb8_tiberius::ConnectionManager>,
+    conn: &mut SqlServerClient,
     schema: &str,
     table: &str,
     pk: &[(String, String)],
@@ -1307,14 +1478,62 @@ async fn execute_row_delete_sqlserver(
         .iter()
         .map(|val| val as &dyn tiberius::ToSql)
         .collect();
-    let mut conn = pool
-        .get()
-        .await
-        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
     conn.execute(&sql, &params)
         .await
         .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
     Ok(())
+}
+
+/// A SQL Server connection, as the pool hands it out.
+type SqlServerClient = <bb8_tiberius::ConnectionManager as bb8::ManageConnection>::Connection;
+
+async fn sqlserver_conn(
+    pool: &bb8::Pool<bb8_tiberius::ConnectionManager>,
+) -> Result<bb8::PooledConnection<'_, bb8_tiberius::ConnectionManager>> {
+    pool.get()
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))
+}
+
+/// tiberius has no transaction type, so the transaction is spelled out — on
+/// the one connection, so every statement lands inside it.
+async fn execute_changes_sqlserver(
+    conn: &mut SqlServerClient,
+    changes: &[RowChange],
+) -> Result<()> {
+    conn.execute("BEGIN TRANSACTION", &[])
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()))?;
+    let mut outcome = Ok(());
+    for change in changes {
+        outcome = match change {
+            RowChange::Update {
+                schema,
+                table,
+                pk,
+                target_col,
+                new_val,
+            } => execute_cell_update_sqlserver(conn, schema, table, pk, target_col, new_val).await,
+            RowChange::Delete { schema, table, pk } => {
+                execute_row_delete_sqlserver(conn, schema, table, pk).await
+            }
+        };
+        if outcome.is_err() {
+            break;
+        }
+    }
+    let finish = if outcome.is_ok() {
+        "COMMIT"
+    } else {
+        "ROLLBACK"
+    };
+    let finished = conn
+        .execute(finish, &[])
+        .await
+        .map_err(|e| SbqlError::SqlServer(e.to_string()));
+    // The statement's error is the one worth reporting; a failed ROLLBACK
+    // after it would only hide why.
+    outcome.and(finished.map(|_| ()))
 }
 
 // ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@
 //!   │  ...                    │  │   name        varchar           │      │
 //!   │                         │  └────────────────────────────────┘      │
 //!   └─────────────────────────┴────────────────────────────────────────────┘
-//!   [ hjkl/arrows scroll canvas | Tab/j/k navigate list | Esc/q exits ]
+//!   [ h/l/arrows scroll canvas | Tab/j/k navigate list | Esc/q exits ]
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -1092,13 +1092,14 @@ fn draw_help_bar(frame: &mut Frame, full_area: Rect, focus_mode: bool) {
     };
 
     let help = Paragraph::new(Line::from(vec![
-        Span::styled(" hjkl", Style::default().fg(theme::blue())),
+        // Not "hjkl": j and k select a table, only h/l and the arrows scroll.
+        Span::styled(" h/l/arrows", Style::default().fg(theme::blue())),
         Span::raw(": scroll  "),
         Span::styled("j/k/Tab", Style::default().fg(theme::blue())),
         Span::raw(": select  "),
         Span::styled("/", Style::default().fg(theme::blue())),
         Span::raw(": search  "),
-        Span::styled("PgUp/Dn", Style::default().fg(theme::blue())),
+        Span::styled("^hjkl/PgUp/Dn", Style::default().fg(theme::blue())),
         Span::raw(": fast scroll  "),
         Span::styled("f", Style::default().fg(theme::blue())),
         Span::raw(format!(

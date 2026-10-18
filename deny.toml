@@ -46,18 +46,32 @@ ignore = [
 
   # --- Blocked on an upstream semver-major bump we do not control ---
 
-  # rustls-webpki 0.101.7, dragged in by rustls 0.21 via the AWS SDK's legacy
-  # aws-smithy-http-client. Name constraints wrongly accepted for URI names
-  # (0098) and for wildcard certs (0099), plus a reachable panic in CRL
-  # parsing (0104). Exploiting any of them needs a certificate signed by a
-  # name-constrained CA in the trust store; the DynamoDB client talks to
-  # amazonaws.com over the public WebPKI, where that shape does not occur.
-  # 0104 additionally needs CRL checking, which is off. The three cannot be
-  # patched in the lockfile: 0.101 -> 0.103 is semver-major and the pin comes
-  # from aws-config. Removable when the AWS SDK moves off rustls 0.21.
-  { id = "RUSTSEC-2026-0098", reason = "rustls-webpki: name-constraint bypass needs a constrained CA in the trust store; AWS endpoints use the public WebPKI. Pinned to 0.101 by aws-smithy-http-client's rustls 0.21" },
-  { id = "RUSTSEC-2026-0099", reason = "rustls-webpki: same trust-store precondition as RUSTSEC-2026-0098; pinned to 0.101 by aws-smithy-http-client's rustls 0.21" },
-  { id = "RUSTSEC-2026-0104", reason = "rustls-webpki: panic is in CRL parsing, which no sbql TLS client enables; pinned to 0.101 by aws-smithy-http-client's rustls 0.21" },
+  # rustls 0.21 and its rustls-webpki 0.101, now reached only through
+  # tiberius 0.12 (SQL Server). The AWS SDK's legacy client used to pull them
+  # too; aws-sdk-dynamodb now builds without its default `rustls` feature, so
+  # that path is gone. tiberius 0.13 moves to rustls 0.23, but bb8-tiberius
+  # (latest 0.16) still requires tiberius ^0.12, so taking it means replacing
+  # the pool adapter — a code change, not a lockfile one. Removable together
+  # once sbql-core is on tiberius 0.13.
+  #
+  # rustls-webpki: name constraints wrongly accepted for URI names (0098) and
+  # wildcard certs (0099), plus a reachable panic in CRL parsing (0104).
+  # 0098/0099 need a certificate from a name-constrained CA in the trust store
+  # — plausible on a SQL Server behind private PKI, but the attacker must
+  # already hold such a CA. 0104 needs CRL checking, and tiberius configures
+  # none.
+  { id = "RUSTSEC-2026-0098", reason = "rustls-webpki: name-constraint bypass needs a constrained CA in the trust store; pinned to 0.101 by tiberius 0.12's rustls 0.21" },
+  { id = "RUSTSEC-2026-0099", reason = "rustls-webpki: same trust-store precondition as RUSTSEC-2026-0098; pinned to 0.101 by tiberius 0.12's rustls 0.21" },
+  { id = "RUSTSEC-2026-0104", reason = "rustls-webpki: panic is in CRL parsing, which tiberius never enables; pinned to 0.101 by tiberius 0.12's rustls 0.21" },
+  #
+  # rustls 0.21: 0346 is a derived `Debug` on client session values, which
+  # only leaks through a custom `ClientSessionStore` that formats them —
+  # tiberius has none and uses the built-in cache, which the advisory states
+  # is unaffected. 0349 lets a network attacker downgrade later handshakes from
+  # the X25519MLKEM768 hybrid to classical key exchange; rustls 0.21 offers
+  # only X25519, P-256 and P-384, so there is no post-quantum exchange to lose.
+  { id = "RUSTSEC-2026-0346", reason = "rustls 0.21: leaks only via a custom ClientSessionStore that Debug-formats values; tiberius uses the built-in cache. Pinned by tiberius 0.12" },
+  { id = "RUSTSEC-2026-0349", reason = "rustls 0.21: downgrade from post-quantum key exchange, which rustls 0.21 never offers. Pinned by tiberius 0.12" },
 
   # hickory-proto 0.25.2, via mongodb 3.x for SRV/TXT resolution of
   # `mongodb+srv://` URIs. 0118 is an unbounded loop in NSEC3
