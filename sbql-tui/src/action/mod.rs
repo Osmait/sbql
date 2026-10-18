@@ -265,6 +265,25 @@ pub(crate) fn apply(
     state: &mut AppState,
     cmd_tx: &mpsc::UnboundedSender<CoreCommand>,
 ) {
+    apply_one(action, state, cmd_tx);
+    leave_insert_mode_off_editor(state);
+}
+
+/// Insert mode belongs to the editor, and only while it has focus.
+///
+/// A dozen paths move focus — running a query, Ctrl/Alt+hjkl, the mouse — and
+/// any one of them that forgot the editor mode left the status bar saying
+/// INSERT while keys went to another panel: typing `q` there quit the app, and
+/// `dd` staged a delete. Enforced once, after the whole action, rather than in
+/// each of them. After, not per step, so a batch may set the mode before it
+/// moves focus to the editor.
+fn leave_insert_mode_off_editor(state: &mut AppState) {
+    if state.focused != FocusedPanel::Editor && state.editor.mode == EditorMode::Insert {
+        state.editor.mode = EditorMode::Normal;
+    }
+}
+
+fn apply_one(action: Action, state: &mut AppState, cmd_tx: &mpsc::UnboundedSender<CoreCommand>) {
     match action {
         Action::Nav(a) => nav::apply(a, state, cmd_tx),
         Action::Results(a) => results::apply(a, state, cmd_tx),
@@ -321,7 +340,7 @@ pub(crate) fn apply(
 
         Action::Batch(actions) => {
             for a in actions {
-                apply(a, state, cmd_tx);
+                apply_one(a, state, cmd_tx);
             }
         }
     }
@@ -395,6 +414,74 @@ mod tests {
     // Navigation
     // -----------------------------------------------------------------------
 
+    /// Typing into the editor, as a user would get there.
+    fn insert_mode_in_editor() -> AppState {
+        let mut state = AppState::new(vec![]);
+        state.focused = FocusedPanel::Editor;
+        state.vim.nav_mode = NavMode::Panel;
+        state.editor.mode = EditorMode::Insert;
+        state
+    }
+
+    /// Running a query hands focus to the results. Insert mode used to stay
+    /// on, so the bar said INSERT while `q` quit and `dd` staged a delete.
+    #[test]
+    fn running_a_query_leaves_insert_mode() {
+        use crate::test_helpers::{dispatch, key_mod};
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        let mut state = insert_mode_in_editor();
+        state.editor.textarea = tui_textarea::TextArea::from(["SELECT 1"]);
+        let (tx, _rx) = cmd_channel();
+
+        dispatch(
+            &mut state,
+            key_mod(KeyCode::Char('s'), KeyModifiers::CONTROL),
+            &tx,
+        );
+
+        assert_eq!(state.focused, FocusedPanel::Results);
+        assert_eq!(state.editor.mode, EditorMode::Normal);
+    }
+
+    /// The same through Ctrl+hjkl, which is meant to work mid-word.
+    #[test]
+    fn leaving_the_editor_by_panel_key_leaves_insert_mode() {
+        use crate::test_helpers::{dispatch, key_mod};
+        use crossterm::event::{KeyCode, KeyModifiers};
+
+        let mut state = insert_mode_in_editor();
+        let (tx, _rx) = cmd_channel();
+
+        dispatch(
+            &mut state,
+            key_mod(KeyCode::Char('j'), KeyModifiers::CONTROL),
+            &tx,
+        );
+
+        assert_eq!(state.focused, FocusedPanel::Results);
+        assert_eq!(state.editor.mode, EditorMode::Normal);
+    }
+
+    /// A batch that sets the mode before focusing the editor — `i` from the
+    /// sidebar does it the other way round, but either order has to work.
+    #[test]
+    fn insert_mode_set_before_focusing_the_editor_survives() {
+        let mut state = AppState::new(vec![]);
+        let (tx, _rx) = cmd_channel();
+
+        apply(
+            Action::Batch(vec![
+                Action::Nav(NavAction::SetEditorMode(EditorMode::Insert)),
+                Action::Nav(NavAction::FocusPanel(FocusedPanel::Editor)),
+            ]),
+            &mut state,
+            &tx,
+        );
+
+        assert_eq!(state.editor.mode, EditorMode::Insert);
+    }
+
     #[test]
     fn focus_panel_normal() {
         let mut state = AppState::new(vec![]);
@@ -448,6 +535,7 @@ mod tests {
     #[test]
     fn set_editor_mode() {
         let mut state = AppState::new(vec![]);
+        state.focused = FocusedPanel::Editor;
         let (tx, _rx) = cmd_channel();
         apply(
             Action::Nav(NavAction::SetEditorMode(EditorMode::Insert)),
@@ -695,8 +783,7 @@ mod tests {
         assert!(state.is_failing());
     }
 
-    #[test]
-    fn commit_pending_sends_commands() {
+    fn state_with_staged_edit_and_delete() -> AppState {
         let mut state = make_state_with_results();
         state.mutation.pending_edits.insert(
             (0, 1),
@@ -716,20 +803,116 @@ mod tests {
                 pk: vec![("id".into(), "3".into())],
             },
         );
+        state
+    }
+
+    /// Everything goes as one command, edits before deletes, and nothing is
+    /// announced or refreshed until core says it landed.
+    #[test]
+    fn commit_pending_sends_one_transaction() {
+        use sbql_core::RowChange;
+
+        let mut state = state_with_staged_edit_and_delete();
         let (tx, mut rx) = cmd_channel();
         apply(
             Action::Results(ResultsAction::CommitPending),
             &mut state,
             &tx,
         );
+
+        let Ok(CoreCommand::CommitChanges { changes }) = rx.try_recv() else {
+            panic!("expected CommitChanges");
+        };
+        assert!(matches!(
+            changes.as_slice(),
+            [RowChange::Update { .. }, RowChange::Delete { .. }]
+        ));
+        assert!(rx.try_recv().is_err(), "no refresh before the commit lands");
+        assert!(state.mutation.committing);
+        assert_eq!(state.mutation.pending_edits.len(), 1);
+        assert_eq!(state.mutation.pending_deletes.len(), 1);
+    }
+
+    /// A delete blocked by a foreign key: the commit rolled back, so the
+    /// error has to stay up and the staged changes have to survive.
+    #[test]
+    fn failed_commit_keeps_the_error_and_the_staged_changes() {
+        let mut state = state_with_staged_edit_and_delete();
+        let (tx, _rx) = cmd_channel();
+        apply(
+            Action::Results(ResultsAction::CommitPending),
+            &mut state,
+            &tx,
+        );
+
+        state.apply_core_event(sbql_core::CoreEvent::Error(sbql_core::CoreError::new(
+            sbql_core::ErrorKind::Query,
+            "FOREIGN KEY constraint failed",
+        )));
+
+        assert!(state.is_failing());
+        assert!(state
+            .notice_text()
+            .is_some_and(|t| t.starts_with("Commit rolled back")));
+        assert!(state
+            .notice
+            .as_ref()
+            .and_then(|n| n.hint())
+            .is_some_and(|h| h.starts_with("Nothing was applied")));
+        assert!(!state.mutation.committing);
+        assert_eq!(state.mutation.pending_edits.len(), 1);
+        assert_eq!(state.mutation.pending_deletes.len(), 1);
+    }
+
+    /// The results help line promises "Esc: discard"; the global Esc
+    /// handler used to get there first and only changed mode.
+    #[test]
+    fn esc_in_the_results_discards_staged_changes() {
+        use crate::test_helpers::{dispatch, key};
+        use crossterm::event::KeyCode;
+
+        let mut state = state_with_staged_edit_and_delete();
+        state.focused = FocusedPanel::Results;
+        state.vim.nav_mode = NavMode::Panel;
+        let (tx, _rx) = cmd_channel();
+
+        dispatch(&mut state, key(KeyCode::Esc), &tx);
+
         assert!(state.mutation.pending_edits.is_empty());
         assert!(state.mutation.pending_deletes.is_empty());
-        // Should have sent UpdateCell, DeleteRow, FetchPage
-        let mut cmds = Vec::new();
-        while let Ok(cmd) = rx.try_recv() {
-            cmds.push(cmd);
-        }
-        assert!(cmds.len() >= 3);
+        assert_eq!(state.notice_text(), Some("Staged changes discarded."));
+    }
+
+    /// The refresh that follows a commit used to dismiss whatever the bar
+    /// said — which is how a failure went unseen.
+    #[test]
+    fn successful_commit_survives_the_refresh() {
+        let mut state = state_with_staged_edit_and_delete();
+        let (tx, _rx) = cmd_channel();
+        apply(
+            Action::Results(ResultsAction::CommitPending),
+            &mut state,
+            &tx,
+        );
+
+        state.apply_core_event(sbql_core::CoreEvent::ChangesCommitted(
+            sbql_core::CommitSummary {
+                updated: 1,
+                deleted: 1,
+            },
+        ));
+        assert!(state.mutation.pending_edits.is_empty());
+        assert!(state.mutation.pending_deletes.is_empty());
+
+        // What the worker sends for the refresh: a spinner, then the page.
+        let refreshed = state.results.data.clone();
+        state.apply_core_event(sbql_core::CoreEvent::Loading);
+        state.apply_core_event(sbql_core::CoreEvent::QueryResult(refreshed));
+
+        assert_eq!(
+            state.notice_text(),
+            Some("Committed: 1 edit(s), 1 delete(s).")
+        );
     }
 
     /// Fetching another page replaces the rows staged changes refer to and

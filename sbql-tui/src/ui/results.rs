@@ -123,16 +123,20 @@ pub(crate) fn draw(
         Style::default().fg(theme::overlay0())
     };
 
-    // Build title with page info
+    // Build title with page info. The range is the rows on screen: page 2
+    // used to read "rows 1–200+" while showing 101–200.
     let page_info = if !results.data.rows.is_empty() {
-        let total_shown = results.current_page * 100 + results.data.rows.len();
+        let first = results.current_page * sbql_core::PAGE_SIZE + 1;
+        let last = first + results.data.rows.len() - 1;
         if results.data.has_next_page {
             format!(
-                " Results (rows 1–{total_shown}+, page {}) ",
+                " Results (rows {first}–{last} of {last}+, page {}) ",
                 results.current_page + 1
             )
+        } else if results.current_page > 0 {
+            format!(" Results (rows {first}–{last} of {last}) ")
         } else {
-            format!(" Results ({total_shown} rows) ")
+            format!(" Results ({last} rows) ")
         }
     } else {
         " Results ".into()
@@ -795,6 +799,7 @@ mod tests {
             pending_deletes: HashMap::new(),
             pending_delete_row: None,
             pending_d: false,
+            committing: false,
         }
     }
 
@@ -818,6 +823,24 @@ mod tests {
             .draw(|f| draw(f, &view, &layout, rect, &mut hits))
             .unwrap();
         (terminal.backend().buffer().clone(), hits)
+    }
+
+    /// The title's range is the rows on screen, not everything read so far.
+    #[test]
+    fn the_title_names_the_rows_on_this_page() {
+        let title = |page: usize, rows: usize, has_next: bool| {
+            let mut s = state_with(&["id"], rows);
+            s.current_page = page;
+            s.data.has_next_page = has_next;
+            let (buffer, _) = render(&s, 80, 10);
+            (0..80u16)
+                .filter_map(|x| buffer.cell((x, 0)).map(|c| c.symbol().to_string()))
+                .collect::<String>()
+        };
+
+        assert!(title(1, 100, true).contains("rows 101–200 of 200+, page 2"));
+        assert!(title(2, 50, false).contains("rows 201–250 of 250"));
+        assert!(title(0, 7, false).contains("(7 rows)"));
     }
 
     /// Draw the filter bar over a results pane of the given size.

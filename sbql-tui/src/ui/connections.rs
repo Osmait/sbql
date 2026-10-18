@@ -226,8 +226,27 @@ const HELP_SAVE: &str = "Enter: save";
 const HELP_GAP: &str = "  ";
 const HELP_CANCEL: &str = "Esc: cancel";
 
+/// Rows the dialog spends on anything but fields: two borders, the line an
+/// error is written on, and the help line.
+const FORM_CHROME: u16 = 4;
+
 pub(crate) fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect, hits: &mut HitMap) {
-    let area = centered_rect(60, 70, screen);
+    let field_count = form.field_count();
+
+    // Sized to what it holds, not to a share of the screen. 70% of an 80x24
+    // terminal is 16 rows; the Postgres form needs 28, so every box was
+    // squeezed down to its own border and no value was visible at all. When
+    // the bordered boxes do not fit, each field gets one row instead, and if
+    // even that is too tall the list scrolls to keep the active field shown.
+    let rows_for = |per_field: usize| {
+        u16::try_from(field_count * per_field)
+            .unwrap_or(u16::MAX)
+            .saturating_add(FORM_CHROME)
+    };
+    let compact = rows_for(3) > screen.height;
+    let row_height: u16 = if compact { 1 } else { 3 };
+    let height = rows_for(usize::from(row_height)).min(screen.height);
+    let area = centered_rect(60, height, screen);
 
     frame.render_widget(Clear, area);
 
@@ -245,9 +264,16 @@ pub(crate) fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect, 
     frame.render_widget(block.clone(), area);
     let inner = block.inner(area);
 
-    let field_count = form.field_count();
-    let mut constraints = vec![Constraint::Length(3); field_count];
-    constraints.push(Constraint::Min(1)); // spacer
+    let room = usize::from(inner.height.saturating_sub(FORM_CHROME - 2) / row_height);
+    let visible = field_count.min(room);
+    // The first row shown: enough to keep the active field on the last line.
+    let first = form
+        .field_index
+        .saturating_sub(visible.saturating_sub(1))
+        .min(field_count - visible);
+
+    let mut constraints = vec![Constraint::Length(row_height); visible];
+    constraints.push(Constraint::Min(1)); // spacer, where an error goes
     constraints.push(Constraint::Length(1)); // help line
 
     let chunks = Layout::default()
@@ -255,7 +281,12 @@ pub(crate) fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect, 
         .constraints(constraints)
         .split(inner);
 
-    for i in 0..field_count {
+    let label_width = (0..field_count)
+        .map(|i| width_of(form.field_label(i)))
+        .max()
+        .unwrap_or(0);
+
+    for (slot, i) in (first..first + visible).enumerate() {
         let label = form.field_label(i);
         let is_active = form.field_index == i;
         let border_style = if is_active {
@@ -301,21 +332,32 @@ pub(crate) fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect, 
             }
         };
 
-        // `chunks` has one entry per field plus two, but a panic here would
-        // take down the whole app mid-frame. Skipping a row is survivable.
-        let Some(&row) = chunks.get(i) else { continue };
+        // `chunks` has one entry per shown field plus two, but a panic here
+        // would take down the whole app mid-frame. Skipping a row is survivable.
+        let Some(&row) = chunks.get(slot) else {
+            continue;
+        };
 
         // Registered inside the loop that paints the row, so a backend with
         // fewer fields leaves no zone behind for the rows it stopped drawing.
         // The whole bordered box counts: its border is part of the field.
         hits.register(row, Zone::FormField(i));
 
-        let para = Paragraph::new(display).block(
-            Block::default()
-                .title(Span::styled(format!(" {label} "), title_style))
-                .borders(Borders::ALL)
-                .border_style(border_style),
-        );
+        let para = if compact {
+            let marker = if is_active { "▸ " } else { "  " };
+            let pad = " ".repeat(usize::from(label_width.saturating_sub(width_of(label))));
+            Paragraph::new(Line::from(vec![
+                Span::styled(format!("{marker}{label}{pad}  "), title_style),
+                Span::styled(display, border_style),
+            ]))
+        } else {
+            Paragraph::new(display).block(
+                Block::default()
+                    .title(Span::styled(format!(" {label} "), title_style))
+                    .borders(Borders::ALL)
+                    .border_style(border_style),
+            )
+        };
         frame.render_widget(para, row);
     }
 
@@ -357,15 +399,12 @@ pub(crate) fn draw_form(frame: &mut Frame, form: &ConnectionForm, screen: Rect, 
 // Helper: centered rect
 // ---------------------------------------------------------------------------
 
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
+fn centered_rect(percent_x: u16, height: u16, r: Rect) -> Rect {
+    let row = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
+        .constraints([Constraint::Length(height)])
+        .flex(ratatui::layout::Flex::Center)
+        .split(r)[0];
 
     Layout::default()
         .direction(Direction::Horizontal)
@@ -374,7 +413,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage(percent_x),
             Constraint::Percentage((100 - percent_x) / 2),
         ])
-        .split(popup_layout[1])[1]
+        .split(row)[1]
 }
 
 #[cfg(test)]
@@ -502,5 +541,39 @@ mod tests {
         assert!(!painted.contains(HELP_SAVE), "the premise changed");
         assert!(zone_rect(&hits, screen, Zone::FormSubmit).is_none());
         assert!(zone_rect(&hits, screen, Zone::FormCancel).is_none());
+    }
+
+    /// 80x24 is the terminal everyone falls back to. The Postgres form needs
+    /// more than that boxed, and used to squeeze every box down to its border
+    /// with no value showing; now each field gets a line and keeps its value.
+    #[test]
+    fn the_postgres_form_is_readable_in_80_by_24() {
+        let screen = Rect::new(0, 0, 80, 24);
+        let mut form = ConnectionForm::open_new();
+        form.draft.host = "db.example.com".into();
+        let (buffer, hits) = render(&form, screen.width, screen.height);
+
+        for i in 0..form.field_count() {
+            let rect = zone_rect(&hits, screen, Zone::FormField(i))
+                .unwrap_or_else(|| panic!("row {i} is not drawn"));
+            assert!(text_at(&buffer, rect).contains(form.field_label(i)));
+        }
+        assert!(text_at(&buffer, screen).contains("PostgreSQL"));
+        assert!(text_at(&buffer, screen).contains("db.example.com"));
+    }
+
+    /// Shorter still, the list scrolls rather than dropping the field the
+    /// user is typing into.
+    #[test]
+    fn a_tiny_terminal_keeps_the_active_field_in_view() {
+        let screen = Rect::new(0, 0, 80, 10);
+        let mut form = ConnectionForm::open_new();
+        form.field_index = form.field_count() - 1;
+        let (buffer, hits) = render(&form, screen.width, screen.height);
+
+        let last = form.field_count() - 1;
+        let rect = zone_rect(&hits, screen, Zone::FormField(last)).expect("the active row");
+        assert!(text_at(&buffer, rect).contains("SSL Mode"));
+        assert!(zone_rect(&hits, screen, Zone::FormField(0)).is_none());
     }
 }

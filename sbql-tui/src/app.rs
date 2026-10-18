@@ -436,6 +436,9 @@ pub(crate) struct ResultsState {
     /// The SQL most recently sent for execution; promoted to `source_sql`
     /// when its result actually arrives.
     pub sent_sql: Option<String>,
+    /// The next result is a refresh whose outcome is already in the status
+    /// bar ("Committed: …"), so its arrival must not take that message down.
+    pub keep_notice_on_next_result: bool,
     pub scroll: usize,
     pub col_scroll: usize,
     pub selected_row: usize,
@@ -622,6 +625,9 @@ pub(crate) struct MutationState {
     pub pending_deletes: HashMap<usize, PendingDelete>,
     pub pending_delete_row: Option<usize>,
     pub pending_d: bool,
+    /// A commit was sent and core has not answered yet. The staged changes
+    /// stay until it succeeds, so a failed commit loses nothing.
+    pub committing: bool,
 }
 
 impl MutationState {
@@ -948,6 +954,7 @@ impl AppState {
                 source_sql: None,
                 sent_sql: None,
                 awaiting_new_query: false,
+                keep_notice_on_next_result: false,
                 scroll: 0,
                 col_scroll: 0,
                 selected_row: 0,
@@ -967,6 +974,7 @@ impl AppState {
                 pending_deletes: HashMap::new(),
                 pending_delete_row: None,
                 pending_d: false,
+                committing: false,
             },
             vim: VimState {
                 nav_mode: NavMode::Global,
@@ -1076,6 +1084,18 @@ impl AppState {
                 self.results.is_loading = false;
                 if self.conn.active_id == Some(id) {
                     self.conn.active_id = None;
+                    // The rows belonged to that connection. Left on screen they
+                    // looked live, and editing one failed with "no connection".
+                    self.results.data = QueryResult::default();
+                    self.results.source_sql = None;
+                    self.results.selected_row = 0;
+                    self.results.selected_col = 0;
+                    self.results.scroll = 0;
+                    self.results.col_scroll = 0;
+                    self.results.col_widths_dirty = true;
+                    self.active_filter = None;
+                    self.mutation.discard_pending();
+                    self.mutation.committing = false;
                 }
                 self.tables.tables.clear();
                 self.inform("Disconnected");
@@ -1164,6 +1184,13 @@ impl AppState {
                         } else if self.results.selected_row >= row_count {
                             self.results.selected_row = row_count - 1;
                         }
+                        // The scroll needs the same clamp. Filtering 250 rows
+                        // down to 62 while scrolled to row 72 kept the offset,
+                        // and the grid skipped past every row it had: "62
+                        // rows" over an empty table.
+                        let vh = self.results.viewport_height.max(1);
+                        self.results.scroll = self.results.scroll.min(row_count.saturating_sub(vh));
+                        self.results.clamp_scroll();
                     }
                 }
                 let col_count = self.results.data.columns.len();
@@ -1173,7 +1200,9 @@ impl AppState {
                     self.results.selected_col = col_count - 1;
                 }
                 self.results.col_widths_dirty = true;
-                self.dismiss_notice();
+                if !std::mem::take(&mut self.results.keep_notice_on_next_result) {
+                    self.dismiss_notice();
+                }
                 if discarded > 0 {
                     self.report(format!(
                         "{discarded} staged change(s) discarded — a new result set arrived."
@@ -1187,7 +1216,7 @@ impl AppState {
             CoreEvent::SortChanged(sort) => {
                 self.results.sort = sort;
             }
-            // The TUI derives its "rows 1–N" range from the page it is showing,
+            // The TUI derives its "rows N–M" range from the page it is showing,
             // so it never asks for a count and has nothing to do with one.
             CoreEvent::TotalCount(_) => {}
             CoreEvent::CellUpdated => {
@@ -1196,6 +1225,19 @@ impl AppState {
             }
             CoreEvent::RowDeleted => {
                 self.results.is_loading = false;
+            }
+            // Announced only now, not when the commit was sent: the old
+            // optimistic "Committed" stayed up even when a delete failed.
+            CoreEvent::ChangesCommitted(summary) => {
+                self.results.is_loading = false;
+                self.mutation.committing = false;
+                self.mutation.discard_pending();
+                // `Sbql` asks for the page again; that result must not clear this.
+                self.results.keep_notice_on_next_result = true;
+                self.inform(format!(
+                    "Committed: {} edit(s), {} delete(s).",
+                    summary.updated, summary.deleted
+                ));
             }
             CoreEvent::PrimaryKeys {
                 schema,
@@ -1252,8 +1294,12 @@ impl AppState {
             CoreEvent::Loading => {
                 self.results.is_loading = true;
                 // A failure from the previous attempt must not sit next to a
-                // spinner for the next one.
-                self.dismiss_notice();
+                // spinner for the next one — unless this is the refresh after
+                // a commit, whose outcome is what the bar is saying. The flag
+                // is left for the result to consume.
+                if !self.results.keep_notice_on_next_result {
+                    self.dismiss_notice();
+                }
             }
             CoreEvent::DiagramLoaded(data) => {
                 self.results.is_loading = false;
@@ -1285,7 +1331,22 @@ impl AppState {
             }
             CoreEvent::Error(err) => {
                 self.results.is_loading = false;
-                self.report_core(err);
+                // A failed commit rolled back: nothing was applied, and the
+                // staged changes are still here to fix or discard. Said in
+                // those words — the generic advice for a query error ("fix the
+                // statement in the editor") points at the wrong thing.
+                if std::mem::take(&mut self.mutation.committing) {
+                    self.report_core(err);
+                    if let Some(notice) = self.notice.as_mut() {
+                        notice.text = format!("Commit rolled back: {}", notice.text);
+                        notice.advice = Some(
+                            "Nothing was applied. The staged changes are kept: fix them, or \
+                             press Esc in the results to discard them.",
+                        );
+                    }
+                } else {
+                    self.report_core(err);
+                }
                 self.mutation.pending_cell_edit = None;
                 self.mutation.pending_delete_row = None;
                 self.filter.loading_suggestions = false;
@@ -1413,7 +1474,20 @@ mod tests {
         assert!(state.results.sort.is_none());
     }
 
-    /// A count arriving from core is a no-op here — the TUI shows "rows 1–N"
+    /// Rows from a closed connection are not live data any more.
+    #[test]
+    fn disconnecting_clears_that_connections_results() {
+        let mut state = crate::test_helpers::make_state_with_results();
+        let id = uuid::Uuid::new_v4();
+        state.conn.active_id = Some(id);
+
+        state.apply_core_event(CoreEvent::Disconnected(id));
+
+        assert!(state.results.data.rows.is_empty());
+        assert!(state.results.source_sql.is_none());
+    }
+
+    /// A count arriving from core is a no-op here — the TUI shows "rows N–M"
     /// from the page it has — but it must not disturb anything either.
     #[test]
     fn a_total_count_changes_nothing() {
@@ -1826,6 +1900,22 @@ mod tests {
 
         assert_eq!(state.results.selected_row, 42);
         assert_eq!(state.results.scroll, 30);
+    }
+
+    /// A filter or sort comes back as the same page with fewer rows. The
+    /// scroll offset was kept as it was, so the grid skipped every row.
+    #[test]
+    fn a_shorter_result_on_the_same_page_stays_in_view() {
+        let mut state = AppState::new(vec![]);
+        state.results.viewport_height = 20;
+        state.apply_core_event(CoreEvent::QueryResult(page_of(100, 0, true)));
+        state.results.selected_row = 80;
+        state.results.scroll = 72;
+
+        state.apply_core_event(CoreEvent::QueryResult(page_of(62, 0, false)));
+
+        assert_eq!(state.results.selected_row, 61);
+        assert_eq!(state.results.scroll, 42, "the last screenful, not past it");
     }
 
     /// Scrolling a long table has to move one row per press, with the view
@@ -2341,6 +2431,7 @@ mod tests {
             pending_deletes: HashMap::new(),
             pending_delete_row: Some(3),
             pending_d: true,
+            committing: false,
         };
         ms.pending_edits.insert(
             (0, 0),
